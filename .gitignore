@@ -84,3 +84,6 @@ chunks-small/
 test-docs/
 test-output/
 .omc/
+
+# Local download/pack artifacts (e.g. OWASP WSTG ingestion runs)
+wstg-*/
