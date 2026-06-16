@@ -92,6 +92,77 @@ def test_ignore_parser_no_file():
         filtered = filter_files(files, os.path.join(temp_dir, '.nope'), ["*.log"], temp_dir)
         assert len(filtered) == 1
 
+
+# --- Binary file skipping (issue: pack read images/binaries as text) ---
+
+def test_is_binary_path():
+    from dograpper.lib.ignore_parser import is_binary_path
+    assert is_binary_path("a/b/image.PNG") is True
+    assert is_binary_path("fonts/icons.woff2") is True
+    assert is_binary_path("doc/page.html") is False
+    assert is_binary_path("notes.md") is False
+    assert is_binary_path("README") is False  # extensionless pretty URL
+
+
+def test_filter_files_skips_binary_by_default():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        files = [
+            os.path.join(temp_dir, 'image.png'),
+            os.path.join(temp_dir, 'photo.JPG'),
+            os.path.join(temp_dir, 'anim.gif'),
+            os.path.join(temp_dir, 'page.html'),
+            os.path.join(temp_dir, 'notes.md'),
+        ]
+        filtered = filter_files(files, None, [], temp_dir)
+        rels = sorted(os.path.basename(p) for p in filtered)
+        assert rels == ['notes.md', 'page.html']
+
+
+def test_filter_files_skip_binary_can_be_disabled():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        files = [
+            os.path.join(temp_dir, 'image.png'),
+            os.path.join(temp_dir, 'page.html'),
+        ]
+        filtered = filter_files(files, None, [], temp_dir, skip_binary=False)
+        assert len(filtered) == 2
+
+
+def test_filter_files_binary_skip_composes_with_patterns():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        files = [
+            os.path.join(temp_dir, 'image.png'),   # dropped: binary
+            os.path.join(temp_dir, '404.html'),    # dropped: pattern
+            os.path.join(temp_dir, 'page.html'),   # kept
+        ]
+        filtered = filter_files(files, None, ['404.html'], temp_dir)
+        assert [os.path.basename(p) for p in filtered] == ['page.html']
+
+
+def test_pack_cli_excludes_binary_files():
+    """Regression: a PNG in the input dir must not be read as text and
+    counted as thousands of words."""
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, 'page.html'), 'w') as f:
+            f.write('<html><body><p>' + 'word ' * 50 + '</p></body></html>')
+        # A binary blob that, read as text, would yield a huge bogus word count.
+        with open(os.path.join(d, 'image.png'), 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n' + b'\xff\x00 \x10' * 5000)
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [d, '-o', out])
+
+        assert result.exit_code == 0, result.output
+        assert "Files excluded:  1" in result.output
+        # The png bytes must not leak into any chunk.
+        chunk_blob = ""
+        for fn in os.listdir(out):
+            with open(os.path.join(out, fn), 'r', encoding='utf-8', errors='replace') as cf:
+                chunk_blob += cf.read()
+        assert "PNG" not in chunk_blob
+
+
 # --- Chunker Engine ---
 
 def create_mock_files(base_dir, file_specs):
