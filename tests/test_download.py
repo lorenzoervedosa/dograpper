@@ -186,6 +186,81 @@ def test_wget_mirror_ua_includes_chrome():
     assert "Mozilla/5.0" in BROWSER_UA
 
 
+# --- Pretty-URL handling (issue: --accept dropped extensionless URLs) ---
+
+def test_content_filter_args_default_uses_reject_denylist():
+    """Default text set must become a binary --reject denylist, not an
+    --accept allowlist, so extensionless pretty URLs are not dropped."""
+    from dograpper.lib.wget_mirror import _content_filter_args
+
+    args = _content_filter_args("html,md,txt")
+
+    assert not any(a.startswith("--accept=") for a in args), \
+        "default text set must not emit an --accept allowlist (drops pretty URLs)"
+    reject = [a for a in args if a.startswith("--reject=")]
+    assert len(reject) == 1
+    assert "png" in reject[0]
+    assert "css" in reject[0]
+    assert "js" in reject[0]
+
+
+def test_content_filter_args_default_order_independent():
+    """Reordered / dot-prefixed default set is still treated as the text default."""
+    from dograpper.lib.wget_mirror import _content_filter_args
+
+    args = _content_filter_args(".txt, .HTML ,md")
+    assert any(a.startswith("--reject=") for a in args)
+    assert not any(a.startswith("--accept=") for a in args)
+
+
+def test_content_filter_args_custom_keeps_accept_allowlist():
+    """An explicitly narrowed set keeps the strict --accept escape hatch."""
+    from dograpper.lib.wget_mirror import _content_filter_args
+
+    args = _content_filter_args("html,md")
+    assert args == ["--accept=html,md"]
+
+
+def test_content_filter_args_empty_is_noop():
+    from dograpper.lib.wget_mirror import _content_filter_args
+    assert _content_filter_args("") == []
+
+
+def test_wget_mirror_default_extensions_reject_not_accept():
+    """Regression: a default mirror must reject binaries (denylist) so that
+    pretty URLs like .../README and .../01-Test_Name are followed."""
+    with patch('subprocess.run') as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = ""
+
+        run_wget_mirror('http://example.com', './out')  # default include_extensions
+        args = mock_run.call_args[0][0]
+
+        assert not any(a.startswith("--accept=") for a in args)
+        assert any(a.startswith("--reject=") and "png" in a for a in args)
+
+
+def test_wget_urls_default_extensions_reject_not_accept():
+    from dograpper.lib.wget_mirror import run_wget_urls
+    with patch('subprocess.run') as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = ""
+
+        with tempfile.TemporaryDirectory() as d:
+            run_wget_urls(["https://site.io/a"], d)  # default include_extensions
+
+        wget_calls = [
+            c for c in mock_run.call_args_list
+            if c[0] and os.path.basename(c[0][0][0]) == "wget" and "-i" in c[0][0]
+        ]
+        assert wget_calls
+        args = wget_calls[-1][0][0]
+        assert not any(a.startswith("--accept=") for a in args)
+        assert any(a.startswith("--reject=") and "png" in a for a in args)
+
+
 def test_spa_detector_empty_shells():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create an empty shell HTML

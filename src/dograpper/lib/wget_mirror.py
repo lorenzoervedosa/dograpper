@@ -20,6 +20,51 @@ BROWSER_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# The text extension set callers default to. When this exact set is requested,
+# we translate it into a binary --reject denylist (see _content_filter_args)
+# instead of an --accept allowlist, so that extensionless "pretty URLs" survive.
+DEFAULT_TEXT_EXTENSIONS = ("html", "md", "txt")
+
+# Binary/asset extensions that are never useful as LLM text context. Used as a
+# wget --reject denylist so that extensionless pretty URLs are still followed.
+ASSET_REJECT_EXTENSIONS = (
+    "png,jpg,jpeg,gif,svg,webp,ico,bmp,tiff,"
+    "css,js,mjs,map,"
+    "woff,woff2,ttf,eot,otf,"
+    "pdf,zip,gz,tar,bz2,7z,rar,"
+    "mp4,webm,mov,avi,mp3,wav,ogg,"
+    "exe,dmg,bin,wasm"
+)
+
+
+def _content_filter_args(include_extensions: str) -> List[str]:
+    """Build wget content-filter args (``--accept`` / ``--reject``).
+
+    An ``--accept`` allowlist silently rejects extensionless *pretty URLs*
+    (e.g. ``.../README``, ``.../01-Test_Name``) emitted by static-site
+    generators such as Jekyll / GitHub Pages: wget matches the allowlist
+    against the URL's filename suffix, and these URLs have none, so they are
+    dropped *before* download (``--adjust-extension`` never runs). On sites
+    like the OWASP WSTG this fetched only the directory-index pages and missed
+    the bulk of the content.
+
+    To fetch those documents while still skipping binary assets, the default
+    text extension set is translated into a binary ``--reject`` denylist:
+    pretty URLs and HTML/MD/TXT pass, images/CSS/JS are dropped. A caller that
+    narrows the set to anything other than the text default keeps the strict
+    ``--accept`` allowlist as an explicit escape hatch.
+    """
+    if not include_extensions:
+        return []
+    normalized = {
+        ext.strip().lstrip(".").lower()
+        for ext in include_extensions.split(",")
+        if ext.strip()
+    }
+    if normalized == set(DEFAULT_TEXT_EXTENSIONS):
+        return [f"--reject={ASSET_REJECT_EXTENSIONS}"]
+    return [f"--accept={include_extensions}"]
+
 @dataclass
 class WgetResult:
     success: bool
@@ -66,10 +111,8 @@ def run_wget_mirror(
         delay_seconds = delay / 1000.0
         cmd.append(f"--wait={delay_seconds}")
     
-    if include_extensions:
-        # e.g. "html,md,txt" -> "--accept=html,md,txt"
-        cmd.append(f"--accept={include_extensions}")
-        
+    cmd.extend(_content_filter_args(include_extensions))
+
     cmd.append(url)
 
     max_retries = 3
@@ -159,8 +202,7 @@ def run_wget_urls(
 
         if delay > 0:
             cmd.append(f"--wait={delay / 1000.0}")
-        if include_extensions:
-            cmd.append(f"--accept={include_extensions}")
+        cmd.extend(_content_filter_args(include_extensions))
 
         max_retries = 3
         attempt = 0
