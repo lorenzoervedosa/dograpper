@@ -1,7 +1,6 @@
 """Tests for loading packed JSONL chunks."""
 
 import json
-import os
 
 from dograpper.lib.pack_reader import PackedChunk, load_chunks
 
@@ -46,6 +45,19 @@ def test_load_chunks_skips_blank_and_malformed_lines(tmp_path):
         f.write('{"id": "01_a", "source": "a", "content": "ok", "words": 1}\n')
         f.write("\n")
         f.write("{not valid json}\n")
+    chunks = load_chunks(str(tmp_path))
+    assert len(chunks) == 1
+    assert chunks[0].id == "01_a"
+
+
+def test_load_chunks_skips_non_dict_json_lines(tmp_path):
+    path = str(tmp_path / "docs_chunk_01.jsonl")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write('"a string"\n')
+        f.write("42\n")
+        f.write("null\n")
+        f.write("[1,2,3]\n")
+        f.write('{"id": "01_a", "source": "a", "content": "ok", "words": 1}\n')
     chunks = load_chunks(str(tmp_path))
     assert len(chunks) == 1
     assert chunks[0].id == "01_a"
