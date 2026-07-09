@@ -38,14 +38,30 @@ def test_mrr_reflects_rank():
     assert report.mrr == 1.0
 
 
-def test_miss_when_expected_not_in_top_k():
-    chunks = _chunks()
+def test_genuine_miss_scores_zero():
+    # Target chunk's own text does NOT contain the token from its deepest
+    # breadcrumb heading ("gamma"), so the generated question can never
+    # score the target highest on its own content.
+    target = PackedChunk(id="z_target", source="z", grade="C",
+                          text="entirely unrelated filler content here",
+                          breadcrumb=["Section", "Gamma"])
+    # Decoy has an empty breadcrumb (generates no golden pair of its own)
+    # but is saturated with the "gamma" token, so it outranks the target
+    # for the question "What does the documentation say about Gamma?".
+    decoy = PackedChunk(id="a_decoy", source="a", grade="A",
+                         text="gamma gamma gamma gamma",
+                         breadcrumb=[])
+    chunks = [target, decoy]
     pairs = generate_golden_qa(chunks)
+    assert len(pairs) == 1
+    assert pairs[0].expected_id == "z_target"
+
     index = build_index(chunks)
     report = evaluate(index, chunks, pairs, k=1)
-    # k=1 with a distractor may still hit both here; assert bounds hold.
-    assert 0.0 <= report.hit_rate <= 1.0
-    assert report.hits <= report.total_questions
+    assert report.total_questions == 1
+    assert report.hits == 0
+    assert report.hit_rate == 0.0
+    assert report.mrr == 0.0
 
 
 def test_per_grade_breakdown():
