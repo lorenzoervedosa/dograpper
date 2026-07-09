@@ -36,6 +36,8 @@ def load_chunks(chunks_dir: str, prefix: str = "docs_chunk_") -> List[PackedChun
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(rec, dict):
+                    continue
                 chunks.append(PackedChunk(
                     id=str(rec.get("id", "")),
                     source=rec.get("source", ""),
