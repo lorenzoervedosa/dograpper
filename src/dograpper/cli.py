@@ -8,6 +8,7 @@ from .commands.download import download
 from .commands.pack import pack
 from .commands.sync import sync
 from .commands.doctor import doctor
+from .commands.eval import eval as eval_cmd
 
 try:
     __version__ = _pkg_version("dograpper")
@@ -55,6 +56,7 @@ cli.add_command(download)
 cli.add_command(pack)
 cli.add_command(sync)
 cli.add_command(doctor)
+cli.add_command(eval_cmd, name="eval")
 
 def main():
     cli(obj={})
