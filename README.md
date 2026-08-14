@@ -137,6 +137,9 @@ On Ubuntu ≤22.04 the package is called `libasound2` (without the `t64` suffix)
 ## Quickstart
 
 ```bash
+# One-time setup: generate a config for your target (notebooklm / rag / claude-project)
+dograpper init
+
 # Full pipeline: download + pack optimized for NotebookLM
 dograpper download https://flask.palletsprojects.com/en/stable/ -o ./flask-docs
 dograpper pack ./flask-docs -o ./chunks --bundle notebooklm --context-header --score
@@ -507,6 +510,36 @@ dograpper sync https://docs.rust-lang.org -o ./rust-docs --chunks-dir ./out/rust
 # SPA sync
 dograpper sync https://react.dev -o ./react-docs --headless --delay 500
 ```
+
+### `dograpper init`
+
+Onboarding wizard: generates a ready-to-use `.dograpper.json` for your
+ingestion target, reusing the `--bundle` presets. Interactive by default;
+`--target` + `--yes` for scripts.
+
+```bash
+dograpper init                          # interactive wizard
+dograpper init --target rag --yes       # non-interactive
+```
+
+| Option | Alias | Default | Description |
+|---|---|---|---|
+| `--target` | `-t` | *(prompted)* | `notebooklm` \| `rag` \| `claude-project` |
+| `--yes` | `-y` | `false` | Non-interactive mode (requires `--target`) |
+| `--output` | `-o` | `.dograpper.json` | Where to write the config |
+| `--force` | `-f` | `false` | Overwrite an existing config file |
+
+Targets:
+
+- **`notebooklm`** — ≤50 balanced `md` chunks (`--bundle notebooklm`), semantic
+  strategy, context headers, readiness score, dedup.
+- **`rag`** — `jsonl` records with context headers, cross-references and
+  readiness score.
+- **`claude-project`** — compact `md` chunks (≤100k words) with context headers.
+
+The generated file plugs into the standard config precedence
+(defaults < `.dograpper.json` < explicit CLI flags) — any flag you pass
+later still wins.
 
 ### Global flags
 
