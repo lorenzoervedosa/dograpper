@@ -27,6 +27,7 @@ src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
 │   ├── download.py         # Cascade 4-layer: llms.txt → sitemap → wget --mirror → Playwright bounded
+│   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
 │   └── sync.py             # Subcomando sync (download + pack em um passo)
 ├── lib/
@@ -65,6 +66,7 @@ tests/
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
+├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo
 ├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, CLI
 ├── test_link_extractor.py  # Link extraction, cross-ref index, annotation, CLI integration
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
@@ -226,6 +228,9 @@ uv run dograpper pack ./test-docs -o ./chunks --delta
 
 # Sync (download + pack delta)
 uv run dograpper sync https://click.palletsprojects.com/en/stable/ -o ./test-docs
+
+# Gerar .dograpper.json por alvo (wizard interativo; --target + --yes para scripts)
+uv run dograpper init --target notebooklm --yes
 
 # Verificar dependências (wget, chromium)
 uv run dograpper doctor
