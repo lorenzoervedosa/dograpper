@@ -15,6 +15,7 @@ from dograpper.lib.mcp_server import (
     PARSE_ERROR,
     METHOD_NOT_FOUND,
     INVALID_PARAMS,
+    INTERNAL_ERROR,
 )
 from dograpper.lib.pack_reader import load_chunks
 from dograpper.lib.retrieval import build_index
@@ -115,6 +116,36 @@ def test_tools_call_unknown_tool_is_invalid_params():
     assert resp["error"]["code"] == INVALID_PARAMS
 
 
+def test_non_dict_params_is_error_not_crash():
+    server = _make_server()
+    for bad_params in ("x", ["a"], 42):
+        resp = server.handle_message({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": bad_params})
+        assert resp["error"]["code"] == INVALID_PARAMS
+        resp = server.handle_message({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": bad_params})
+        assert resp["error"]["code"] == INVALID_PARAMS
+    # notification with bad params: ignored, no crash, no response
+    resp = server.handle_message({
+        "jsonrpc": "2.0", "method": "notifications/initialized",
+        "params": "x"})
+    assert resp is None
+
+
+def test_handler_crash_becomes_internal_error():
+    def boom(args):
+        raise KeyError("oops")
+    tool = Tool(name="boom", description="", input_schema={}, handler=boom)
+    server = _make_server([tool])
+    resp = server.handle_message(_req("tools/call", params={"name": "boom"}))
+    assert resp["error"]["code"] == INTERNAL_ERROR
+    assert "boom" in resp["error"]["message"]
+    # server object remains usable
+    assert server.handle_message(_req("ping", msg_id=9))["result"] == {}
+
+
 def test_tools_call_tool_error_is_in_band():
     def boom(args):
         raise ToolError("missing thing")
@@ -149,6 +180,27 @@ def test_serve_stdio_roundtrip_and_parse_error():
     assert responses[0]["id"] == 0
     assert responses[1]["error"]["code"] == PARSE_ERROR
     assert responses[2]["id"] == 2
+
+
+def test_serve_stdio_survives_handler_crash_and_bad_params():
+    def boom(args):
+        raise RuntimeError("handler bug")
+    tool = Tool(name="boom", description="", input_schema={}, handler=boom)
+    server = _make_server([tool])
+    lines = "\n".join([
+        json.dumps(_req("tools/call", msg_id=0, params={"name": "boom"})),
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": "not-an-object"}),
+        json.dumps(_req("ping", msg_id=2)),
+    ]) + "\n"
+    stdout = io.StringIO()
+    serve_stdio(server, stdin=io.StringIO(lines), stdout=stdout)
+
+    responses = [json.loads(l) for l in stdout.getvalue().splitlines()]
+    assert len(responses) == 3
+    assert responses[0]["error"]["code"] == INTERNAL_ERROR
+    assert responses[1]["error"]["code"] == INVALID_PARAMS
+    assert responses[2]["result"] == {}  # server still alive after both
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +338,23 @@ def test_missing_sidecars_reported_in_band(tmp_path):
     is_err, text = _call(server, "get_readiness", {})
     assert is_err is True
     assert "--score" in text
+
+
+def test_malformed_sidecar_shape_reported_not_fatal(tmp_path):
+    # A hand-edited cross_refs.json with a non-dict entry must not kill the
+    # long-running server: the call errors in-band, the next call works.
+    _write_pack(str(tmp_path))
+    chunks = load_chunks(str(tmp_path))
+    index = build_index(chunks)
+    tools = build_tools(chunks, index, {"docs_chunk_00": ["broken"]}, None,
+                        "docs_chunk_")
+    server = _make_server(tools)
+    resp = server.handle_message(_req("tools/call", params={
+        "name": "get_cross_refs", "arguments": {"chunk_id": "docs_chunk_00"}}))
+    assert resp["error"]["code"] == INTERNAL_ERROR
+    resp = server.handle_message(_req("tools/call", msg_id=2, params={
+        "name": "search_chunks", "arguments": {"query": "guide"}}))
+    assert resp["result"]["isError"] is False
 
 
 def test_parent_chunk_id_mapping():

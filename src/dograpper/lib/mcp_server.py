@@ -22,6 +22,7 @@ PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
+INTERNAL_ERROR = -32603
 
 
 class ToolError(Exception):
@@ -69,14 +70,20 @@ class McpServer:
             return None if is_notification else self._error(
                 msg_id, INVALID_REQUEST, "Missing method")
 
+        params = msg.get("params")
+        if params is not None and not isinstance(params, dict):
+            return None if is_notification else self._error(
+                msg_id, INVALID_PARAMS, "params must be an object")
+        params = params or {}
+
         if method == "initialize":
-            return self._result(msg_id, self._initialize(msg.get("params") or {}))
+            return self._result(msg_id, self._initialize(params))
         if method == "ping":
             return self._result(msg_id, {})
         if method == "tools/list":
             return self._result(msg_id, self._tools_list())
         if method == "tools/call":
-            return self._tools_call(msg_id, msg.get("params") or {})
+            return self._tools_call(msg_id, params)
 
         if is_notification:
             # e.g. notifications/initialized, notifications/cancelled
@@ -120,6 +127,12 @@ class McpServer:
                 "content": [{"type": "text", "text": str(e)}],
                 "isError": True,
             })
+        except Exception as e:
+            # A long-running server must survive buggy handlers/artifacts:
+            # report loudly in-band instead of dying with a traceback.
+            return self._error(
+                msg_id, INTERNAL_ERROR,
+                f"Internal error in tool '{name}': {type(e).__name__}: {e}")
 
         text = payload if isinstance(payload, str) else json.dumps(
             payload, indent=2, ensure_ascii=False)
