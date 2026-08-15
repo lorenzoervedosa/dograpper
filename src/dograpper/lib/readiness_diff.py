@@ -120,7 +120,8 @@ def render_markdown(report: DriftReport, delta: Optional[dict] = None) -> str:
 
     The first line is always the ``<!-- dograpper-drift -->`` marker, used
     by the GitHub Action to upsert its comment. ``delta`` is the parsed
-    delta_manifest.json, or None when no source drift was recorded.
+    delta_manifest.json; when None the source-file section is omitted
+    entirely (the Action appends its own git-based section instead).
     """
     lines = ["<!-- dograpper-drift -->", "## Context drift report", ""]
 
@@ -150,10 +151,8 @@ def render_markdown(report: DriftReport, delta: Optional[dict] = None) -> str:
         lines += [f"- `{c.chunk_id}` — score {c.score:.2f}, grade {c.grade}"
                   for c in report.removed]
 
-    lines += ["", "### Source file drift", ""]
-    if delta is None:
-        lines.append("_No source drift recorded._")
-    else:
+    if delta is not None:
+        lines += ["", "### Source file drift", ""]
         groups = _delta_file_groups(delta)
         if not any(paths for _, paths in groups):
             lines.append("_No source file changes._")
@@ -200,10 +199,8 @@ def render_text(report: DriftReport, delta: Optional[dict] = None) -> str:
         lines += [f"  {c.chunk_id}  score {c.score:.2f}  grade {c.grade}"
                   for c in report.removed]
 
-    lines.append("")
-    if delta is None:
-        lines.append("Source file drift: no source drift recorded")
-    else:
+    if delta is not None:
+        lines.append("")
         groups = _delta_file_groups(delta)
         if not any(paths for _, paths in groups):
             lines.append("Source file drift: no source file changes")

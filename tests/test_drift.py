@@ -132,11 +132,7 @@ MARKDOWN_WORKED_EXAMPLE = """\
 
 ### Removed chunks (1)
 
-- `docs_chunk_04` — score 6.00, grade C
-
-### Source file drift
-
-_No source drift recorded._"""
+- `docs_chunk_04` — score 6.00, grade C"""
 
 
 def test_render_markdown_worked_example():
@@ -162,11 +158,7 @@ def test_render_markdown_first_run():
 
 ### Added chunks (1)
 
-- `docs_chunk_01` — score 8.00, grade A
-
-### Source file drift
-
-_No source drift recorded._"""
+- `docs_chunk_01` — score 8.00, grade A"""
     assert render_markdown(report, None) == expected
 
 
@@ -176,12 +168,13 @@ def test_render_markdown_no_drift():
 <!-- dograpper-drift -->
 ## Context drift report
 
-**Summary:** no drift — avg score 7.33 → 7.33
-
-### Source file drift
-
-_No source drift recorded._"""
+**Summary:** no drift — avg score 7.33 → 7.33"""
     assert render_markdown(report, None) == expected
+
+
+def test_render_markdown_without_delta_omits_source_section():
+    report = compare_readiness(OLD, NEW)
+    assert "Source file drift" not in render_markdown(report, None)
 
 
 def test_render_markdown_with_delta_manifest():
@@ -239,14 +232,17 @@ Modified chunks (1):
   docs_chunk_02  grade B -> A  score 7.00 -> 8.50 (+1.50)
 
 Removed chunks (1):
-  docs_chunk_04  score 6.00  grade C
-
-Source file drift: no source drift recorded"""
+  docs_chunk_04  score 6.00  grade C"""
 
 
 def test_render_text_worked_example():
     report = compare_readiness(OLD, NEW)
     assert render_text(report, None) == TEXT_WORKED_EXAMPLE
+
+
+def test_render_text_without_delta_omits_source_section():
+    report = compare_readiness(OLD, NEW)
+    assert "Source file drift" not in render_text(report, None)
 
 
 def test_render_text_with_delta_manifest():
@@ -356,7 +352,8 @@ def test_drift_cli_delta_manifest_missing_is_tolerated():
         result = runner.invoke(cli, ["drift", "--new", "new.json", "--old", "old.json",
                                      "--delta-manifest", "absent.json"])
         assert result.exit_code == 0, result.output
-        assert "No source drift recorded" in result.output
+        # Missing manifest degrades to "no delta": the section is omitted.
+        assert "Source file drift" not in result.output
 
 
 def test_drift_cli_delta_manifest_present_lists_files():

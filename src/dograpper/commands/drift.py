@@ -68,7 +68,7 @@ def _load_readiness(ctx, path, label):
                    "mode (every chunk reported as added).")
 @click.option('--delta-manifest', 'delta_path', type=click.Path(), default=None,
               help="delta_manifest.json from pack --delta. Missing file is "
-                   "tolerated (no source drift recorded).")
+                   "tolerated (source-file section omitted).")
 @click.option('--format', 'output_format', type=click.Choice(['markdown', 'text']),
               default='markdown', show_default=True,
               help="Report format. Markdown starts with the "
@@ -94,9 +94,9 @@ def drift(ctx, new_path, old_path, delta_path, output_format, output,
                 delta = json.load(f)
         except FileNotFoundError:
             # pack --delta legitimately does not write the manifest when
-            # nothing changed — the renderers label this in the output.
+            # nothing changed — the renderers omit the source-file section.
             logger.debug(f"delta manifest {delta_path} not found; "
-                         "reporting no source drift recorded")
+                         "omitting the source-file drift section")
         except (OSError, json.JSONDecodeError) as e:
             click.echo(f"Error: cannot read delta manifest {delta_path}: {e}",
                        err=True)
