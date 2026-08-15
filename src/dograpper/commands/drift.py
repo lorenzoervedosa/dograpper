@@ -16,7 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 def _load_readiness(ctx, path, label):
-    """Load and validate an llm-readiness.json file, or exit 1 loudly."""
+    """Load and validate an llm-readiness.json file, or exit 1 loudly.
+
+    Deliberately diverges from utils/chunk_inspector.load_sidecar, which
+    returns None on a missing/invalid sidecar because explain/serve treat
+    readiness as optional decoration. Here the snapshots are the command's
+    primary input, so any missing or malformed file must fail loudly.
+    """
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
@@ -30,6 +36,19 @@ def _load_readiness(ctx, path, label):
             err=True,
         )
         ctx.exit(1)
+    for entry in data["chunks"]:
+        if (not isinstance(entry, dict)
+                or not isinstance(entry.get("chunk_id"), str)
+                or not isinstance(entry.get("score"), (int, float))
+                or isinstance(entry.get("score"), bool)
+                or not isinstance(entry.get("grade"), str)):
+            click.echo(
+                f"Error: {label} snapshot {path} has an invalid chunk entry "
+                "(chunk_id/score/grade missing or wrong type). "
+                "Re-pack with --score.",
+                err=True,
+            )
+            ctx.exit(1)
     return data
 
 
@@ -81,6 +100,13 @@ def drift(ctx, new_path, old_path, delta_path, output_format, output,
         except (OSError, json.JSONDecodeError) as e:
             click.echo(f"Error: cannot read delta manifest {delta_path}: {e}",
                        err=True)
+            ctx.exit(1)
+        if delta is not None and not isinstance(delta, dict):
+            click.echo(
+                f"Error: delta manifest {delta_path} is not a valid "
+                "delta_manifest.json (expected a JSON object).",
+                err=True,
+            )
             ctx.exit(1)
 
     report = compare_readiness(old_data, new_data)

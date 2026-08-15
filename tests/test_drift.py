@@ -404,3 +404,73 @@ def test_drift_is_in_help():
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
     assert "drift" in result.output
+
+
+# ---------------------------------------------------------------------------
+# CLI: malformed inputs must error loudly (exit 1), never traceback
+# ---------------------------------------------------------------------------
+
+def _invoke_with_new(payload):
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("new.json", payload)
+        return runner.invoke(cli, ["drift", "--new", "new.json"])
+
+
+def test_drift_cli_chunk_entry_missing_chunk_id_errors():
+    result = _invoke_with_new({"chunks": [{"score": 8.0, "grade": "A"}]})
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_drift_cli_chunk_entry_missing_score_errors():
+    result = _invoke_with_new({"chunks": [{"chunk_id": "docs_chunk_01", "grade": "A"}]})
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_drift_cli_chunk_entry_missing_grade_errors():
+    result = _invoke_with_new({"chunks": [{"chunk_id": "docs_chunk_01", "score": 8.0}]})
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_drift_cli_chunk_entry_non_numeric_score_errors():
+    result = _invoke_with_new(
+        {"chunks": [{"chunk_id": "docs_chunk_01", "score": "high", "grade": "A"}]})
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_drift_cli_chunk_entry_not_a_dict_errors():
+    result = _invoke_with_new({"chunks": ["docs_chunk_01"]})
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_drift_cli_malformed_old_snapshot_errors():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("new.json", NEW)
+        _write_json("old.json", {"chunks": [{"chunk_id": "x"}]})
+        result = runner.invoke(cli, ["drift", "--new", "new.json", "--old", "old.json"])
+        assert result.exit_code == 1
+        assert "old.json" in result.output
+        assert "Traceback" not in result.output
+
+
+def test_drift_cli_delta_manifest_not_a_dict_errors():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("new.json", NEW)
+        _write_json("delta.json", ["docs/new.html"])
+        result = runner.invoke(cli, ["drift", "--new", "new.json",
+                                     "--delta-manifest", "delta.json"])
+        assert result.exit_code == 1
+        assert "delta.json" in result.output
+        assert "Traceback" not in result.output
