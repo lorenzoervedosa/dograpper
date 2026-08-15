@@ -187,6 +187,46 @@ manifest. Ideal for corporate RAG and regulated environments.
 
 ## Commands
 
+### `dograpper doctor`
+
+Detects, reports, and installs the heavy dependencies (`wget`, chromium)
+dograpper needs but doesn't bundle, into `DOGRAPPER_HOME` (default
+`~/.dograpper`; see [Storage layout](#storage-layout)).
+
+```bash
+dograpper doctor [options]
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--install` | `false` | Download and install missing dependencies (wget, chromium) |
+| `--force` | `false` | Re-install even if already present |
+| `--check-system-libs` | `false` | Diagnose missing chromium system libraries via `ldd`; suggests the install command |
+
+Without flags, prints a status table (`WGET`/`CHROMIUM`, path, version) and
+exits 0 if both are present, 1 if either is missing.
+
+#### Exit codes
+
+| Code | Mode | Meaning |
+|---|---|---|
+| 0 | any | success |
+| 1 | default | one or more deps missing |
+| 1 | `--install` | download, SHA256 verification, or the chromium install step failed |
+| 1 | `--check-system-libs` | `ldd` not found on this system |
+| 2 | `--check-system-libs` | required system libraries missing |
+| 3 | `--check-system-libs` | chromium not installed |
+| 4 | `--install` | another `--install` holds the lock |
+
+#### Examples
+
+```bash
+dograpper doctor
+dograpper doctor --install
+dograpper doctor --install --force
+dograpper doctor --check-system-libs
+```
+
 ### `dograpper download`
 
 Mirrors a documentation site to local disk.
@@ -650,6 +690,36 @@ meant for local use right after a `pack --delta` run — the file on disk
 reflects the *last* delta run and can be stale (or absent) if nothing
 changed; the GitHub Action does not use it and derives source drift
 from git instead.
+
+### `dograpper eval`
+
+Empirically validates a packed context's retrieval quality: generates
+deterministic golden Q&A from heading breadcrumbs, runs BM25 retrieval,
+and reports hit-rate@k, MRR, and a per-grade breakdown. Fully offline —
+no network calls.
+
+```bash
+dograpper eval <chunks_dir> [options]
+```
+
+| Option | Alias | Default | Description |
+|---|---|---|---|
+| `CHUNKS_DIR` | — | *required* | Directory containing the JSONL pack |
+| `--top-k` | `-k` | `5` | Retrieval depth used to compute hit-rate |
+| `--output` | `-o` | *(none)* | Write the JSON report to this path |
+| `--prefix` | — | `docs_chunk_` | Chunk filename prefix to load |
+
+Prerequisite: a pack built with `--format jsonl --context-header` —
+golden Q&A generation needs the heading breadcrumbs that flag injects.
+Exits 1 if no JSONL chunks match `--prefix`, or if none of the loaded
+chunks carry a heading breadcrumb to generate a question from.
+
+#### Examples
+
+```bash
+dograpper eval ./chunks
+dograpper eval ./chunks -k 3 -o eval-report.json
+```
 
 ### `dograpper init`
 
