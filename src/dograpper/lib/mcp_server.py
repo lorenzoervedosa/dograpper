@@ -16,6 +16,9 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
+SUPPORTED_PROTOCOL_VERSIONS = frozenset({
+    "2024-11-05", "2025-03-26", "2025-06-18",
+})
 FALLBACK_PROTOCOL_VERSION = "2025-06-18"
 
 PARSE_ERROR = -32700
@@ -59,8 +62,11 @@ class McpServer:
     def handle_message(self, msg: dict) -> Optional[dict]:
         """Handle one JSON-RPC message. Returns the response dict, or None
         for notifications (which must not be answered)."""
-        if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
+        if not isinstance(msg, dict):
             return self._error(None, INVALID_REQUEST, "Invalid JSON-RPC 2.0 message")
+        if msg.get("jsonrpc") != "2.0":
+            return self._error(msg.get("id"), INVALID_REQUEST,
+                               "Invalid JSON-RPC 2.0 message")
 
         method = msg.get("method")
         msg_id = msg.get("id")
@@ -76,6 +82,10 @@ class McpServer:
                 msg_id, INVALID_PARAMS, "params must be an object")
         params = params or {}
 
+        if is_notification:
+            # Notifications must never be answered, whatever the method.
+            return None
+
         if method == "initialize":
             return self._result(msg_id, self._initialize(params))
         if method == "ping":
@@ -85,16 +95,13 @@ class McpServer:
         if method == "tools/call":
             return self._tools_call(msg_id, params)
 
-        if is_notification:
-            # e.g. notifications/initialized, notifications/cancelled
-            return None
         return self._error(msg_id, METHOD_NOT_FOUND, f"Method not found: {method}")
 
     # -- Methods -------------------------------------------------------------
 
     def _initialize(self, params: dict) -> dict:
         requested = params.get("protocolVersion")
-        protocol = requested if isinstance(requested, str) and requested \
+        protocol = requested if requested in SUPPORTED_PROTOCOL_VERSIONS \
             else FALLBACK_PROTOCOL_VERSION
         return {
             "protocolVersion": protocol,
