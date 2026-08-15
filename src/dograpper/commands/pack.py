@@ -11,6 +11,12 @@ from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, read_s
 
 logger = logging.getLogger(__name__)
 
+# State of the corpus as of the last successful pack, written next to the
+# chunks it describes. It cannot be the download manifest: `download` rewrites
+# that file after downloading, so it always reflects the current tree and
+# would report "nothing changed" on the very run that needs packing.
+PACK_STATE_FILENAME = "pack_state.json"
+
 
 def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
                     is_dry_run, is_score):
@@ -113,10 +119,12 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Generate cross_refs.json with cross-references between chunks "
                    "and annotate chunk text with [-> chunk_id] pointers.")
 @click.option('--delta', is_flag=True, default=False,
-              help="Reprocess only files changed since the last pack.")
+              help="Skip the run when nothing changed since the last pack; "
+                   "pack in full when something did.")
 @click.option('--manifest', type=str, default=".dograpper-manifest.json",
               show_default=True,
-              help="Download manifest used for delta comparison.")
+              help="Download manifest, used to resolve source URLs for "
+                   "--context-header.")
 @click.option('--bundle', type=click.Choice(['notebooklm', 'rag-standard']),
               default=None,
               help="Optimized packaging preset. "
@@ -244,28 +252,33 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     if not filtered_paths:
         raise click.ClickException("All files were excluded by ignore rules. Check your .docsignore or --ignore flags.")
 
-    # 6b. Delta filtering (opt-in, after filter, before dedup)
+    # 6b. Delta gate (opt-in, after filter, before dedup)
+    #
+    # The manifest diff decides WHETHER this run happens, not WHICH files it
+    # packs: a partial run renumbers chunks from 01 and overwrites the
+    # artifacts of the files it did not touch. See ADR-0008 / issue #39.
     diff = None
+    current_state = None
     if is_delta:
-        from ..lib.manifest import load_manifest, build_manifest, diff_manifests
+        from ..lib.manifest import (
+            build_manifest, diff_manifests, load_manifest, narrow_diff_to_paths,
+        )
 
-        old_manifest = load_manifest(manifest_path)
-        current_manifest = build_manifest(base_url="", output_dir=input_dir)
-        diff = diff_manifests(old_manifest, current_manifest)
+        state_path = os.path.join(output_dir, PACK_STATE_FILENAME)
+        previous_state = load_manifest(state_path)
+        current_state = build_manifest(base_url="", output_dir=input_dir)
+        diff = narrow_diff_to_paths(
+            diff_manifests(previous_state, current_state),
+            current_state,
+            (os.path.relpath(f, input_dir).replace(os.sep, '/')
+             for f in filtered_paths),
+        )
 
-        delta_files = set(diff.added + diff.modified)
-        pre_count = len(filtered_paths)
+        logger.info(f"[delta] {len(filtered_paths)} files packed; "
+                     f"{len(diff.added)} added, {len(diff.modified)} modified, "
+                     f"{len(diff.removed)} removed")
 
-        filtered_paths = [
-            f for f in filtered_paths
-            if os.path.relpath(f, input_dir).replace(os.sep, '/') in delta_files
-        ]
-
-        logger.info(f"[delta] {pre_count} files → {len(filtered_paths)} changed "
-                     f"({len(diff.added)} added, {len(diff.modified)} modified, "
-                     f"{len(diff.removed)} removed)")
-
-        if not filtered_paths:
+        if not (diff.added or diff.modified or diff.removed):
             click.echo("Delta: no files changed since last pack. Nothing to do.")
             return
 
@@ -517,7 +530,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         cross_ref_total = cross_ref_stats.total
         cross_ref_unresolved = cross_ref_stats.unresolved
 
-    # 10b. Delta manifest (opt-in, after write)
+    # 10b. Delta report (opt-in, after write)
     if is_delta and diff is not None:
         from ..lib.pack_artifacts import write_delta_manifest
 
@@ -555,6 +568,13 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
         token_counts = count_chunk_tokens(
             chunks, output_dir, pref, fmt, t_encoding)
+
+    # 10f. Corpus state for the next delta run. Written last, so a run that
+    # dies partway through does not claim these files as packed (issue #39).
+    if is_delta and current_state is not None:
+        from ..lib.manifest import save_manifest
+
+        save_manifest(current_state, os.path.join(output_dir, PACK_STATE_FILENAME))
 
     # 11. Summary footprint calculation
     files_processed = sum(len(c.files) for c in chunks)
