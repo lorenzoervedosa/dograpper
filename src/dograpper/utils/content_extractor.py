@@ -40,6 +40,13 @@ BLACKLISTED_CLASSES = frozenset({
     "announcement", "announcement-banner",
 })
 
+# HTML void elements: they have no end tag, so a skip region opened on one
+# would never be closed.
+VOID_ELEMENTS = frozenset({
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+})
+
 BLACKLISTED_IDS = frozenset({
     "navbar", "sidebar", "footer", "toc", "table-of-contents",
     "breadcrumb", "cookie-consent", "announcement-bar",
@@ -135,6 +142,11 @@ def _is_blacklisted(tag, attrs):
             if blocked in el_id:
                 return True
     return False
+
+
+def _last_index(stack, tag):
+    """Index of the innermost open *tag* in *stack*."""
+    return len(stack) - 1 - stack[::-1].index(tag)
 
 
 def _rebuild_tag(tag, attrs):
@@ -299,41 +311,61 @@ class _DensityScorerParser(HTMLParser):
 
 
 class _BlacklistRemoverParser(HTMLParser):
-    """Rebuild HTML while omitting blacklisted elements and their children."""
+    """Rebuild HTML while omitting blacklisted elements and their children.
+
+    A skip region must always terminate: a blacklisted element whose end tag
+    never arrives (a void element, or stray markup inside a code sample) used
+    to swallow the whole remainder of the document. Two guarantees keep that
+    from happening:
+
+    * a blacklisted void element is dropped on its own, without opening a
+      skip region at all;
+    * an end tag belonging to an element that was already open when the skip
+      started closes the runaway skip, because the blacklisted element must
+      have been implicitly closed before it.
+    """
 
     def __init__(self):
         super().__init__()
         self.convert_charrefs = True
         self.output = []
-        self._skip_tag = None
-        self._skip_nesting = 0
+        self._open_tags = []    # elements open around the current position
+        self._skip_stack = []   # elements open inside the skipped subtree
 
     def handle_starttag(self, tag, attrs):
-        if self._skip_tag is not None:
-            if tag == self._skip_tag:
-                self._skip_nesting += 1
+        if self._skip_stack:
+            if tag not in VOID_ELEMENTS:
+                self._skip_stack.append(tag)
             return
 
         if _is_blacklisted(tag, attrs):
-            self._skip_tag = tag
-            self._skip_nesting = 0
+            if tag not in VOID_ELEMENTS:
+                self._skip_stack.append(tag)
             return
 
+        if tag not in VOID_ELEMENTS:
+            self._open_tags.append(tag)
         self.output.append(_rebuild_tag(tag, attrs))
 
     def handle_endtag(self, tag):
-        if self._skip_tag is not None:
-            if tag == self._skip_tag:
-                if self._skip_nesting > 0:
-                    self._skip_nesting -= 1
-                else:
-                    self._skip_tag = None
-            return
+        if self._skip_stack:
+            if tag in self._skip_stack:
+                # Closes an element inside the skipped subtree — when it is
+                # the blacklisted element itself, the skip region ends here.
+                del self._skip_stack[_last_index(self._skip_stack, tag):]
+                return
+            if tag not in self._open_tags:
+                return
+            # An enclosing element is closing while the blacklisted element is
+            # still open: it was never closed. Recover and handle normally.
+            self._skip_stack.clear()
 
+        if tag in self._open_tags:
+            del self._open_tags[_last_index(self._open_tags, tag):]
         self.output.append(f"</{tag}>")
 
     def handle_data(self, data):
-        if self._skip_tag is None:
+        if not self._skip_stack:
             self.output.append(data)
 
     def get_output(self) -> str:

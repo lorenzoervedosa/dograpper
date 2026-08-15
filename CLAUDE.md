@@ -26,8 +26,10 @@ subcomandos: `download` (espelha site via wget/playwright), `pack`
 src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
+│   ├── doctor.py           # Detecta e instala deps pesadas (wget, chromium) em DOGRAPPER_HOME; --check-system-libs
 │   ├── download.py         # Cascade 4-layer: llms.txt → sitemap → wget --mirror → Playwright bounded
 │   ├── drift.py            # Drift de contexto entre dois llm-readiness.json (+ delta_manifest.json opcional)
+│   ├── eval.py             # Hit-rate empírico do pack JSONL: golden Q&A offline → BM25 → hit-rate@k/MRR por grade
 │   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
@@ -36,15 +38,19 @@ src/dograpper/
 ├── lib/
 │   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile, write_chunks() (md, txt, jsonl)
 │   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source)
+│   ├── eval_harness.py     # evaluate() — hit-rate@k e MRR sobre pares golden, com breakdown por readiness grade
+│   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
 │   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build
 │   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
 │   ├── pack_artifacts.py   # Sidecars do pack: cross_refs.json, delta_manifest.json, llm-readiness.json, report HTML, tokens
+│   ├── pack_reader.py      # load_chunks() — leitura tolerante dos chunks JSONL do pack em PackedChunk
 │   ├── pack_scoring.py     # score_chunks() — readiness por chunk + páginas do --report, lê cada fonte uma vez
 │   ├── playwright_crawl.py # Crawler headless; hidratação bounded (domcontentloaded 10s + a[href] 5s + 500ms); aceita seed_urls
 │   ├── query_packer.py     # load_queries() + order_files_by_queries() — ordenação gulosa por afinidade BM25 (pack --for-queries)
 │   ├── readiness_diff.py   # compare_readiness() + render_markdown()/render_text() — diff de snapshots llm-readiness.json, stdlib-only
+│   ├── retrieval.py        # build_index()/BM25Index — retrieval determinístico stdlib-only (tie-break por doc_id)
 │   ├── sitemap_parser.py   # fetch_sitemap() — sitemap.xml + sitemapindex recursivo, gzip, same-netloc guard (SITEMAP_NS)
 │   ├── spa_detector.py     # is_spa() via html.parser; small-sample branch (N<5) + errors='replace' encoding
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth
@@ -53,6 +59,7 @@ src/dograpper/
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
     ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy)
+    ├── dep_resolver.py     # resolve_wget()/resolve_browser_dir() — deps em DOGRAPPER_HOME (env lido no import)
     ├── dry_run_report.py   # generate_report() — relatório formatado para --dry-run
     ├── heading_extractor.py # extract_with_headings(), get_active_headings(), format_context_header() — formato dograpper-context-v1
     ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML
@@ -66,18 +73,25 @@ tests/
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
+├── test_claude_md_inventory.py # Guard estrutural do CLAUDE.md: árvore completa e referências de caminho válidas
+├── test_cli_regression.py  # Baseline literal de `dograpper --help` (tests/fixtures/help_baseline.txt)
 ├── test_cli_smoke.py       # Help, flags obrigatórias, mutual exclusion
 ├── test_config.py          # Precedência, JSON inválido, arquivo ausente
 ├── test_content_extractor.py # Extração inteligente: semantic, density, blacklist, edge cases, CLI
 ├── test_context_v1.py      # Formato dograpper-context-v1: JSON header, campos opcionais, schema
 ├── test_dedup.py           # Dedup: _split_blocks, _simhash, _hamming_distance, exact/fuzzy/both, CLI
 ├── test_delta_manifest.py  # Delta pack: reprocessamento incremental via manifest
+├── test_dep_resolver.py    # Resolução de wget/chromium via DOGRAPPER_HOME (fallback para PATH, reload de módulo)
+├── test_doctor.py          # Doctor: detecção, --install (download verificado, lock, idempotência), --check-system-libs
 ├── test_download.py        # wget mock, SPA detector, manifest roundtrip, UA/headers, run_wget_urls, bounded hydration
 ├── test_download_cascade.py # Cascade 4-layer: layer-1/2/3/4 wins, below-threshold fall-through, headless, post-wget-i SPA, observability
 ├── test_drift.py           # Drift: compare_readiness, renders markdown/text (literais), CLI (first run, fail-on-drift, --output)
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
+├── test_eval_command.py    # Integração do `dograpper eval` sobre um pack JSONL (--json, erros de pré-requisito)
+├── test_eval_harness.py    # evaluate(): hit-rate, MRR por rank, breakdown por grade, pares vazios
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
+├── test_golden_qa.py       # generate_golden_qa: um par por chunk, heading mais profundo, determinismo
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
 ├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo
 ├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, CLI
@@ -86,11 +100,14 @@ tests/
 ├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
 ├── test_pack.py            # word_counter, ignore_parser, chunker, write_chunks, CLI integration
 ├── test_pack_artifacts.py  # Sidecars: cross-refs, delta manifest, snapshot de readiness, contagem de tokens
+├── test_pack_reader.py     # load_chunks: campos, linhas malformadas, ordem determinística entre arquivos
 ├── test_pack_scoring.py    # score_chunks: ids, report pages, overrides de texto, tolerância a falha
 ├── test_query_packer.py    # load_queries (comments/blanks, erros) e order_files_by_queries (determinismo, co-locação, tie-break)
 ├── test_readiness_report.py # Readiness report: find_removed_blocks, builders HTML/terminal, CLI --report
+├── test_retrieval.py       # BM25: tokenize, ranking, top-k, determinismo e tie-break por doc_id
 ├── test_scorer.py          # LLM Readiness Score: noise_ratio, boundary, context_depth, grades, CLI
 ├── test_sitemap_parser.py  # fetch_sitemap: namespace, urlset, gzip, sitemapindex recursivo, cross-host reject, 404, UA
+├── test_sync.py            # Pass-through de flags do sync para download/pack (sem precedência)
 ├── test_sync_precedence.py # Precedência de config através do ctx.invoke do sync (CLI explícita > JSON > defaults)
 ├── test_token_counter.py   # Token counting: fallback, tiktoken, format_summary, CLI integration
 └── test_url_filter.py      # filter_urls: same-netloc, path-prefix canonicalizado, depth=0 unlimited, depth bounded, dedup
@@ -102,7 +119,7 @@ action.yml                  # Composite GitHub Action: download + full pack --sc
 ```bash
 git clone <repo-url>
 cd dograpper
-uv sync                    # instala todas as dependências
+uv sync --extra dev --extra headless   # deps + pytest + playwright (sem baixar browser)
 uv run dograpper --help    # verifica que está funcionando
 ```
 
@@ -116,7 +133,8 @@ uv run dograpper pack ./test-docs -o ./chunks
 
 | Arquivo | Quando ler |
 |---|---|
-| `about_dograpper.md` | **Sempre.** Spec completa do projeto: comportamento esperado de cada comando, flags, tabela de erros, formato de config, invariantes. É a fonte de verdade. |
+| `README.md` | **Sempre.** Comportamento de cada subcomando, flags, formato de config e exemplos de uso. É a fonte de verdade do contrato observável. |
+| `docs/adr/` | Antes de reverter ou contornar uma decisão arquitetural (repomix, contagem por palavras, deps opcionais, query-oriented packing, delta na Action) |
 | `.dograpper.json.example` | Ao mexer em `config_loader.py` ou no merge de configuração |
 | `.docsignore.example` | Ao mexer em `ignore_parser.py` |
 | `tests/test_pack.py` | Antes de alterar qualquer coisa em `lib/chunker.py` ou `commands/pack.py` |
@@ -141,12 +159,19 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_context_v1.py` | Antes de alterar o formato `dograpper-context-v1` em `utils/heading_extractor.py` |
 | `tests/test_jsonl_format.py` | Antes de alterar a escrita JSONL em `lib/chunker.py` |
 | `tests/test_delta_manifest.py` | Antes de alterar `lib/manifest.py` ou lógica de `--delta` |
+| `tests/test_retrieval.py` | Antes de alterar `lib/retrieval.py` (BM25, tokenização ou tie-break determinístico) |
+| `tests/test_pack_reader.py` | Antes de alterar `lib/pack_reader.py` ou o formato JSONL que ele consome |
+| `tests/test_golden_qa.py` | Antes de alterar `lib/golden_qa.py` ou o template de perguntas |
+| `tests/test_eval_harness.py` | Antes de alterar `lib/eval_harness.py` (hit-rate, MRR, breakdown por grade) |
+| `tests/test_eval_command.py` | Antes de alterar `commands/eval.py` |
 | `tests/test_drift.py` | Antes de alterar `lib/readiness_diff.py` ou `commands/drift.py` (formatos markdown/text são literais testados) |
 | `tests/test_action_yml.py` | Antes de alterar `action.yml` (inputs/outputs/marcador exigidos) |
 | `tests/test_bundle_notebooklm.py` | Antes de alterar lógica de `--bundle` |
 | `tests/test_boundary_chunking.py` | Antes de alterar `_split_text_by_words` |
 | `docs/schema-v1.md` | Referência do schema `dograpper-context-v1` — manter sincronizado com `heading_extractor.py` e `chunker.py` |
-| `.omc/plans/ralplan-global-cli-install.md` | Ao mexer em build/release, install.sh, doctor, dep_resolver |
+| `tests/test_doctor.py` | Antes de alterar `commands/doctor.py` (detecção, `--install`, lock, `--check-system-libs`) |
+| `tests/test_dep_resolver.py` | Antes de alterar `utils/dep_resolver.py` ou a semântica de `DOGRAPPER_HOME` |
+| `tests/test_cli_regression.py` | Antes de adicionar/renomear subcomando ou flag no help top-level — o baseline `tests/fixtures/help_baseline.txt` precisa ser regenerado |
 
 ## Regras críticas
 
@@ -168,9 +193,14 @@ uv run dograpper pack ./test-docs -o ./chunks
 
 ## CI/CD
 
-Não há pipeline de CI configurado ainda. Para replicar o que um CI faria:
+`.github/workflows/ci.yml` roda a suíte em push para `main` e em pull request,
+numa matriz Python 3.10 / 3.12, com `uv sync --extra dev --extra headless`
+(o extra `headless` é necessário porque `tests/test_doctor.py` faz patch de
+`playwright.__main__` — nenhum browser é baixado). `.github/workflows/release.yml`
+cuida do release. Para replicar o CI localmente:
 
 ```bash
+uv sync --extra dev --extra headless
 uv run pytest tests/ -v
 ```
 

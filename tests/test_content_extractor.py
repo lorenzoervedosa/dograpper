@@ -289,6 +289,85 @@ def test_removes_edit_on_github():
 
 
 # ---------------------------------------------------------------------------
+# Blacklist skip termination (issue #42)
+# ---------------------------------------------------------------------------
+
+def test_void_element_with_blacklisted_class_does_not_eat_the_rest():
+    """A blacklisted void element has no end tag; skipping must not run away."""
+    html = """
+    <main>
+        <p>First paragraph of the page.</p>
+        <img class="copy-button" src="copy.png">
+        <p>Second paragraph, this is the payload as text.</p>
+    </main>
+    """
+    result = strip_html(extract_content(html))
+    assert "First paragraph" in result
+    assert "payload as text" in result
+
+
+def test_void_element_with_blacklisted_id_does_not_eat_the_rest():
+    """Same guarantee when the void element matches by id instead of class."""
+    html = """
+    <main>
+        <p>Search the docs below.</p>
+        <input id="sidebar-search" type="text">
+        <p>Second paragraph, this is the payload as text.</p>
+    </main>
+    """
+    result = strip_html(extract_content(html))
+    assert "Search the docs" in result
+    assert "payload as text" in result
+
+
+def test_unclosed_blacklisted_tag_recovers_at_the_enclosing_element():
+    """Stray markup in a code sample opens <aside> that never closes.
+
+    The skip must end when the enclosing element closes, instead of
+    discarding every sibling that follows.
+    """
+    html = """
+    <main>
+        <p>Example:</p>
+        <pre><code>print("hello<aside>")</code></pre>
+        <p>Second paragraph, this is the payload as text.</p>
+    </main>
+    """
+    result = strip_html(extract_content(html))
+    assert "Example:" in result
+    assert "payload as text" in result
+
+
+def test_blacklisted_void_element_is_still_removed():
+    """Terminating the skip must not resurrect the blacklisted element."""
+    html = """
+    <main>
+        <p>Body text.</p>
+        <img class="copy-button" alt="Copy to clipboard" src="copy.png">
+    </main>
+    """
+    result = extract_content(html)
+    assert "Body text" in result
+    assert "copy-button" not in result
+    assert "Copy to clipboard" not in result
+
+
+def test_closed_blacklisted_block_still_removes_its_children():
+    """The recovery path must not weaken normal blacklist removal."""
+    html = """
+    <main>
+        <p>Body text.</p>
+        <aside class="related"><p>Sidebar noise.</p><img src="x.png"></aside>
+        <p>Trailing text.</p>
+    </main>
+    """
+    result = strip_html(extract_content(html))
+    assert "Body text" in result
+    assert "Trailing text" in result
+    assert "Sidebar noise" not in result
+
+
+# ---------------------------------------------------------------------------
 # Fallback and edge cases
 # ---------------------------------------------------------------------------
 
