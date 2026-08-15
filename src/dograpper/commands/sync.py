@@ -73,8 +73,10 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
       dograpper download <url> -o <output> [download flags]
       dograpper pack <output> -o <chunks-dir> --delta [pack flags]
 
-    All relevant pack flags (bundle, context-header, score, cross-refs,
-    dedup, etc.) are forwarded to the pack stage.
+    Forwarded pack flags: max-words-per-chunk, max-chunks, strategy,
+    format, bundle, context-header, cross-refs, score, dedup,
+    show-tokens. Calibration-only flags (e.g. pack's --report and
+    --dry-run) are deliberately not exposed here.
     """
     from .download import download
     from .pack import pack

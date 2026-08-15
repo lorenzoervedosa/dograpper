@@ -10,6 +10,8 @@ from dograpper.utils.scorer import (
     check_boundary_integrity,
     calculate_context_depth,
     calculate_grade,
+    find_boundary_issues,
+    penalty_breakdown,
     score_chunk,
 )
 from dograpper.commands.pack import pack
@@ -53,6 +55,45 @@ class TestBoundaryIntegrity:
         assert check_boundary_integrity(text) is True
 
 
+class TestFindBoundaryIssues:
+    def test_balanced_text_no_issues(self):
+        text = "```python\ncode\n```\n\n<pre>snippet</pre>\n\nRegular text."
+        assert find_boundary_issues(text) == []
+
+    def test_plain_text_no_issues(self):
+        assert find_boundary_issues("Just regular text.") == []
+
+    def test_odd_fences_reports_last_fence(self):
+        text = "intro\n```python\ncode\n```\nmore\n```js\ntail"
+        issues = find_boundary_issues(text)
+        assert len(issues) == 1
+        assert issues[0].kind == "code_fence"
+        assert issues[0].line == 6
+        assert issues[0].snippet == "```js"
+
+    def test_unclosed_pre_reports_first_unmatched_opener(self):
+        text = '<pre>a</pre>\nmiddle\n<pre class="x">b'
+        issues = find_boundary_issues(text)
+        assert len(issues) == 1
+        assert issues[0].kind == "pre_tag"
+        assert issues[0].line == 3
+        assert issues[0].snippet == '<pre class="x">b'
+
+    def test_surplus_pre_closer_reports_first_surplus(self):
+        text = "</pre>\n<pre>a</pre>"
+        issues = find_boundary_issues(text)
+        assert len(issues) == 1
+        assert issues[0].kind == "pre_tag"
+        assert issues[0].line == 1
+        assert issues[0].snippet == "</pre>"
+
+    def test_fence_and_pre_issues_together(self):
+        text = "```\ncode\n\n<pre>never closed"
+        issues = find_boundary_issues(text)
+        kinds = [i.kind for i in issues]
+        assert kinds == ["code_fence", "pre_tag"]
+
+
 class TestContextDepth:
     def test_no_headings(self):
         assert calculate_context_depth(0, 0) == 0
@@ -78,6 +119,34 @@ class TestGrade:
         score, grade = calculate_grade(0.9, False, 0)
         assert grade == "C"
         assert score < 0.5
+
+
+class TestPenaltyBreakdown:
+    def test_labels_and_values(self):
+        penalties = penalty_breakdown(0.5, True, 1)
+        assert [label for label, _ in penalties] == ["noise", "boundary", "context"]
+        values = dict(penalties)
+        assert values["noise"] == pytest.approx(0.2)
+        assert values["boundary"] == 0.0
+        assert values["context"] == pytest.approx(0.15)
+
+    def test_broken_boundary_penalty(self):
+        values = dict(penalty_breakdown(0.0, False, 2))
+        assert values["noise"] == 0.0
+        assert values["boundary"] == pytest.approx(0.3)
+        assert values["context"] == 0.0
+
+    def test_no_headings_penalty(self):
+        values = dict(penalty_breakdown(1.0, True, 0))
+        assert values["noise"] == pytest.approx(0.4)
+        assert values["context"] == pytest.approx(0.3)
+
+    def test_complements_calculate_grade(self):
+        # The breakdown and the composite score must share one weighting:
+        # score == 1 - sum(penalties), pinned with independent literals.
+        score, _ = calculate_grade(0.5, True, 1)
+        assert score == pytest.approx(0.65)
+        assert sum(v for _, v in penalty_breakdown(0.5, True, 1)) == pytest.approx(0.35)
 
 
 class TestScoreChunk:

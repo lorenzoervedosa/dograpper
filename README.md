@@ -306,6 +306,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
+| `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
 
 #### Pack internal pipeline
 
@@ -415,6 +416,30 @@ Final grade:
 Results are saved to `llm-readiness.json`. When combined with
 `--context-header` or `--format jsonl`, the grade is injected into
 headers/records.
+
+#### Readiness report (`--report`)
+
+Visual companion to `--score` (implied if absent): writes a
+self-contained `readiness-report.html` in the output directory and
+prints a colorized worst-first summary after the pack summary.
+
+The report makes each penalty tangible:
+
+- **noise** — per-page before/after word counts plus samples of the
+  blocks removed by extraction (first 5 per page, in document order);
+- **boundary** — the line and snippet of each broken ` ``` ` fence or
+  unmatched `<pre>` tag, attributed to its source page (line numbers
+  are relative to that page's extracted content);
+- **context depth** — the headings found per page (or the absence of
+  headings as the cause).
+
+Chunks are sorted worst-first (C grades on top) so calibration effort
+goes where it pays off. Incompatible with `--dry-run`: the report needs
+the final chunk text.
+
+```bash
+dograpper pack ./docs -o ./chunks --report
+```
 
 #### Presets (`--bundle`)
 
@@ -679,6 +704,7 @@ Full spec: [docs/schema-v1.md](docs/schema-v1.md)
 | `docs_chunk_*.jsonl` | `--format jsonl` | One JSON line per source file |
 | `cross_refs.json` | `--cross-refs` | Cross-reference graph between chunks |
 | `llm-readiness.json` | `--score` | Quality scores per chunk |
+| `readiness-report.html` | `--report` | Visual before/after report with penalty causes |
 | `IMPORT_GUIDE.md` | `--bundle notebooklm` | Upload guide with recommended ordering |
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
 | `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes) |
