@@ -322,8 +322,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             for rel, fpath in rel_map.items():
                 try:
                     query_texts[rel] = read_source_text(fpath, no_extract=no_ext)
-                except Exception:
-                    continue
+                except Exception as e:
+                    click.echo(f"Warning: cannot read '{rel}' for query "
+                               f"ordering: {e}", err=True)
 
         query_pack_result = order_files_by_queries(
             list(rel_map.keys()), query_texts, query_list)
