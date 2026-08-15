@@ -279,19 +279,29 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
     return guide_path
 
 
+def read_source_text(path: str, no_extract: bool = False) -> str:
+    """Read a source file applying the standard extraction policy:
+    HTML files go through extract_content (unless no_extract) and then
+    strip_html; everything else is returned raw. Reads with
+    errors='replace'. Raises on unreadable files — callers choose
+    their own failure policy.
+    """
+    with open(path, 'r', encoding='utf-8', errors='replace') as source_f:
+        content = source_f.read()
+    if path.lower().endswith(('.html', '.htm')):
+        if not no_extract:
+            content = extract_content(content)
+        content = strip_html(content)
+    return content
+
+
 def _read_source_content(base_dir: str, cf: ChunkFile, no_extract: bool = False, text_overrides: Dict[str, str] = None) -> str:
     """Read a source file from disk, stripping HTML markup if applicable."""
     if text_overrides and cf.relative_path in text_overrides:
         return text_overrides[cf.relative_path]
     true_filepath = os.path.join(base_dir, cf.relative_path)
     try:
-        with open(true_filepath, 'r', encoding='utf-8', errors='replace') as source_f:
-            content = source_f.read()
-        if cf.relative_path.lower().endswith(('.html', '.htm')):
-            if not no_extract:
-                content = extract_content(content)
-            content = strip_html(content)
-        return content
+        return read_source_text(true_filepath, no_extract=no_extract)
     except Exception as e:
         logger.error(f"Failed to copy contents of {cf.relative_path}: {e}")
         return f"[Excluded unreadable blob: {e}]"
