@@ -2,6 +2,7 @@
 
 import os
 import json
+import hashlib
 import logging
 from dataclasses import dataclass, asdict, field, fields
 from typing import Dict, Optional
@@ -20,6 +21,11 @@ class ManifestEntry:
     # compatibility; when absent, fall back to the entry key.
     local_path: Optional[str] = None
     mtime: Optional[float] = None
+    # md5 of the file's bytes. Optional for backwards compatibility: entries
+    # loaded from a manifest written before this field existed have it as
+    # None, and diff_manifests falls back to the old size+mtime comparison
+    # for those specifically.
+    content_hash: Optional[str] = None
 
 @dataclass
 class Manifest:
@@ -86,6 +92,9 @@ def build_manifest(base_url: str, output_dir: str) -> Manifest:
             fs_rel = os.path.relpath(full_path, output_dir).replace(os.sep, '/')
             size = os.path.getsize(full_path)
 
+            with open(full_path, 'rb') as fh:
+                content_hash = hashlib.md5(fh.read()).hexdigest()
+
             # Strip the leading "<netloc>/" that wget adds so the key matches
             # the URL path on the original site.
             if netloc and (fs_rel == netloc or fs_rel.startswith(netloc + '/')):
@@ -105,6 +114,7 @@ def build_manifest(base_url: str, output_dir: str) -> Manifest:
                 last_modified=None,
                 local_path=fs_rel,
                 mtime=mtime,
+                content_hash=content_hash,
             )
 
     return Manifest(
@@ -186,7 +196,20 @@ def diff_manifests(old: Optional[Manifest], new: Manifest) -> ManifestDiff:
             old_entry = old.files[key]
             if old_entry.size_bytes != new_entry.size_bytes:
                 modified.append(key)
-            elif old_entry.mtime != new_entry.mtime:
+            elif old_entry.mtime == new_entry.mtime:
+                # Fast path: mtime unchanged, content assumed unchanged
+                # without hashing.
+                pass
+            elif old_entry.content_hash is not None and new_entry.content_hash is not None:
+                # mtime changed but content hash is available on both sides:
+                # trust the hash, not the mtime (touch, cp without -p, a
+                # fresh git clone all churn mtime without changing bytes).
+                if old_entry.content_hash != new_entry.content_hash:
+                    modified.append(key)
+            else:
+                # Backward compat: old_entry came from a manifest written
+                # before content_hash existed. Can't verify by hash, so fall
+                # back to the old size+mtime heuristic for this entry only.
                 modified.append(key)
 
     for key in old.files:

@@ -46,6 +46,15 @@ and fixes alone are a PATCH bump.
 
 ## [Unreleased]
 
+### Fixed
+
+- `pack --delta` no longer reports a byte-identical file as `modified` when
+  only its mtime changed (a `touch`, a `cp` without `-p`, a fresh `git
+  clone`). The manifest diff now falls back to an md5 content hash whenever
+  size matches but mtime disagrees, instead of trusting mtime alone; the
+  mtime match itself remains a fast path that skips hashing. Manifests
+  written before this change still load and compare correctly. ([#56])
+
 ## [0.4.0] - 2026-08-15
 
 ### Added
@@ -112,3 +121,4 @@ and fixes alone are a PATCH bump.
 [#2]: https://github.com/lorenzoervedosa/dograpper/issues/2
 [#39]: https://github.com/lorenzoervedosa/dograpper/issues/39
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
+[#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
