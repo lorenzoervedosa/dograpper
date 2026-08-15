@@ -75,8 +75,13 @@ logger = logging.getLogger(__name__)
 @click.option('--score', is_flag=True, default=False,
               help="Compute LLM Readiness Score per chunk. "
                    "Generates llm-readiness.json in the output.")
+@click.option('--for-queries', type=click.Path(), default=None,
+              help="Text file with one expected query per line. Reorders "
+                   "files by BM25 query affinity before chunking so content "
+                   "answering the same query is co-located. Requires "
+                   "--strategy size.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool, for_queries: str):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -122,6 +127,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'manifest': manifest,
         'bundle': bundle,
         'score': score,
+        'for_queries': for_queries,
     }
     
     merged_params = load_config(config_path, 'pack', cli_params, ctx)
@@ -147,6 +153,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     manifest_path = merged_params.get('manifest', manifest)
     bundle_preset = merged_params.get('bundle', bundle)
     is_score = merged_params.get('score', score)
+    for_queries_path = merged_params.get('for_queries', for_queries)
 
     # 2b. Bundle overrides
     if bundle_preset == 'notebooklm':
@@ -160,6 +167,26 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         raise click.ClickException(
             "XML format is deprecated since v1.x. Use 'md' (default) or 'jsonl'."
         )
+
+    # 2d. Query-oriented packing: load queries early (fail fast, no silent fallback)
+    query_list = None
+    if for_queries_path:
+        if strat == 'semantic':
+            click.echo("Error: --for-queries requires --strategy size "
+                       "(semantic grouping and query grouping are mutually "
+                       "exclusive).", err=True)
+            ctx.exit(1)
+        from ..lib.query_packer import load_queries
+        try:
+            query_list = load_queries(for_queries_path)
+        except OSError as e:
+            click.echo(f"Error: cannot read queries file "
+                       f"'{for_queries_path}': {e}", err=True)
+            ctx.exit(1)
+        if not query_list:
+            click.echo(f"Error: queries file '{for_queries_path}' "
+                       f"contains no queries.", err=True)
+            ctx.exit(1)
 
     # 3. List all files
     all_files = []
@@ -207,6 +234,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     dedup_stats = None
     dedup_word_counts = None
     dedup_text_overrides = None
+    processed_texts = None
 
     if dedup_mode != "off":
         from ..utils.html_stripper import strip_html as _strip_html
@@ -283,11 +311,49 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         except Exception:
             pass
 
+    # 7d. Query-oriented ordering (opt-in, after delta/dedup, before chunking)
+    query_pack_result = None
+    if query_list is not None:
+        from ..lib.query_packer import order_files_by_queries
+
+        rel_map = {os.path.relpath(f, input_dir).replace(os.sep, '/'): f
+                   for f in filtered_paths}
+        if processed_texts is not None:
+            # Reuse the extraction pass the dedup step already did.
+            query_texts = processed_texts
+        else:
+            # Same extraction as the dedup step above (first copy of this loop).
+            from ..utils.html_stripper import strip_html as _q_strip
+            from ..utils.content_extractor import extract_content as _q_extract
+
+            query_texts = {}
+            for rel, fpath in rel_map.items():
+                try:
+                    with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
+                        raw = fh.read()
+                except Exception:
+                    continue
+                if fpath.lower().endswith(('.html', '.htm')):
+                    if not no_ext:
+                        raw = _q_extract(raw)
+                    text = _q_strip(raw)
+                else:
+                    text = raw
+                query_texts[rel] = text
+
+        query_pack_result = order_files_by_queries(
+            list(rel_map.keys()), query_texts, query_list)
+        for assignment in query_pack_result.assignments:
+            if assignment.total_hits == 0:
+                click.echo(f"Warning: query matched no files: "
+                           f"'{assignment.query}'", err=True)
+        filtered_paths = [rel_map[rp] for rp in query_pack_result.ordered_paths]
+
     # 8. Execute chunking
     if strat == 'semantic':
         chunks = chunk_by_semantic(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts)
     else:
-        chunks = chunk_by_size(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts)
+        chunks = chunk_by_size(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts, preserve_order=query_pack_result is not None)
 
     # 8b. Bundle balancing (post-process)
     if bundle_preset == 'notebooklm':
@@ -675,6 +741,11 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         else:
             pct = 0
         click.echo(f"  Words removed:     {dedup_stats.words_removed:,} (~{pct}%)")
+
+    if query_pack_result is not None:
+        click.echo(f"  Query packing:   {len(query_list)} queries, "
+                   f"{query_pack_result.matched_count} files matched, "
+                   f"{len(query_pack_result.unmatched_files)} unmatched")
 
     if is_delta and diff is not None:
         click.echo(f"  Delta:           {len(diff.added)} added, {len(diff.modified)} modified, {len(diff.removed)} removed")
