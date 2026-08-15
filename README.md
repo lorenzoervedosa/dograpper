@@ -467,7 +467,12 @@ they carry no co-location signal (this filter only kicks in on corpora
 of 5+ files, so small `--delta` subsets still match normally; under
 `--delta` the ranking corpus is the delta subset). Fully deterministic —
 same corpus + same queries file = same chunk layout. The summary reports
-the assignment: `Query packing: 3 queries, 12 files matched, 4 unmatched`.
+the assignment: `Query packing:   3 queries, 12 files matched, 4 unmatched`.
+
+Greedy assignment favors earlier queries: the filter mitigates — it does
+not solve — one query absorbing most of the corpus (measured 29/40 files
+claimed by the first query on the click docs corpus even with the
+filter). Put your most specific queries first.
 
 Incompatible with `--strategy semantic` (two mutually exclusive grouping
 policies — the CLI errors instead of silently overriding). Composes with
