@@ -23,15 +23,24 @@ def load_config(config_path: str, command_name: str, cli_params: dict, ctx: clic
             
     cmd_config = config_data.get(command_name, {})
     final_params = {}
-    
+
+    # Params forwarded by a wrapper command (sync) via ctx.invoke lose their
+    # click parameter source; the wrapper records which of them were explicit
+    # on ITS command line in ctx.obj so precedence survives the boundary.
+    forwarded_explicit = set()
+    ctx_obj = getattr(ctx, 'obj', None)
+    if isinstance(ctx_obj, dict):
+        forwarded_explicit = set(ctx_obj.get('CLI_EXPLICIT_PARAMS', ()))
+
     for param_name, default_value in cli_params.items():
         # Check source from click context
         # ctx.get_parameter_source returns ParameterSource enum
         source = ctx.get_parameter_source(param_name)
         value_from_cli = ctx.params.get(param_name)
-        
+
         # If it was explicitly set via command line or env var, it wins
-        if source and source.name in ('COMMANDLINE', 'ENVIRONMENT'):
+        if (source and source.name in ('COMMANDLINE', 'ENVIRONMENT')) \
+                or param_name in forwarded_explicit:
             final_params[param_name] = value_from_cli
         else:
             # Otherwise, use JSON config if present
