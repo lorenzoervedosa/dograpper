@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 @click.option('--score', is_flag=True, default=False,
               help="Compute LLM Readiness Score per chunk. "
                    "Generates llm-readiness.json in the output.")
-@click.option('--report', is_flag=True, default=False,
+@click.option('--report/--no-report', default=False, show_default=True,
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
 @click.pass_context

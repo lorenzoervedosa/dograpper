@@ -305,7 +305,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--manifest` | — | `.dograpper-manifest.json` | Download manifest used for delta comparison |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
-| `--report` | — | `false` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
+| `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
 
 #### Pack internal pipeline
 

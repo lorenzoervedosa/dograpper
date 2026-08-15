@@ -333,3 +333,19 @@ class TestReportCLI:
 
             assert result.exit_code == 0
             assert os.path.exists(os.path.join("chunks", "readiness-report.html"))
+
+    def test_no_report_flag_overrides_config_for_dry_run(self):
+        """Config {"pack": {"report": true}} must not trap --dry-run:
+        an explicit --no-report wins over the config file."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _make_html_tree("docs")
+            with open(".dograpper.json", "w", encoding="utf-8") as f:
+                json.dump({"pack": {"report": True}}, f)
+
+            result = runner.invoke(pack, [
+                "docs", "-o", "chunks", "--no-report", "--dry-run",
+            ], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            assert not os.path.exists(os.path.join("chunks", "readiness-report.html"))
