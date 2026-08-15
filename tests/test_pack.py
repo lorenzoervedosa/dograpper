@@ -190,6 +190,21 @@ def test_chunk_by_size_oversized_file():
         assert len(chunks) == 1
         assert chunks[0].total_words == 1000
 
+def test_chunk_by_size_preserve_order():
+    with tempfile.TemporaryDirectory() as d:
+        files = create_mock_files(d, [("a.md", 100), ("b.md", 100), ("c.md", 100)])
+        ordered = [files[2], files[0], files[1]]  # caller order: c, a, b
+        chunks = chunk_by_size(ordered, d, 250, preserve_order=True)
+        rels = [cf.relative_path for c in chunks for cf in c.files]
+        assert rels == ["c.md", "a.md", "b.md"]
+
+def test_chunk_by_size_default_still_sorts():
+    with tempfile.TemporaryDirectory() as d:
+        files = create_mock_files(d, [("a.md", 100), ("b.md", 100)])
+        chunks = chunk_by_size(list(reversed(files)), d, 250)
+        rels = [cf.relative_path for c in chunks for cf in c.files]
+        assert rels == ["a.md", "b.md"]
+
 def test_chunk_by_semantic_grouping():
     with tempfile.TemporaryDirectory() as d:
         files = create_mock_files(d, [

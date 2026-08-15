@@ -23,11 +23,15 @@ class Chunk:
     files: List[ChunkFile] = field(default_factory=list)
     total_words: int = 0
 
-def chunk_by_size(files: List[str], base_dir: str, max_words: int, no_extract: bool = False, word_counts: Dict[str, int] = None) -> List[Chunk]:
-    """Group incoming files in chunks keeping them under the soft limit max_words per chunk."""
+def chunk_by_size(files: List[str], base_dir: str, max_words: int, no_extract: bool = False, word_counts: Dict[str, int] = None, preserve_order: bool = False) -> List[Chunk]:
+    """Group incoming files in chunks keeping them under the soft limit max_words per chunk.
 
-    # Sort alphabetically to keep things predictable
-    sorted_files = sorted(files)
+    With ``preserve_order=True`` the caller's list order is respected
+    (used by ``pack --for-queries``); otherwise files are sorted
+    alphabetically to keep things predictable.
+    """
+
+    sorted_files = list(files) if preserve_order else sorted(files)
 
     chunks = []
     current_chunk = Chunk(index=1)
