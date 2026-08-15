@@ -542,3 +542,26 @@ def test_pack_for_queries_file_inside_input_dir_not_packed():
         with open(os.path.join(out, 'docs_chunk_01.md')) as f:
             assert 'SOURCE: zebra.html' in f.read()
         assert "2 files matched" in result.output
+
+
+def test_pack_for_queries_warns_on_unreadable_file():
+    if os.geteuid() == 0:
+        pytest.skip("permission-based test is meaningless as root")
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        locked = os.path.join(d, 'locked.html')
+        with open(locked, 'w') as f:
+            f.write('<html><body><p>secret content</p></body></html>')
+        os.chmod(locked, 0)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\n")
+        try:
+            result = runner.invoke(pack, [
+                d, '-o', os.path.join(d, 'out'), '--for-queries', qfile])
+        finally:
+            os.chmod(locked, 0o644)
+        assert result.exit_code == 0, result.output
+        assert "cannot read" in result.output
+        assert "locked.html" in result.output
