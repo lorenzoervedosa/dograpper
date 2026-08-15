@@ -611,9 +611,10 @@ from `llm-readiness.json`, and the content preview — including the
 
 ### `dograpper sync`
 
-Convenience wrapper: `download` + `pack --delta` chained. Uses the
-same flags as `download` and `pack`, with defaults tuned for
-continuous maintenance.
+Convenience wrapper: `download` + `pack --delta` chained, with defaults
+tuned for continuous maintenance. Forwards most `download` and `pack`
+flags; calibration-only pack flags (`--report`, `--dry-run`) are
+deliberately not exposed here.
 
 ```bash
 dograpper sync <url> -o <dir> [options]
@@ -626,12 +627,17 @@ dograpper sync <url> -o <dir> [options]
 | `--depth` | `-d` | `0` | Maximum depth (passed to `download`) |
 | `--headless` | — | `false` | Playwright direct (passed to `download`) |
 | `--delay` | — | `0` | Rate limiting in ms (passed to `download`) |
+| `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
-| `--format` | — | `md` | `md` \| `jsonl` (passed to `pack`) |
+| `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |
+| `--format` | — | `md` | `txt` \| `md` \| `jsonl` \| `xml` (deprecated) (passed to `pack`) |
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |
+| `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` (passed to `pack`) |
 | `--score` | — | `false` | LLM Readiness (passed to `pack`) |
+| `--dedup` | — | `off` | `off` \| `exact` \| `fuzzy` \| `both` (passed to `pack`) |
+| `--show-tokens` | — | `false` | Show per-chunk and total token count (passed to `pack`) |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (passed to `pack`) |
 
 `pack` is always executed with an implicit `--delta`: when the mirror
