@@ -12,6 +12,14 @@ from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, read_s
 
 logger = logging.getLogger(__name__)
 
+
+def _query_packing_summary(query_list, query_pack_result) -> str:
+    """Summary line shared by the normal and dry-run outputs."""
+    return (f"  Query packing:   {len(query_list)} queries, "
+            f"{query_pack_result.matched_count} files matched, "
+            f"{len(query_pack_result.unmatched_files)} unmatched")
+
+
 @click.command(
     epilog=(
         "\b\n"
@@ -457,6 +465,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             report_data.readiness_scores = dr_scores
             report_data.show_score = True
 
+        if query_pack_result is not None:
+            click.echo(_query_packing_summary(query_list, query_pack_result))
         click.echo(generate_report(report_data))
         return
 
@@ -727,9 +737,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         click.echo(f"  Words removed:     {dedup_stats.words_removed:,} (~{pct}%)")
 
     if query_pack_result is not None:
-        click.echo(f"  Query packing:   {len(query_list)} queries, "
-                   f"{query_pack_result.matched_count} files matched, "
-                   f"{len(query_pack_result.unmatched_files)} unmatched")
+        click.echo(_query_packing_summary(query_list, query_pack_result))
 
     if is_delta and diff is not None:
         click.echo(f"  Delta:           {len(diff.added)} added, {len(diff.modified)} modified, {len(diff.removed)} removed")
