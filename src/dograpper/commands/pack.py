@@ -75,8 +75,11 @@ logger = logging.getLogger(__name__)
 @click.option('--score', is_flag=True, default=False,
               help="Compute LLM Readiness Score per chunk. "
                    "Generates llm-readiness.json in the output.")
+@click.option('--report', is_flag=True, default=False,
+              help="Write readiness-report.html with per-page before/after "
+                   "extraction data and score penalty causes. Implies --score.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool, report: bool):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -122,6 +125,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'manifest': manifest,
         'bundle': bundle,
         'score': score,
+        'report': report,
     }
     
     merged_params = load_config(config_path, 'pack', cli_params, ctx)
@@ -147,6 +151,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     manifest_path = merged_params.get('manifest', manifest)
     bundle_preset = merged_params.get('bundle', bundle)
     is_score = merged_params.get('score', score)
+    is_report = merged_params.get('report', report)
 
     # 2b. Bundle overrides
     if bundle_preset == 'notebooklm':
@@ -160,6 +165,16 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         raise click.ClickException(
             "XML format is deprecated since v1.x. Use 'md' (default) or 'jsonl'."
         )
+
+    # 2d. Report validation and implied score
+    if is_report and is_dry_run:
+        raise click.ClickException(
+            "--report requires a real pack run (there is no final chunk text "
+            "in --dry-run)."
+        )
+    if is_report and not is_score:
+        is_score = True
+        click.echo("--report implies --score: enabling readiness scoring.")
 
     # 3. List all files
     all_files = []
@@ -413,10 +428,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     # 9c. LLM Readiness scoring (before write, so readiness can be injected into headers)
     readiness_scores = []
     readiness_map = None
+    report_pages = {}   # chunk_id -> List[PageReadiness] (only with --report)
+    report_issues = {}  # chunk_id -> List[BoundaryIssue] (only with --report)
     if is_score:
         from ..utils.scorer import score_chunk
         from ..utils.html_stripper import strip_html as _score_strip
         from ..utils.content_extractor import extract_content as _score_extract
+        if is_report:
+            from ..utils.scorer import calculate_noise_ratio, find_boundary_issues
+            from ..utils.readiness_report import PageReadiness, find_removed_blocks
 
         for chunk in chunks:
             chunk_id = f"{pref}{chunk.index:02d}"
@@ -426,48 +446,62 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             headings_count = 0
             max_heading_level = 0
             chunk_text_parts = []
+            chunk_pages = []
 
             for cf in chunk.files:
                 fpath = os.path.join(input_dir, cf.relative_path)
+                raw_text = None
+                extracted_text = None
                 if fpath.lower().endswith(('.html', '.htm')):
                     try:
                         with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
                             raw_html = fh.read()
-                        raw_total += len(_score_strip(raw_html).split())
+                        raw_text = _score_strip(raw_html)
                         if not no_ext:
-                            extracted_total += len(_score_strip(_score_extract(raw_html)).split())
+                            extracted_text = _score_strip(_score_extract(raw_html))
                         else:
-                            extracted_total += len(_score_strip(raw_html).split())
+                            extracted_text = raw_text
+                        raw_total += len(raw_text.split())
+                        extracted_total += len(extracted_text.split())
                     except Exception:
                         pass
                 else:
                     try:
-                        wc = len(open(fpath, 'r', encoding='utf-8', errors='replace').read().split())
+                        with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
+                            raw_text = fh.read()
+                        extracted_text = raw_text
+                        wc = len(raw_text.split())
                         raw_total += wc
                         extracted_total += wc
                     except Exception:
                         pass
 
+                file_headings = []
                 if heading_map and cf.relative_path in heading_map:
-                    hdgs = heading_map[cf.relative_path]
-                    headings_count += len(hdgs)
-                    if hdgs:
-                        max_heading_level = max(max_heading_level, max(h.level for h in hdgs))
+                    file_headings = heading_map[cf.relative_path]
+                    headings_count += len(file_headings)
+                    if file_headings:
+                        max_heading_level = max(max_heading_level, max(h.level for h in file_headings))
 
-                # Read content for boundary check
+                # Content for boundary check (dedup override wins over re-processed text)
                 if dedup_text_overrides and cf.relative_path in dedup_text_overrides:
                     chunk_text_parts.append(dedup_text_overrides[cf.relative_path])
-                else:
-                    try:
-                        with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
-                            raw = fh.read()
-                        if fpath.lower().endswith(('.html', '.htm')):
-                            if not no_ext:
-                                raw = _score_extract(raw)
-                            raw = _score_strip(raw)
-                        chunk_text_parts.append(raw)
-                    except Exception:
-                        pass
+                elif extracted_text is not None:
+                    chunk_text_parts.append(extracted_text)
+
+                if is_report and raw_text is not None:
+                    page_raw = len(raw_text.split())
+                    page_extracted = len(extracted_text.split())
+                    chunk_pages.append(PageReadiness(
+                        relative_path=cf.relative_path,
+                        raw_words=page_raw,
+                        extracted_words=page_extracted,
+                        noise_ratio=calculate_noise_ratio(page_raw, page_extracted),
+                        headings_count=len(file_headings),
+                        max_heading_level=max((h.level for h in file_headings), default=0),
+                        first_headings=[h.text for h in file_headings[:3]],
+                        removed_samples=find_removed_blocks(raw_text, extracted_text),
+                    ))
 
             chunk_text = "\n\n".join(chunk_text_parts)
 
@@ -480,6 +514,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                 max_heading_level=max_heading_level,
             )
             readiness_scores.append(cs)
+
+            if is_report:
+                report_pages[chunk_id] = chunk_pages
+                report_issues[chunk_id] = find_boundary_issues(chunk_text)
 
         # Build readiness_map for header injection (md/txt) and JSONL grade
         if ctx_header or fmt == 'jsonl':
@@ -623,6 +661,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         with open(readiness_path, 'w', encoding='utf-8') as rf:
             json.dump(readiness_data, rf, indent=2)
 
+    # 10d-2. Readiness report — HTML with per-page before/after and penalty causes
+    report_path = None
+    if is_report and readiness_scores:
+        from ..utils.readiness_report import generate_html_report
+
+        report_path = os.path.join(output_dir, "readiness-report.html")
+        with open(report_path, 'w', encoding='utf-8') as rf:
+            rf.write(generate_html_report(readiness_scores, report_pages, report_issues))
+
     # 10e. Token counting (opt-in)
     token_counts = []
     if s_tokens:
@@ -710,3 +757,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         
     if generated_chunk_count > max_c:
         click.echo(f"  \u26a0 Chunk count exceeds max-chunks limit ({generated_chunk_count} > {max_c})")
+
+    # 12. Readiness report terminal summary (after the normal pack summary)
+    if report_path is not None:
+        from ..utils.readiness_report import format_terminal_report
+        click.echo(format_terminal_report(readiness_scores, report_path))

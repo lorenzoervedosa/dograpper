@@ -1,8 +1,14 @@
 """Tests for the readiness report (--report): removed-block diff,
 HTML report generation and colorized terminal summary."""
 
+import json
+import os
 import re
+import tempfile
 
+from click.testing import CliRunner
+
+from dograpper.commands.pack import pack
 from dograpper.utils.readiness_report import (
     PageReadiness,
     find_removed_blocks,
@@ -206,3 +212,92 @@ class TestFormatTerminalReport:
                          boundary=True, depth=0)]
         out = _strip_ansi(format_terminal_report(scores, "r.html"))
         assert "context" in out
+
+
+# ---------------------------------------------------------------------------
+# CLI integration tests
+# ---------------------------------------------------------------------------
+
+def _make_html_tree(input_dir):
+    os.makedirs(input_dir)
+    with open(os.path.join(input_dir, "page.html"), "w", encoding="utf-8") as f:
+        f.write(
+            "<html><body>"
+            "<nav><a href='#'>Home</a> <a href='#'>About</a></nav>"
+            "<main><h1>Guide Title</h1><p>"
+            + "Real content words here. " * 100
+            + "</p></main>"
+            "<footer>Copyright footer boilerplate</footer>"
+            "</body></html>"
+        )
+
+
+class TestReportCLI:
+    def test_report_writes_html_and_implies_score(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = os.path.join(tmp, "docs")
+            output_dir = os.path.join(tmp, "chunks")
+            _make_html_tree(input_dir)
+
+            result = runner.invoke(pack, [
+                input_dir, "-o", output_dir, "--report",
+            ], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            report_path = os.path.join(output_dir, "readiness-report.html")
+            assert os.path.exists(report_path)
+            # --report implies --score (with an explicit note)
+            assert os.path.exists(os.path.join(output_dir, "llm-readiness.json"))
+            assert "--score" in result.output
+            # Terminal summary with report path
+            assert "Readiness report (worst first):" in result.output
+            assert report_path in result.output
+
+            with open(report_path, encoding="utf-8") as f:
+                report_html = f.read()
+            assert "page.html" in report_html
+            assert "Guide Title" in report_html
+
+    def test_report_with_dry_run_errors(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = os.path.join(tmp, "docs")
+            _make_html_tree(input_dir)
+
+            result = runner.invoke(pack, [
+                input_dir, "-o", os.path.join(tmp, "chunks"),
+                "--report", "--dry-run",
+            ])
+
+            assert result.exit_code == 1
+            assert "--report requires a real pack run" in result.output
+
+    def test_without_report_no_html_written(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = os.path.join(tmp, "docs")
+            output_dir = os.path.join(tmp, "chunks")
+            _make_html_tree(input_dir)
+
+            result = runner.invoke(pack, [
+                input_dir, "-o", output_dir, "--score",
+            ], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            assert not os.path.exists(os.path.join(output_dir, "readiness-report.html"))
+            assert "Readiness report (worst first):" not in result.output
+
+    def test_report_from_config_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _make_html_tree("docs")
+            with open(".dograpper.json", "w", encoding="utf-8") as f:
+                json.dump({"pack": {"report": True}}, f)
+
+            result = runner.invoke(pack, [
+                "docs", "-o", "chunks",
+            ], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            assert os.path.exists(os.path.join("chunks", "readiness-report.html"))
