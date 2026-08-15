@@ -7,15 +7,12 @@ navigation and readiness grades. Fully local, zero outbound network.
 """
 
 import click
-import logging
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
 from ..lib.mcp_server import McpServer, Tool, ToolError, serve_stdio
 from ..lib.pack_reader import load_chunks
 from ..lib.retrieval import build_index
 from ..utils.chunk_inspector import load_sidecar
-
-logger = logging.getLogger(__name__)
 
 EXCERPT_WORDS = 50
 
@@ -43,11 +40,13 @@ def build_tools(chunks, index, cross_refs, readiness, prefix: str):
         if not query or not isinstance(query, str):
             raise ToolError("Missing required argument: query")
         k = args.get("k", 5)
-        if not isinstance(k, int) or k < 1:
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
             raise ToolError("k must be a positive integer")
         hits = index.search(query, k=k)
         results = []
         for hit in hits:
+            if hit.score <= 0:
+                continue
             rec = by_id.get(hit.doc_id)
             if rec is None:
                 continue
@@ -224,4 +223,9 @@ def serve(ctx, chunks_dir, prefix):
         f"readiness: {'yes' if readiness else 'no'}). Waiting for client…",
         err=True,
     )
+    import sys
+    if hasattr(sys.stdout, "reconfigure"):
+        # Packed content is arbitrary unicode; don't let a non-UTF-8
+        # locale kill the server mid-response.
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     serve_stdio(server)

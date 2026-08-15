@@ -57,6 +57,13 @@ def test_initialize_without_version_uses_fallback():
     assert resp["result"]["protocolVersion"]
 
 
+def test_initialize_unknown_version_gets_fallback_not_echo():
+    server = _make_server()
+    resp = server.handle_message(_req("initialize", params={
+        "protocolVersion": "banana"}))
+    assert resp["result"]["protocolVersion"] == "2025-06-18"
+
+
 def test_ping_returns_empty_result():
     server = _make_server()
     resp = server.handle_message(_req("ping"))
@@ -83,10 +90,19 @@ def test_unknown_notification_ignored():
     assert resp is None
 
 
+def test_handled_methods_as_notifications_get_no_response():
+    server = _make_server()
+    for method in ("ping", "initialize", "tools/list", "tools/call"):
+        resp = server.handle_message({"jsonrpc": "2.0", "method": method})
+        assert resp is None, method
+
+
 def test_non_jsonrpc_message_rejected():
     server = _make_server()
     resp = server.handle_message({"id": 1, "method": "initialize"})
     assert resp["error"]["code"] == -32600
+    # a detectable id is preserved on the error, per JSON-RPC 2.0
+    assert resp["id"] == 1
 
 
 def test_tools_list_exposes_schema():
@@ -280,8 +296,26 @@ def test_search_chunks_requires_query(tmp_path):
 
 def test_search_chunks_respects_k(tmp_path):
     server = _pack_server(tmp_path)
-    _, text = _call(server, "search_chunks", {"query": "guide", "k": 1})
+    # both records contain "the"; k must cap the matches
+    _, text = _call(server, "search_chunks",
+                    {"query": "configuration pipeline", "k": 1})
     assert len(json.loads(text)["results"]) == 1
+
+
+def test_search_chunks_rejects_boolean_k(tmp_path):
+    server = _pack_server(tmp_path)
+    is_err, text = _call(server, "search_chunks",
+                         {"query": "pipeline", "k": True})
+    assert is_err is True
+    assert "positive integer" in text
+
+
+def test_search_chunks_no_match_returns_empty(tmp_path):
+    server = _pack_server(tmp_path)
+    is_err, text = _call(server, "search_chunks",
+                         {"query": "zzz nonexistent qqq"})
+    assert is_err is False
+    assert json.loads(text)["results"] == []
 
 
 def test_get_chunk_full_content(tmp_path):
