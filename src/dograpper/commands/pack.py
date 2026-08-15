@@ -240,7 +240,6 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     dedup_stats = None
     dedup_word_counts = None
     dedup_text_overrides = None
-    processed_texts = None
 
     if dedup_mode != "off":
         from ..utils.dedup import deduplicate
@@ -314,9 +313,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
         rel_map = {os.path.relpath(f, input_dir).replace(os.sep, '/'): f
                    for f in filtered_paths}
-        if processed_texts is not None:
-            # Reuse the extraction pass the dedup step already did.
-            query_texts = processed_texts
+        if dedup_mode != "off" and dedup_text_overrides is not None:
+            # Rank on the post-dedup texts — what actually gets written.
+            query_texts = dedup_text_overrides
         else:
             query_texts = {}
             for rel, fpath in rel_map.items():
