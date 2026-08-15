@@ -295,7 +295,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--ignore` | — | *(none)* | Inline exclusion patterns (repeatable) |
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
-| `--format` | — | `md` | Output format: `txt`, `md`, `jsonl` |
+| `--format` | — | `md` | Output format: `txt`, `md`, `jsonl`, `xml` (deprecated — errors, use `md`) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
 | `--token-encoding` | — | `cl100k` | Tokenizer encoding: `cl100k`, `o200k`, `p50k` |
@@ -317,9 +317,11 @@ Operation order (each stage reads the output of the previous one):
 
 ```
 list files → apply .docsignore → --no-extract? yes: full HTML / no: extract
-           → --dedup → --strategy (size|semantic) → boundary-aware chunking
-           → --cross-refs? annotate → --context-header? inject → --score? annotate
-           → --format (md|txt|jsonl) → write → --bundle? guide + cap
+           → --dedup → --bundle? cap max-chunks/max-words-per-chunk
+           → --strategy (size|semantic) → boundary-aware chunking
+           → --score? compute readiness
+           → --format (md|txt|jsonl) + --context-header? inject → write
+           → --cross-refs? annotate written chunks → --bundle? generate guide
 ```
 
 #### Smart extraction (on by default)
@@ -332,9 +334,10 @@ Preference order:
 3. Fallback: full HTML with `<script>`, `<style>`, `<nav>`, `<footer>`
    stripped.
 
-Blacklist removes: breadcrumbs, "copy to clipboard" buttons, version
-banners, search widgets, edit-on-github. Use `--no-extract` to keep
-the full HTML.
+Blacklist removes: navigation, breadcrumbs, sidebars, table of
+contents, "copy to clipboard" buttons, version banners, cookie and
+announcement banners, feedback widgets, edit-on-github links. Use
+`--no-extract` to keep the full HTML.
 
 #### Deduplication (`--dedup`)
 
@@ -397,7 +400,7 @@ Schema (required fields in **bold**, optional in italics):
 - **`words`** — word count
 - **`content`** — extracted text
 - **`schema_version`** — `"v1"`
-- *`breadcrumb`, `chunk_index`, `total_chunks`* (with `--context-header`)
+- *`breadcrumb`, `chunk_index`, `total_chunks`* (with `--context-header` or `--score`)
 - *`url`* (when available via manifest)
 - *`readiness_grade`* (with `--score`)
 
@@ -413,8 +416,8 @@ Per-chunk 0–1 score derived from three weighted metrics:
 
 Final grade:
 - **A** — score ≥ 0.8 (ready for direct use)
-- **B** — 0.6 ≤ score < 0.8 (usable, consider refining extraction)
-- **C** — score < 0.6 (review `.docsignore` or run `--dedup`)
+- **B** — 0.5 ≤ score < 0.8 (usable, consider refining extraction)
+- **C** — score < 0.5 (review `.docsignore` or run `--dedup`)
 
 Results are saved to `llm-readiness.json`. When combined with
 `--context-header` or `--format jsonl`, the grade is injected into
@@ -446,13 +449,20 @@ dograpper pack ./docs -o ./chunks --report
 
 #### Presets (`--bundle`)
 
-Shortcuts for common combinations. The preset **sets defaults**;
-explicit CLI flags override them.
+Shortcuts for common combinations.
 
-| Preset | `max-chunks` | `max-words-per-chunk` | `strategy` | `format` | Produces |
-|---|---|---|---|---|---|
-| `notebooklm` | 50 | 400,000 | `semantic` | `md` | `IMPORT_GUIDE.md` |
-| `rag-standard` | 500 | 50,000 | `size` | `jsonl` | — |
+- **`notebooklm`** — hard ceiling, not a default: caps `max-chunks` at
+  50 and `max-words-per-chunk` at 500,000 regardless of what the CLI
+  flags request (`--max-chunks 100 --bundle notebooklm` still yields
+  50 chunks). Does not set `strategy` or `format`.
+- **`rag-standard`** — no restrictions; sets nothing.
+
+Both presets generate `IMPORT_GUIDE.md` alongside the chunks.
+
+| Preset | `max-chunks` cap | `max-words-per-chunk` cap | Produces |
+|---|---|---|---|
+| `notebooklm` | 50 | 500,000 | `IMPORT_GUIDE.md` |
+| `rag-standard` | — | — | `IMPORT_GUIDE.md` |
 
 Example combining preset with score:
 
@@ -930,8 +940,9 @@ Conditional extra lines (per enabled flag):
 Warnings appear when:
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
   into a chunk, overshooting the stated limit).
-- Total chunks exceed `--max-chunks` (the overflow is discarded with a
-  warning; use `--bundle` for deterministic behavior).
+- Total chunks exceed `--max-chunks` (nothing is discarded — every
+  chunk is still written, just with a warning; use `--bundle
+  notebooklm` for a hard cap that's actually enforced).
 
 ---
 
@@ -982,9 +993,11 @@ artifacts of the files they did not touch. See
 
 ### Chunks too large for NotebookLM
 
-Use `--bundle notebooklm` (400k words/chunk limit) + `--strategy semantic`
-to keep modules cohesive. If it still overflows, reduce
-`--max-words-per-chunk` progressively and combine with `--dedup both`.
+`--bundle notebooklm` caps `--max-words-per-chunk` at 500,000 — with
+the default (also 500,000) this produces no size reduction on its
+own. Combine with `--strategy semantic` to keep modules cohesive, and
+if chunks still overflow, lower `--max-words-per-chunk` explicitly
+below the cap and combine with `--dedup both`.
 
 ### `wget returned 8` but the download looks fine
 
