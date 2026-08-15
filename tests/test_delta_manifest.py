@@ -115,6 +115,67 @@ def test_diff_both_empty():
     assert diff.removed == []
 
 
+def test_diff_mtime_changed_same_hash_not_modified():
+    """Size equal, mtime differs, content hash equal → not modified (#56).
+
+    A touch, a cp without -p, or a fresh git clone changes mtime without
+    changing bytes. The hash is the source of truth once mtime disagrees.
+    """
+    old = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=1.0, content_hash="abc123"),
+    })
+    new = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=9.0, content_hash="abc123"),
+    })
+    diff = diff_manifests(old, new)
+    assert diff.added == []
+    assert diff.modified == []
+    assert diff.removed == []
+
+
+def test_diff_mtime_changed_different_hash_modified():
+    """Size equal, mtime differs, content hash differs → modified."""
+    old = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=1.0, content_hash="abc123"),
+    })
+    new = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=9.0, content_hash="def456"),
+    })
+    diff = diff_manifests(old, new)
+    assert diff.added == []
+    assert diff.modified == ["a.html"]
+    assert diff.removed == []
+
+
+def test_diff_old_entry_missing_hash_falls_back_to_mtime():
+    """Backward compat: entries from a manifest written before the hash field
+    existed have content_hash=None. Without a hash to compare, fall back to
+    the old size+mtime heuristic instead of crashing or assuming unchanged.
+    """
+    old = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=1.0),
+    })
+    new = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=9.0, content_hash="abc123"),
+    })
+    diff = diff_manifests(old, new)
+    assert diff.modified == ["a.html"]
+
+
+def test_diff_old_entry_missing_hash_same_mtime_not_modified():
+    """Backward compat: no hash on the old entry, but mtime is unchanged, so
+    the fast path applies and no hashing is needed to decide.
+    """
+    old = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=1.0),
+    })
+    new = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=1.0, content_hash="abc123"),
+    })
+    diff = diff_manifests(old, new)
+    assert diff.modified == []
+
+
 # --- Integration tests for --delta via CLI ---
 
 def _make_test_dir(tmpdir, files_dict):
@@ -196,6 +257,38 @@ def test_delta_modified_file_only():
         # Both files are in the pack, not just the modified one.
         packed = [f for cg in data["chunks_generated"] for f in cg["files"]]
         assert sorted(packed) == ["a.txt", "b.txt"]
+
+
+def test_delta_touch_no_content_change_not_modified():
+    """touch changes mtime but not content → delta gate stays closed (#56).
+
+    Reproduces the issue's repro: byte-identical file, changed mtime only,
+    must not be reported as modified nor trigger a full repack.
+    """
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_dir = os.path.join(tmpdir, "docs")
+        output_dir = os.path.join(tmpdir, "chunks")
+
+        _make_test_dir(input_dir, {
+            "a.txt": "hello world one two three",
+            "b.txt": "foo bar baz qux quux",
+        })
+
+        # Record the corpus as already packed
+        _seed_pack_state(input_dir, output_dir)
+
+        # touch b.txt: mtime changes, content stays byte-identical
+        time.sleep(0.05)
+        os.utime(os.path.join(input_dir, "b.txt"), None)
+
+        result = runner.invoke(pack, [
+            input_dir, '-o', output_dir, '--delta',
+        ], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "no files changed" in result.output.lower()
+        assert [f for f in os.listdir(output_dir) if f != PACK_STATE_FILENAME] == []
 
 
 def test_delta_no_changes():
@@ -290,3 +383,17 @@ def test_build_manifest_populates_mtime():
         assert entry.mtime is not None
         assert isinstance(entry.mtime, float)
         assert entry.mtime > 0
+
+
+def test_build_manifest_populates_content_hash():
+    """build_manifest should populate an md5 content hash for each entry."""
+    import hashlib
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fpath = os.path.join(tmpdir, "test.txt")
+        with open(fpath, 'wb') as f:
+            f.write(b"content")
+
+        manifest = build_manifest(base_url="", output_dir=tmpdir)
+        entry = list(manifest.files.values())[0]
+        assert entry.content_hash == hashlib.md5(b"content").hexdigest()

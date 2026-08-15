@@ -52,6 +52,12 @@ and fixes alone are a PATCH bump.
   substring of an unrelated word in the chunk (e.g. link text "Install"
   inside the word "Installation"). `annotate_cross_refs` now matches on
   word boundaries instead of doing a plain substring replace. ([#55])
+- `pack --delta` no longer reports a byte-identical file as `modified` when
+  only its mtime changed (a `touch`, a `cp` without `-p`, a fresh `git
+  clone`). The manifest diff now falls back to an md5 content hash whenever
+  size matches but mtime disagrees, instead of trusting mtime alone; the
+  mtime match itself remains a fast path that skips hashing. Manifests
+  written before this change still load and compare correctly. ([#56])
 
 ## [0.4.0] - 2026-08-15
 
@@ -120,3 +126,4 @@ and fixes alone are a PATCH bump.
 [#39]: https://github.com/lorenzoervedosa/dograpper/issues/39
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
+[#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
