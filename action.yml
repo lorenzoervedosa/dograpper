@@ -1,0 +1,170 @@
+name: "dograpper Context Freshness"
+description: >-
+  Keep packed LLM context fresh: sync or delta-pack your docs with dograpper,
+  compute context drift against the previous readiness snapshot, and post or
+  update a drift report comment on the pull request.
+branding:
+  icon: "refresh-cw"
+  color: "orange"
+
+# Assumes ubuntu runners: python3, wget, jq and the gh CLI are preinstalled.
+# The packed chunks dir (including .dograpper-manifest.json and
+# llm-readiness.json) must be versioned in the user's repo — that is what
+# makes --delta and the drift diff meaningful on stateless CI runners.
+
+inputs:
+  url:
+    description: >-
+      Docs site URL. When set, runs `dograpper sync <url>`; when empty, runs
+      `dograpper pack --delta` on input-dir.
+    required: false
+    default: ""
+  input-dir:
+    description: "Directory holding the downloaded docs (sync output / pack input)."
+    required: false
+    default: "./docs"
+  chunks-dir:
+    description: "Directory holding the packed chunks (versioned in the repo)."
+    required: false
+    default: "./chunks"
+  pack-args:
+    description: "Extra flags appended verbatim to the sync/pack command."
+    required: false
+    default: ""
+  mode:
+    description: >-
+      warn: emit a ::warning:: annotation when drift is found.
+      fail: fail the job when drift is found (after posting the comment).
+    required: false
+    default: "warn"
+  comment:
+    description: "Post/update the PR drift comment (pull_request events only)."
+    required: false
+    default: "true"
+  github-token:
+    description: "Token used by the gh CLI to post the PR comment."
+    required: false
+    default: "${{ github.token }}"
+
+outputs:
+  drift:
+    description: "true when any context drift was detected (first run counts)."
+    value: ${{ steps.drift.outputs.drift }}
+  report-path:
+    description: "Path to the generated markdown drift report."
+    value: ${{ steps.drift.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install dograpper
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install --quiet "${GITHUB_ACTION_PATH}"
+
+    - name: Preserve previous readiness snapshot
+      shell: bash
+      env:
+        CHUNKS_DIR: ${{ inputs.chunks-dir }}
+      run: |
+        set -euo pipefail
+        if [ -f "${CHUNKS_DIR}/llm-readiness.json" ]; then
+          cp "${CHUNKS_DIR}/llm-readiness.json" "${RUNNER_TEMP}/old-readiness.json"
+          echo "Previous readiness snapshot preserved."
+        else
+          echo "No previous readiness snapshot (first run)."
+        fi
+
+    - name: Refresh pack
+      shell: bash
+      env:
+        URL: ${{ inputs.url }}
+        INPUT_DIR: ${{ inputs.input-dir }}
+        CHUNKS_DIR: ${{ inputs.chunks-dir }}
+        PACK_ARGS: ${{ inputs.pack-args }}
+      run: |
+        set -euo pipefail
+        # PACK_ARGS is intentionally unquoted: flags are appended verbatim.
+        if [ -n "${URL}" ]; then
+          dograpper sync "${URL}" -o "${INPUT_DIR}" --chunks-dir "${CHUNKS_DIR}" --score ${PACK_ARGS}
+        else
+          dograpper pack "${INPUT_DIR}" -o "${CHUNKS_DIR}" --delta --score ${PACK_ARGS}
+        fi
+
+    - name: Compute drift
+      id: drift
+      shell: bash
+      env:
+        CHUNKS_DIR: ${{ inputs.chunks-dir }}
+        MODE: ${{ inputs.mode }}
+      run: |
+        set -euo pipefail
+        REPORT="${RUNNER_TEMP}/drift.md"
+        ARGS=(--new "${CHUNKS_DIR}/llm-readiness.json"
+              --delta-manifest "${CHUNKS_DIR}/delta_manifest.json"
+              --format markdown --output "${REPORT}"
+              --fail-on-drift)
+        if [ -f "${RUNNER_TEMP}/old-readiness.json" ]; then
+          ARGS+=(--old "${RUNNER_TEMP}/old-readiness.json")
+        fi
+        EXIT_CODE=0
+        dograpper drift "${ARGS[@]}" || EXIT_CODE=$?
+        # --fail-on-drift exits 1 on drift AFTER writing the report; a
+        # missing report means a real error, which must fail the job here.
+        if [ ! -f "${REPORT}" ]; then
+          echo "::error::dograpper drift failed (exit ${EXIT_CODE})"
+          exit "${EXIT_CODE}"
+        fi
+        if [ "${EXIT_CODE}" -ne 0 ]; then
+          DRIFT=true
+        else
+          DRIFT=false
+        fi
+        echo "drift=${DRIFT}" >> "${GITHUB_OUTPUT}"
+        echo "report-path=${REPORT}" >> "${GITHUB_OUTPUT}"
+        if [ "${DRIFT}" = "true" ] && [ "${MODE}" != "fail" ]; then
+          echo "::warning::Context drift detected — see the drift report comment."
+        fi
+
+    - name: Post or update PR comment
+      if: ${{ inputs.comment == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPORT: ${{ steps.drift.outputs.report-path }}
+      run: |
+        set -euo pipefail
+        if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+          echo "Not a pull_request event — skipping PR comment."
+          exit 0
+        fi
+        PR_NUMBER=$(jq -r '.pull_request.number' "${GITHUB_EVENT_PATH}")
+        MARKER='<!-- dograpper-drift -->'
+        COMMENT_ID=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+          --paginate \
+          --jq "[.[] | select(.body | startswith(\"${MARKER}\"))][0].id // empty")
+        if [ -n "${COMMENT_ID}" ]; then
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" \
+            -F "body=@${REPORT}" --silent
+          echo "Updated drift comment ${COMMENT_ID} on PR #${PR_NUMBER}."
+        else
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            -F "body=@${REPORT}" --silent
+          echo "Posted drift comment on PR #${PR_NUMBER}."
+        fi
+
+    - name: Enforce fail mode
+      if: ${{ inputs.mode == 'fail' }}
+      shell: bash
+      env:
+        DRIFT: ${{ steps.drift.outputs.drift }}
+      run: |
+        set -euo pipefail
+        if [ "${DRIFT}" = "true" ]; then
+          echo "::error::Context drift detected and mode=fail."
+          exit 1
+        fi
+        echo "No drift — nothing to enforce."
