@@ -89,13 +89,11 @@ def test_order_files_by_queries_deterministic():
 
 
 def test_order_files_by_queries_tiebreak_by_doc_id():
+    # n=2 is below MIN_DOCS_FOR_DF_FILTER, so "widgets" being in both
+    # docs does not disqualify it here.
     texts = {
         "b.html": "identical content about widgets",
         "a.html": "identical content about widgets",
-        # Filler docs keep df("widgets") at half the corpus, below the
-        # common-term cutoff.
-        "c.html": "unrelated filler text one",
-        "d.html": "unrelated filler text two",
     }
     result = order_files_by_queries(list(texts.keys()), texts, ["widgets"])
     assert result.assignments[0].files == ["a.html", "b.html"]
@@ -129,14 +127,16 @@ def test_order_files_by_queries_common_terms_carry_no_signal():
         "b.html": "the guide covers testing steps",
         "c.html": "the guide covers deployment steps",
         "d.html": "the guide covers configuration steps",
+        "e.html": "the guide covers upgrade steps",
     }
-    # Every query term appears in all 4 docs (df ratio 1.0 > 0.5):
+    # Every query term appears in all 5 docs (df ratio 1.0 > 0.5):
     # no co-location signal, so nothing may be assigned.
     result = order_files_by_queries(
         list(texts.keys()), texts, ["the guide steps"])
     assert result.assignments[0].files == []
     assert result.assignments[0].total_hits == 0
-    assert result.unmatched_files == ["a.html", "b.html", "c.html", "d.html"]
+    assert result.unmatched_files == [
+        "a.html", "b.html", "c.html", "d.html", "e.html"]
     assert result.matched_count == 0
 
 
@@ -146,14 +146,29 @@ def test_order_files_by_queries_mixed_query_uses_discriminative_terms():
         "b.html": "how to configure the settings panel",
         "c.html": "how to deploy the application stack",
         "d.html": "how to test the release branch",
+        "e.html": "how to monitor the running service",
     }
     # "how"/"to"/"the" are in every doc (dropped); "frobnicate" only in
     # a.html — the query must assign via its discriminative term alone.
     result = order_files_by_queries(
         list(texts.keys()), texts, ["how do I frobnicate"])
     assert result.assignments[0].files == ["a.html"]
-    assert result.unmatched_files == ["b.html", "c.html", "d.html"]
+    assert result.unmatched_files == ["b.html", "c.html", "d.html", "e.html"]
     # Determinism holds with the filter active.
     again = order_files_by_queries(
         list(reversed(sorted(texts.keys()))), texts, ["how do I frobnicate"])
     assert again.ordered_paths == result.ordered_paths
+
+
+def test_order_files_by_queries_small_corpus_skips_df_filter():
+    # Delta subsets are often 1-2 files where every meaningful term is
+    # "ubiquitous" by construction; below the floor the filter must not
+    # discard exact-content queries.
+    texts = {
+        "a.html": "delta changed page about widgets",
+        "b.html": "another delta changed page about widgets",
+    }
+    result = order_files_by_queries(list(texts.keys()), texts, ["widgets"])
+    assert result.assignments[0].files == ["a.html", "b.html"]
+    assert result.assignments[0].total_hits == 2
+    assert result.unmatched_files == []
