@@ -759,5 +759,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     # 12. Readiness report terminal summary (after the normal pack summary)
     if report_path is not None:
-        from ..utils.readiness_report import format_terminal_report
-        click.echo(format_terminal_report(readiness_scores, report_path))
+        from ..utils.readiness_report import GRADE_COLORS, format_terminal_report
+        for grade, text in format_terminal_report(readiness_scores, report_path):
+            if grade is None:
+                click.echo(text)
+            else:
+                badge = click.style(f"[{grade}]", fg=GRADE_COLORS[grade], bold=True)
+                click.echo(f"  {badge} {text}")

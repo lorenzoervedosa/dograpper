@@ -3,7 +3,6 @@ HTML report generation and colorized terminal summary."""
 
 import json
 import os
-import re
 import tempfile
 
 from click.testing import CliRunner
@@ -16,10 +15,6 @@ from dograpper.utils.readiness_report import (
     generate_html_report,
 )
 from dograpper.utils.scorer import BoundaryIssue, ChunkScore
-
-
-def _strip_ansi(text):
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 def _score(chunk_id, score, grade, noise_ratio=0.1, boundary=True, depth=2, words=100):
@@ -183,48 +178,52 @@ class TestGenerateHtmlReport:
 # ---------------------------------------------------------------------------
 
 class TestFormatTerminalReport:
-    def test_one_line_per_chunk_worst_first(self):
+    def test_one_row_per_chunk_worst_first(self):
         scores = [
             _score("docs_chunk_01", 0.90, "A", noise_ratio=0.05),
             _score("docs_chunk_02", 0.30, "C", noise_ratio=0.60, boundary=False, depth=0),
         ]
-        out = _strip_ansi(format_terminal_report(scores, "/tmp/out/readiness-report.html"))
-        chunk_lines = [l for l in out.split("\n") if "docs_chunk_" in l]
-        assert len(chunk_lines) == 2
-        assert "docs_chunk_02" in chunk_lines[0]
-        assert "docs_chunk_01" in chunk_lines[1]
+        rows = format_terminal_report(scores, "/tmp/out/readiness-report.html")
+        chunk_rows = [(g, t) for g, t in rows if g is not None]
+        assert len(chunk_rows) == 2
+        assert chunk_rows[0][0] == "C"
+        assert "docs_chunk_02" in chunk_rows[0][1]
+        assert chunk_rows[1][0] == "A"
+        assert "docs_chunk_01" in chunk_rows[1][1]
 
-    def test_contains_grade_letters(self):
+    def test_header_and_path_rows_have_no_grade(self):
+        scores = [_score("docs_chunk_01", 0.90, "A")]
+        rows = format_terminal_report(scores, "/tmp/out/readiness-report.html")
+        assert (None, "Readiness report (worst first):") in rows
+        assert rows[-1][0] is None
+        assert "/tmp/out/readiness-report.html" in rows[-1][1]
+
+    def test_rows_are_unstyled(self):
+        # utils stays framework-free: styling is the caller's job
         scores = [
             _score("docs_chunk_01", 0.90, "A"),
             _score("docs_chunk_02", 0.30, "C", boundary=False, depth=0),
         ]
-        out = _strip_ansi(format_terminal_report(scores, "report.html"))
-        assert " A " in out or "[A]" in out
-        assert " C " in out or "[C]" in out
-
-    def test_contains_report_path(self):
-        scores = [_score("docs_chunk_01", 0.90, "A")]
-        out = _strip_ansi(format_terminal_report(scores, "/tmp/out/readiness-report.html"))
-        assert "/tmp/out/readiness-report.html" in out
+        rows = format_terminal_report(scores, "r.html")
+        assert all("\x1b" not in text for _, text in rows)
 
     def test_dominant_penalty_noise(self):
         scores = [_score("docs_chunk_01", 0.50, "B", noise_ratio=0.9,
                          boundary=True, depth=2)]
-        out = _strip_ansi(format_terminal_report(scores, "r.html"))
-        assert "noise" in out
+        rows = format_terminal_report(scores, "r.html")
+        assert any("noise" in t for g, t in rows if g is not None)
 
     def test_dominant_penalty_boundary(self):
         scores = [_score("docs_chunk_01", 0.60, "B", noise_ratio=0.1,
                          boundary=False, depth=2)]
-        out = _strip_ansi(format_terminal_report(scores, "r.html"))
-        assert "boundary" in out
+        rows = format_terminal_report(scores, "r.html")
+        assert any("boundary" in t for g, t in rows if g is not None)
 
     def test_dominant_penalty_context(self):
         scores = [_score("docs_chunk_01", 0.66, "B", noise_ratio=0.1,
                          boundary=True, depth=0)]
-        out = _strip_ansi(format_terminal_report(scores, "r.html"))
-        assert "context" in out
+        rows = format_terminal_report(scores, "r.html")
+        assert any("context" in t for g, t in rows if g is not None)
 
 
 # ---------------------------------------------------------------------------

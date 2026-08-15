@@ -1,15 +1,13 @@
 """Readiness report generation for the pack command (--report).
 
 Receives per-chunk scores and per-page extraction data and produces a
-self-contained HTML report plus a colorized terminal summary. Pure
-string builders: no I/O and no click.echo inside generation.
+self-contained HTML report plus terminal summary rows. Pure string
+builders: no I/O, no click — styling is applied by the command layer.
 """
 
 import html as html_mod
 from dataclasses import dataclass, field
 from typing import Dict, List
-
-import click
 
 from .scorer import penalty_breakdown
 
@@ -206,7 +204,8 @@ def generate_html_report(
     return "\n".join(out)
 
 
-_GRADE_COLORS = {"A": "green", "B": "yellow", "C": "red"}
+# Terminal color per grade (plain color names; the caller applies styling)
+GRADE_COLORS = {"A": "green", "B": "yellow", "C": "red"}
 
 
 def _dominant_penalty(s) -> str:
@@ -216,14 +215,18 @@ def _dominant_penalty(s) -> str:
     return label if value > 0 else "none"
 
 
-def format_terminal_report(scores: list, report_path: str) -> str:
-    """Compact colorized per-chunk summary (worst-first) for the terminal."""
-    lines = []
-    lines.append("")
-    lines.append("Readiness report (worst first):")
+def format_terminal_report(scores: list, report_path: str) -> List[tuple]:
+    """Rows for the compact terminal summary (worst-first).
+
+    Returns (grade, text) tuples; grade is None for header/footer rows.
+    The caller styles chunk rows (badge + color) — no styling here so
+    utils stays framework-free.
+    """
+    rows = []
+    rows.append((None, ""))
+    rows.append((None, "Readiness report (worst first):"))
     for s in _sort_worst_first(scores):
-        badge = click.style(f"[{s.grade}]", fg=_GRADE_COLORS[s.grade], bold=True)
-        lines.append(f"  {badge} {s.chunk_id}  score {s.score:.2f}  "
-                     f"worst penalty: {_dominant_penalty(s)}")
-    lines.append(f"  Report: {report_path}")
-    return "\n".join(lines)
+        rows.append((s.grade, f"{s.chunk_id}  score {s.score:.2f}  "
+                              f"worst penalty: {_dominant_penalty(s)}"))
+    rows.append((None, f"  Report: {report_path}"))
+    return rows
