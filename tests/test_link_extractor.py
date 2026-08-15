@@ -196,6 +196,39 @@ def test_unresolved_links_not_annotated():
     assert result == text
 
 
+def test_substring_link_text_does_not_corrupt_word():
+    """Link text that is a substring of an unrelated word is not annotated
+    mid-word (e.g. "Install" must not match inside "Installation")."""
+    text = "Installation Widgetize ships as a single self contained binary."
+    links = [LinkRef("a.html", "install.html", "", "Install")]
+    file_to_chunk = {"install.html": "docs_chunk_01"}
+
+    result = annotate_cross_refs(text, links, file_to_chunk)
+    assert "Install [-> docs_chunk_01]ation" not in result
+    assert "Installation" in result
+    assert "[-> docs_chunk_01]" not in result
+
+
+def test_word_boundary_link_text_still_annotated():
+    """A whole-word occurrence of the link text is still annotated."""
+    text = "Install the CLI before running any command."
+    links = [LinkRef("a.html", "install.html", "", "Install")]
+    file_to_chunk = {"install.html": "docs_chunk_01"}
+
+    result = annotate_cross_refs(text, links, file_to_chunk)
+    assert "Install [-> docs_chunk_01]" in result
+
+
+def test_regex_special_chars_in_link_text_escaped():
+    """Link text containing regex-special characters is treated literally."""
+    text = "See C++ (advanced) for details."
+    links = [LinkRef("a.html", "cpp.html", "", "C++ (advanced)")]
+    file_to_chunk = {"cpp.html": "docs_chunk_01"}
+
+    result = annotate_cross_refs(text, links, file_to_chunk)
+    assert "C++ (advanced) [-> docs_chunk_01]" in result
+
+
 # ---------------------------------------------------------------------------
 # CLI integration tests
 # ---------------------------------------------------------------------------
