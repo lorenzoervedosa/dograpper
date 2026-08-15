@@ -256,3 +256,47 @@ def test_freshly_downloaded_corpus_still_packs(tmp_path):
     assert result.exit_code == 0
     assert "Files processed: 2" in result.output
     assert os.path.exists(os.path.join(output_dir, "docs_chunk_01.md"))
+
+
+def test_sync_packs_on_the_first_run_and_no_ops_on_the_second(tmp_path, monkeypatch):
+    """`sync` always invokes pack with --delta, so the gate must not misfire.
+
+    Download rewrites its manifest after mirroring; if the gate read that
+    file it would report "nothing changed" on the very run that has to pack,
+    and sync would never produce chunks.
+    """
+    from unittest.mock import patch
+
+    from dograpper.cli import cli
+
+    docs = str(tmp_path / "docs")
+    chunks = str(tmp_path / "chunks")
+    monkeypatch.chdir(tmp_path)  # sync's default --manifest is cwd-relative
+
+    def _fake_download(url, output, depth, headless, delay, include_extensions,
+                       manifest):
+        site = os.path.join(output, "site.com")
+        os.makedirs(site, exist_ok=True)
+        for name in ("a.html", "b.html"):
+            path = os.path.join(site, name)
+            if not os.path.exists(path):
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(_page(name, f"body for {name}"))
+        save_manifest(build_manifest(url, output), manifest)
+
+    runner = CliRunner()
+    with patch("dograpper.commands.download.download.callback",
+               side_effect=_fake_download):
+        first = runner.invoke(cli, ["sync", "https://site.com/", "-o", docs,
+                                    "--chunks-dir", chunks],
+                              catch_exceptions=False)
+        assert first.exit_code == 0
+        assert os.path.exists(os.path.join(chunks, "docs_chunk_01.md"))
+
+        second = runner.invoke(cli, ["sync", "https://site.com/", "-o", docs,
+                                     "--chunks-dir", chunks],
+                               catch_exceptions=False)
+        assert second.exit_code == 0
+        assert "no files changed" in second.output.lower()
+        # The no-op must not remove what the first run produced.
+        assert os.path.exists(os.path.join(chunks, "docs_chunk_01.md"))
