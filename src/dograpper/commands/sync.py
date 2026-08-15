@@ -5,6 +5,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# sync's own option names forwarded to each stage. Used to detect which of
+# them the user set explicitly, so precedence survives ctx.invoke (see
+# lib/config_loader.py and issue #32).
+_DOWNLOAD_PASSTHROUGH = ('depth', 'headless', 'delay', 'include_extensions')
+_PACK_PASSTHROUGH = ('max_words_per_chunk', 'max_chunks', 'strategy', 'format',
+                     'bundle', 'context_header', 'cross_refs', 'score',
+                     'dedup', 'show_tokens')
+
+
+def _explicit_params(ctx: click.Context, names) -> set:
+    explicit = set()
+    for name in names:
+        source = ctx.get_parameter_source(name)
+        if source and source.name in ('COMMANDLINE', 'ENVIRONMENT'):
+            explicit.add(name)
+    return explicit
+
 
 @click.command(
     epilog=(
@@ -62,8 +79,12 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
     from .pack import pack
 
     chunks_output = chunks_dir or f"{output}/chunks"
+    ctx.ensure_object(dict)
 
     click.echo("=== Step 1: Download ===")
+    # 'output' is always user-derived on sync (-o is required)
+    ctx.obj['CLI_EXPLICIT_PARAMS'] = (
+        _explicit_params(ctx, _DOWNLOAD_PASSTHROUGH) | {'output'})
     ctx.invoke(
         download,
         url=url,
@@ -75,6 +96,10 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
     )
 
     click.echo("\n=== Step 2: Pack (delta) ===")
+    # 'output' comes from --chunks-dir/-o and 'delta' is sync's contract:
+    # both always win over config
+    ctx.obj['CLI_EXPLICIT_PARAMS'] = (
+        _explicit_params(ctx, _PACK_PASSTHROUGH) | {'output', 'delta'})
     ctx.invoke(
         pack,
         input_dir=output,
@@ -91,3 +116,4 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
         show_tokens=show_tokens,
         delta=True,
     )
+    ctx.obj.pop('CLI_EXPLICIT_PARAMS', None)
