@@ -176,6 +176,9 @@ dograpper sync <url> -o ./docs
 # Incremental download + automatic delta pack
 ```
 
+For a ready-made CI setup — scheduled refresh, PR drift report and
+auto-commit — see the [GitHub Action](#github-action).
+
 ### Air-gapped environments
 Zero outbound calls after the initial download. No telemetry. Auditable
 manifest. Ideal for corporate RAG and regulated environments.
@@ -597,6 +600,45 @@ dograpper sync https://docs.rust-lang.org -o ./rust-docs --chunks-dir ./out/rust
 dograpper sync https://react.dev -o ./react-docs --headless --delay 500
 ```
 
+### `dograpper drift`
+
+Compare two `llm-readiness.json` snapshots (produced by `pack --score`)
+and render a human-readable **context drift report**: chunks added,
+modified (grade/score transitions) and removed, plus the exact
+source-file lists from `delta_manifest.json` when available. Built for
+CI — it powers the [GitHub Action](#github-action).
+
+```bash
+# Keep the previous snapshot, fully re-pack, then diff
+cp ./chunks/llm-readiness.json /tmp/old-readiness.json
+dograpper pack ./docs -o ./chunks --score
+dograpper drift --new ./chunks/llm-readiness.json --old /tmp/old-readiness.json
+```
+
+| Option | Alias | Default | Description |
+|---|---|---|---|
+| `--new` | — | *required* | Freshly generated `llm-readiness.json` |
+| `--old` | — | *(none)* | Previous snapshot. Omitted = first-run mode: every chunk reported as added |
+| `--delta-manifest` | — | *(none)* | `delta_manifest.json` from `pack --delta`. A missing file is tolerated (`pack --delta` does not write it when nothing changed) |
+| `--format` | — | `markdown` | `markdown` \| `text` |
+| `--output` | `-o` | *(stdout)* | Write the report to a file instead of stdout |
+| `--fail-on-drift` | — | `false` | Exit 1 when any drift exists (first run counts as drift) |
+
+The markdown report always starts with the `<!-- dograpper-drift -->`
+marker line, which the GitHub Action uses to update its PR comment in
+place instead of posting a new one.
+
+**Caveats**: chunk ids (`docs_chunk_NN`) are positional and can be
+renumbered by upstream content changes, so chunk-level drift is
+best-effort; the source-file lists from `delta_manifest.json` are exact.
+For a meaningful snapshot diff, generate both snapshots with a **full**
+`pack --score`: `pack --delta --score` rewrites `llm-readiness.json`
+with only the re-chunked files, renumbered from 01. `--delta-manifest`
+is meant for local use right after a `pack --delta` run — the manifest
+on disk reflects the *last* delta run and can be stale (or absent) if
+nothing changed; the GitHub Action does not use it and derives source
+drift from git instead.
+
 ### `dograpper init`
 
 Onboarding wizard: generates a ready-to-use `.dograpper.json` tuned for
@@ -672,6 +714,89 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | `--config` | — | `.dograpper.json` | Configuration file |
 
 `--verbose` and `--quiet` are mutually exclusive.
+
+---
+
+## GitHub Action
+
+dograpper ships a composite GitHub Action (`action.yml` at the repo
+root) that keeps your packed context fresh from CI: it downloads the
+docs (`dograpper download`, when a `url` is given), always runs a
+**full** `pack --score`, computes the drift against the previous
+`llm-readiness.json` with [`dograpper drift`](#dograpper-drift), and
+posts/updates a single drift report comment on the pull request. The
+comment's source-file section comes from `git status` over `input-dir`
+— exact lists, since the docs are versioned.
+
+The action deliberately never runs `pack --delta`: a delta pack rewrites
+`llm-readiness.json` with only the re-chunked files (renumbered from
+01), which would corrupt the snapshot diff from the second run onward
+(see [ADR-0007](docs/adr/0007-freshness-action-and-drift-command.md)).
+Incrementality lives at the download layer (wget timestamping +
+manifest); a full pack over unchanged sources is deterministic, so no
+upstream change means an empty drift.
+
+It assumes **ubuntu runners** (python3, wget, `jq` and the `gh` CLI are
+preinstalled) and that the docs mirror, the chunks directory (with
+`llm-readiness.json`) and the repo-root `.dograpper-manifest.json`
+(written relative to the working directory, not inside `chunks-dir`)
+are **versioned in your repo**: that is what carries state across
+stateless CI runners (see
+[Incremental maintenance](#incremental-maintenance-cicd)).
+
+```yaml
+name: Context freshness
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly refresh
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Refresh context and report drift
+        id: freshness
+        uses: your-user/dograpper@v1 # pin a tag (or a commit SHA), not a branch
+        with:
+          url: https://docs.example.com
+          input-dir: ./docs
+          chunks-dir: ./chunks
+          pack-args: "--context-header"
+          mode: warn # or `fail` to break the build on drift
+
+      - name: Commit refreshed pack
+        if: github.event_name == 'schedule' && steps.freshness.outputs.drift == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ./docs ./chunks .dograpper-manifest.json
+          git diff --cached --quiet || git commit -m "chore: refresh packed context"
+          git push
+```
+
+Inputs:
+
+| Input | Default | Description |
+|---|---|---|
+| `url` | *(empty)* | Docs site URL. Set → `dograpper download` before packing; empty → only re-packs `input-dir` |
+| `input-dir` | `./docs` | Downloaded docs directory (download output / pack input) |
+| `chunks-dir` | `./chunks` | Packed chunks directory (versioned in the repo) |
+| `pack-args` | *(empty)* | Extra flags appended verbatim to the pack command |
+| `mode` | `warn` | `warn`: `::warning::` annotation on drift; `fail`: fail the job on drift (after posting the comment) |
+| `comment` | `true` | Post/update the PR drift comment (`pull_request` events only) |
+| `github-token` | `${{ github.token }}` | Token used by the `gh` CLI to post the comment |
+
+Outputs: `drift` (`true`/`false`) and `report-path` (the markdown
+report). The PR comment is upserted by matching the
+`<!-- dograpper-drift -->` marker, so re-runs edit the same comment.
 
 ---
 

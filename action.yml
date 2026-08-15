@@ -1,0 +1,239 @@
+name: "dograpper Context Freshness"
+description: >-
+  Keep packed LLM context fresh: download and fully re-pack your docs with
+  dograpper, compute context drift against the previous readiness snapshot,
+  and post or update a drift report comment on the pull request.
+branding:
+  icon: "refresh-cw"
+  color: "orange"
+
+# Assumes ubuntu runners: python3, wget, jq and the gh CLI are preinstalled.
+# The docs mirror (input-dir), the chunks dir (llm-readiness.json included)
+# and the repo-root .dograpper-manifest.json (download writes it relative to
+# the working directory, NOT inside chunks-dir) must be versioned in the
+# user's repo — that is what carries state across stateless CI runners.
+#
+# The refresh is always a FULL pack, never `pack --delta`: a delta pack
+# writes a partial llm-readiness.json (only the re-chunked files, renumbered
+# from 01) over the full snapshot, which would corrupt the drift diff from
+# the second run onward (see ADR-0007). Incrementality lives at the download
+# layer (wget timestamping + manifest); a full pack over unchanged sources
+# is deterministic, so no upstream change means an empty drift.
+
+inputs:
+  url:
+    description: >-
+      Docs site URL. When set, runs `dograpper download <url>` before
+      packing; when empty, only re-packs input-dir.
+    required: false
+    default: ""
+  input-dir:
+    description: "Directory holding the downloaded docs (download output / pack input)."
+    required: false
+    default: "./docs"
+  chunks-dir:
+    description: "Directory holding the packed chunks (versioned in the repo)."
+    required: false
+    default: "./chunks"
+  pack-args:
+    description: "Extra flags appended verbatim to the pack command."
+    required: false
+    default: ""
+  mode:
+    description: >-
+      warn: emit a ::warning:: annotation when drift is found.
+      fail: fail the job when drift is found (after posting the comment).
+    required: false
+    default: "warn"
+  comment:
+    description: "Post/update the PR drift comment (pull_request events only)."
+    required: false
+    default: "true"
+  github-token:
+    description: "Token used by the gh CLI to post the PR comment."
+    required: false
+    default: "${{ github.token }}"
+
+outputs:
+  drift:
+    description: "true when any context drift was detected (first run counts)."
+    value: ${{ steps.drift.outputs.drift }}
+  report-path:
+    description: "Path to the generated markdown drift report."
+    value: ${{ steps.drift.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+      run: |
+        set -euo pipefail
+        if [ "${MODE}" != "warn" ] && [ "${MODE}" != "fail" ]; then
+          echo "::error::Invalid mode '${MODE}' (expected 'warn' or 'fail')."
+          exit 1
+        fi
+
+    - name: Prepare workspace
+      id: workspace
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Per-invocation temp dir: running the action twice in one job must
+        # not reuse a stale old-readiness.json or drift.md.
+        WORK_DIR="$(mktemp -d "${RUNNER_TEMP}/dograpper-freshness.XXXXXX")"
+        echo "work-dir=${WORK_DIR}" >> "${GITHUB_OUTPUT}"
+
+    - name: Install dograpper
+      shell: bash
+      env:
+        WORK_DIR: ${{ steps.workspace.outputs.work-dir }}
+      run: |
+        set -euo pipefail
+        # Dedicated venv: runner system pythons can be externally managed
+        # (PEP 668) and abort a plain `pip install`.
+        python3 -m venv "${WORK_DIR}/venv"
+        "${WORK_DIR}/venv/bin/pip" install --quiet "${GITHUB_ACTION_PATH}"
+        echo "${WORK_DIR}/venv/bin" >> "${GITHUB_PATH}"
+
+    - name: Preserve previous readiness snapshot
+      shell: bash
+      env:
+        CHUNKS_DIR: ${{ inputs.chunks-dir }}
+        WORK_DIR: ${{ steps.workspace.outputs.work-dir }}
+      run: |
+        set -euo pipefail
+        if [ -f "${CHUNKS_DIR}/llm-readiness.json" ]; then
+          cp "${CHUNKS_DIR}/llm-readiness.json" "${WORK_DIR}/old-readiness.json"
+          echo "Previous readiness snapshot preserved."
+        else
+          echo "No previous readiness snapshot (first run)."
+        fi
+
+    - name: Refresh docs and pack
+      shell: bash
+      env:
+        URL: ${{ inputs.url }}
+        INPUT_DIR: ${{ inputs.input-dir }}
+        CHUNKS_DIR: ${{ inputs.chunks-dir }}
+        PACK_ARGS: ${{ inputs.pack-args }}
+      run: |
+        set -euo pipefail
+        if [ -n "${URL}" ]; then
+          dograpper download "${URL}" -o "${INPUT_DIR}"
+        fi
+        # PACK_ARGS is split on whitespace into individual flags (verbatim
+        # append) while globbing is disabled, so a `*` in a flag value is
+        # never expanded against the workspace.
+        set -f
+        read -ra EXTRA_ARGS <<< "${PACK_ARGS}"
+        # Always a FULL pack — see the header comment for why not --delta.
+        dograpper pack "${INPUT_DIR}" -o "${CHUNKS_DIR}" --score "${EXTRA_ARGS[@]}"
+        set +f
+
+    - name: Compute drift
+      id: drift
+      shell: bash
+      env:
+        CHUNKS_DIR: ${{ inputs.chunks-dir }}
+        INPUT_DIR: ${{ inputs.input-dir }}
+        MODE: ${{ inputs.mode }}
+        WORK_DIR: ${{ steps.workspace.outputs.work-dir }}
+      run: |
+        set -euo pipefail
+        REPORT="${WORK_DIR}/drift.md"
+        ARGS=(--new "${CHUNKS_DIR}/llm-readiness.json"
+              --format markdown --output "${REPORT}"
+              --fail-on-drift)
+        if [ -f "${WORK_DIR}/old-readiness.json" ]; then
+          ARGS+=(--old "${WORK_DIR}/old-readiness.json")
+        fi
+        EXIT_CODE=0
+        dograpper drift "${ARGS[@]}" || EXIT_CODE=$?
+        # --fail-on-drift exits 1 on drift AFTER writing the report; a
+        # missing report means a real error, which must fail the job here.
+        if [ ! -f "${REPORT}" ]; then
+          echo "::error::dograpper drift failed (exit ${EXIT_CODE})"
+          exit "${EXIT_CODE}"
+        fi
+        # Source-file drift comes from git (the docs are versioned): exact
+        # file lists, unlike chunk-level drift which is best-effort.
+        {
+          echo ""
+          echo "### Source file drift (git)"
+          echo ""
+          CHANGES="$(git status --porcelain -- "${INPUT_DIR}")"
+          if [ -z "${CHANGES}" ]; then
+            echo "_No source file changes._"
+          else
+            echo '```'
+            echo "${CHANGES}"
+            echo '```'
+          fi
+        } >> "${REPORT}"
+        if [ "${EXIT_CODE}" -ne 0 ]; then
+          DRIFT=true
+        else
+          DRIFT=false
+        fi
+        echo "drift=${DRIFT}" >> "${GITHUB_OUTPUT}"
+        echo "report-path=${REPORT}" >> "${GITHUB_OUTPUT}"
+        if [ "${DRIFT}" = "true" ] && [ "${MODE}" != "fail" ]; then
+          echo "::warning::Context drift detected — see the drift report comment."
+        fi
+
+    - name: Post or update PR comment
+      if: ${{ inputs.comment == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPORT: ${{ steps.drift.outputs.report-path }}
+      run: |
+        set -euo pipefail
+        if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+          echo "Not a pull_request event — skipping PR comment."
+          exit 0
+        fi
+        PR_NUMBER=$(jq -r '.pull_request.number' "${GITHUB_EVENT_PATH}")
+        MARKER='<!-- dograpper-drift -->'
+        # --paginate applies --jq per page, so take the first hit only. The
+        # listing is best-effort: on failure fall through to a POST attempt.
+        COMMENT_ID=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+          --paginate \
+          --jq "[.[] | select(.body | startswith(\"${MARKER}\"))][0].id // empty" \
+          | head -n1 || true)
+        # Posting is best-effort: fork PRs get a read-only GITHUB_TOKEN and
+        # a 403 here must not mask the drift result (mode=fail is still
+        # enforced by the next step).
+        if [ -n "${COMMENT_ID}" ]; then
+          if gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" \
+              -F "body=@${REPORT}" --silent; then
+            echo "Updated drift comment ${COMMENT_ID} on PR #${PR_NUMBER}."
+          else
+            echo "::warning::Could not update the drift comment (read-only token? fork PRs cannot write comments)."
+          fi
+        else
+          if gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -F "body=@${REPORT}" --silent; then
+            echo "Posted drift comment on PR #${PR_NUMBER}."
+          else
+            echo "::warning::Could not post the drift comment (read-only token? fork PRs cannot write comments)."
+          fi
+        fi
+
+    - name: Enforce fail mode
+      if: ${{ inputs.mode == 'fail' }}
+      shell: bash
+      env:
+        DRIFT: ${{ steps.drift.outputs.drift }}
+      run: |
+        set -euo pipefail
+        if [ "${DRIFT}" = "true" ]; then
+          echo "::error::Context drift detected and mode=fail."
+          exit 1
+        fi
+        echo "No drift — nothing to enforce."

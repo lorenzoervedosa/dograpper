@@ -27,6 +27,7 @@ src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
 │   ├── download.py         # Cascade 4-layer: llms.txt → sitemap → wget --mirror → Playwright bounded
+│   ├── drift.py            # Drift de contexto entre dois llm-readiness.json (+ delta_manifest.json opcional)
 │   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
@@ -41,6 +42,7 @@ src/dograpper/
 │   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
 │   ├── playwright_crawl.py # Crawler headless; hidratação bounded (domcontentloaded 10s + a[href] 5s + 500ms); aceita seed_urls
 │   ├── query_packer.py     # load_queries() + order_files_by_queries() — ordenação gulosa por afinidade BM25 (pack --for-queries)
+│   ├── readiness_diff.py   # compare_readiness() + render_markdown()/render_text() — diff de snapshots llm-readiness.json, stdlib-only
 │   ├── sitemap_parser.py   # fetch_sitemap() — sitemap.xml + sitemapindex recursivo, gzip, same-netloc guard (SITEMAP_NS)
 │   ├── spa_detector.py     # is_spa() via html.parser; small-sample branch (N<5) + errors='replace' encoding
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth
@@ -59,6 +61,7 @@ src/dograpper/
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
     └── word_counter.py     # count_words() e count_words_file()
 tests/
+├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
 ├── test_cli_smoke.py       # Help, flags obrigatórias, mutual exclusion
@@ -69,6 +72,7 @@ tests/
 ├── test_delta_manifest.py  # Delta pack: reprocessamento incremental via manifest
 ├── test_download.py        # wget mock, SPA detector, manifest roundtrip, UA/headers, run_wget_urls, bounded hydration
 ├── test_download_cascade.py # Cascade 4-layer: layer-1/2/3/4 wins, below-threshold fall-through, headless, post-wget-i SPA, observability
+├── test_drift.py           # Drift: compare_readiness, renders markdown/text (literais), CLI (first run, fail-on-drift, --output)
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
@@ -86,6 +90,7 @@ tests/
 ├── test_sync_precedence.py # Precedência de config através do ctx.invoke do sync (CLI explícita > JSON > defaults)
 ├── test_token_counter.py   # Token counting: fallback, tiktoken, format_summary, CLI integration
 └── test_url_filter.py      # filter_urls: same-netloc, path-prefix canonicalizado, depth=0 unlimited, depth bounded, dedup
+action.yml                  # Composite GitHub Action: download + full pack --score → drift → comentário de PR (nunca pack --delta; ver ADR-0007)
 ```
 
 ## Como rodar localmente
@@ -130,6 +135,8 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_context_v1.py` | Antes de alterar o formato `dograpper-context-v1` em `utils/heading_extractor.py` |
 | `tests/test_jsonl_format.py` | Antes de alterar a escrita JSONL em `lib/chunker.py` |
 | `tests/test_delta_manifest.py` | Antes de alterar `lib/manifest.py` ou lógica de `--delta` |
+| `tests/test_drift.py` | Antes de alterar `lib/readiness_diff.py` ou `commands/drift.py` (formatos markdown/text são literais testados) |
+| `tests/test_action_yml.py` | Antes de alterar `action.yml` (inputs/outputs/marcador exigidos) |
 | `tests/test_bundle_notebooklm.py` | Antes de alterar lógica de `--bundle` |
 | `tests/test_boundary_chunking.py` | Antes de alterar `_split_text_by_words` |
 | `docs/schema-v1.md` | Referência do schema `dograpper-context-v1` — manter sincronizado com `heading_extractor.py` e `chunker.py` |
@@ -249,6 +256,9 @@ uv run dograpper serve ./chunks
 
 # Sync (download + pack delta)
 uv run dograpper sync https://click.palletsprojects.com/en/stable/ -o ./test-docs
+
+# Drift entre dois snapshots llm-readiness.json (markdown com marcador p/ PR comment)
+uv run dograpper drift --new ./chunks/llm-readiness.json --old ./old-readiness.json --delta-manifest ./chunks/delta_manifest.json
 
 # Gerar .dograpper.json por alvo (wizard interativo; --target + --yes para scripts)
 uv run dograpper init --target notebooklm --yes
