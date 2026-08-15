@@ -11,9 +11,20 @@ Era preciso (1) um mecanismo de CI que re-empacote periodicamente e
 mostre **o que mudou no contexto** em cada PR, e (2) uma forma testável
 de comparar dois snapshots de `llm-readiness.json`.
 
-Runners de CI são stateless, então `pack --delta` só é incremental se o
-estado (chunks + `.dograpper-manifest.json` + `llm-readiness.json`)
-sobreviver entre execuções.
+Runners de CI são stateless, então qualquer incrementalidade exige que o
+estado (mirror de docs, chunks, `llm-readiness.json` e o
+`.dograpper-manifest.json` da raiz do repo — ele é resolvido relativo ao
+diretório de trabalho, não dentro de `chunks-dir`) sobreviva entre
+execuções, versionado no repositório do usuário.
+
+**Limitação conhecida de `pack --delta`** (reproduzida empiricamente em
+review; issue própria a ser aberta): `pack --delta --score` escreve um
+`llm-readiness.json` PARCIAL — apenas os arquivos re-chunkados,
+renumerados a partir de 01 — por cima do snapshot completo. Um diff de
+snapshots após um delta pack compara completo-vs-parcial e é lixo a
+partir da segunda execução; o snapshot versionado degrada
+permanentemente. Como `sync` sempre invoca pack com `delta=True`, os
+dois caminhos herdam o problema.
 
 ## Decisão
 
@@ -28,13 +39,27 @@ sobreviver entre execuções.
    `<!-- dograpper-drift -->`, usado para upsert do comentário de PR.
 2. **Composite Action** (`action.yml` na raiz) em vez de Docker/JS
    action: bash puro sobre runners ubuntu (python3, wget, `gh` e `jq`
-   pré-instalados), instala o dograpper via
-   `pip install "${GITHUB_ACTION_PATH}"` no ref da própria action —
-   simples de revisar e sem build/publicação de imagem.
-3. **Pack versionado no repo do usuário** é a premissa de design: é o
-   que dá significado ao `--delta` e ao diff de drift em runners
-   stateless. O snapshot anterior é copiado para `$RUNNER_TEMP` antes do
+   pré-instalados), instala o dograpper num venv próprio (runners com
+   python gerenciado — PEP 668 — abortam `pip install` direto) a partir
+   de `"${GITHUB_ACTION_PATH}"`, o ref da própria action — simples de
+   revisar e sem build/publicação de imagem.
+3. **A action NUNCA usa `pack --delta` (nem `sync`)** por causa da
+   limitação acima: quando há `url`, roda `dograpper download` (a
+   incrementalidade mora na camada de download: wget timestamping +
+   manifest) e em seguida SEMPRE um `pack --score` completo. Full pack
+   sobre fontes inalteradas é determinístico: sem mudança upstream, o
+   drift é vazio. O snapshot anterior é copiado para um diretório
+   temporário por invocação (`mktemp -d` sob `$RUNNER_TEMP`) antes do
    re-pack e usado como `--old`.
+4. **Drift de arquivos-fonte via git, não via `delta_manifest.json`**:
+   como os docs são versionados, a action gera a seção de source drift
+   do comentário com `git status --porcelain -- <input-dir>` (listas
+   exatas) e a anexa ao report. A flag `--delta-manifest` do CLI
+   permanece para uso local logo após um `pack --delta`, com o caveat de
+   staleness documentado no README.
+5. **Pack versionado no repo do usuário** é a premissa de design: é o
+   que dá significado ao diff de drift (e ao download incremental) em
+   runners stateless.
 
 ## Consequências
 
@@ -42,7 +67,11 @@ sobreviver entre execuções.
   contexto; `mode: fail` permite travar o build quando há drift.
 - Chunk ids (`docs_chunk_NN`) são posicionais e podem ser renumerados
   por mudanças de conteúdo upstream: o drift por chunk é best-effort,
-  enquanto as listas de arquivos do `delta_manifest.json` são exatas.
+  enquanto as listas de arquivos vindas do git (na action) e do
+  `delta_manifest.json` (uso local) são exatas.
+- O custo é re-empacotar tudo a cada execução — aceitável para docs
+  (segundos) e o único caminho correto enquanto `pack --delta` escrever
+  snapshot parcial.
 - A action não tem runner nos testes: `tests/test_action_yml.py` guarda
   apenas a estrutura do `action.yml` (inputs, outputs, marcador,
   branding); a lógica de verdade testada é a do `drift`.

@@ -86,7 +86,7 @@ tests/
 ├── test_sync_precedence.py # Precedência de config através do ctx.invoke do sync (CLI explícita > JSON > defaults)
 ├── test_token_counter.py   # Token counting: fallback, tiktoken, format_summary, CLI integration
 └── test_url_filter.py      # filter_urls: same-netloc, path-prefix canonicalizado, depth=0 unlimited, depth bounded, dedup
-action.yml                  # Composite GitHub Action: sync/pack → drift → comentário de PR (frescor de contexto em CI)
+action.yml                  # Composite GitHub Action: download + full pack --score → drift → comentário de PR (nunca pack --delta; ver ADR-0007)
 ```
 
 ## Como rodar localmente
