@@ -11,6 +11,7 @@ from dograpper.utils.scorer import (
     calculate_context_depth,
     calculate_grade,
     find_boundary_issues,
+    penalty_breakdown,
     score_chunk,
 )
 from dograpper.commands.pack import pack
@@ -118,6 +119,34 @@ class TestGrade:
         score, grade = calculate_grade(0.9, False, 0)
         assert grade == "C"
         assert score < 0.5
+
+
+class TestPenaltyBreakdown:
+    def test_labels_and_values(self):
+        penalties = penalty_breakdown(0.5, True, 1)
+        assert [label for label, _ in penalties] == ["noise", "boundary", "context"]
+        values = dict(penalties)
+        assert values["noise"] == pytest.approx(0.2)
+        assert values["boundary"] == 0.0
+        assert values["context"] == pytest.approx(0.15)
+
+    def test_broken_boundary_penalty(self):
+        values = dict(penalty_breakdown(0.0, False, 2))
+        assert values["noise"] == 0.0
+        assert values["boundary"] == pytest.approx(0.3)
+        assert values["context"] == 0.0
+
+    def test_no_headings_penalty(self):
+        values = dict(penalty_breakdown(1.0, True, 0))
+        assert values["noise"] == pytest.approx(0.4)
+        assert values["context"] == pytest.approx(0.3)
+
+    def test_complements_calculate_grade(self):
+        # The breakdown and the composite score must share one weighting:
+        # score == 1 - sum(penalties), pinned with independent literals.
+        score, _ = calculate_grade(0.5, True, 1)
+        assert score == pytest.approx(0.65)
+        assert sum(v for _, v in penalty_breakdown(0.5, True, 1)) == pytest.approx(0.35)
 
 
 class TestScoreChunk:

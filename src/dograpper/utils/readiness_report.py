@@ -11,6 +11,8 @@ from typing import Dict, List
 
 import click
 
+from .scorer import penalty_breakdown
+
 REMOVED_SAMPLES_PER_PAGE = 5
 SAMPLE_MAX_CHARS = 200
 
@@ -200,17 +202,7 @@ _GRADE_COLORS = {"A": "green", "B": "yellow", "C": "red"}
 
 def _dominant_penalty(s) -> str:
     """Name of the penalty that costs the chunk the most score."""
-    if s.context_depth >= 2:
-        context_penalty = 0.0
-    elif s.context_depth == 1:
-        context_penalty = 0.15
-    else:
-        context_penalty = 0.3
-    penalties = [
-        ("noise", 0.4 * s.noise_ratio),
-        ("boundary", 0.0 if s.boundary_integrity else 0.3),
-        ("context", context_penalty),
-    ]
+    penalties = penalty_breakdown(s.noise_ratio, s.boundary_integrity, s.context_depth)
     label, value = max(penalties, key=lambda kv: kv[1])
     return label if value > 0 else "none"
 

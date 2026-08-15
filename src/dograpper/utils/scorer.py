@@ -100,6 +100,35 @@ def calculate_context_depth(headings_count: int, max_level: int) -> int:
     return 0
 
 
+# Metric weights shared by calculate_grade and penalty_breakdown —
+# the composite invariant is score == 1 - sum(penalties).
+NOISE_WEIGHT = 0.4
+BOUNDARY_WEIGHT = 0.3
+CONTEXT_WEIGHT = 0.3
+
+
+def _context_score(context_depth: int) -> float:
+    """Context sub-score: depth >= 2 = 1.0, depth == 1 = 0.5, depth == 0 = 0.0."""
+    if context_depth >= 2:
+        return 1.0
+    if context_depth == 1:
+        return 0.5
+    return 0.0
+
+
+def penalty_breakdown(noise_ratio: float, boundary_ok: bool, context_depth: int) -> List[tuple]:
+    """Score lost per metric, as (label, penalty) pairs.
+
+    Uses the same weights as calculate_grade so the decomposition can
+    never drift from the composite score.
+    """
+    return [
+        ("noise", NOISE_WEIGHT * noise_ratio),
+        ("boundary", 0.0 if boundary_ok else BOUNDARY_WEIGHT),
+        ("context", CONTEXT_WEIGHT * (1.0 - _context_score(context_depth))),
+    ]
+
+
 def calculate_grade(noise_ratio: float, boundary_ok: bool, context_depth: int) -> tuple:
     """Calculate composite score (0-1) and grade (A/B/C).
 
@@ -110,15 +139,11 @@ def calculate_grade(noise_ratio: float, boundary_ok: bool, context_depth: int) -
     """
     score_noise = 1.0 - noise_ratio
     score_boundary = 1.0 if boundary_ok else 0.0
+    score_context = _context_score(context_depth)
 
-    if context_depth >= 2:
-        score_context = 1.0
-    elif context_depth == 1:
-        score_context = 0.5
-    else:
-        score_context = 0.0
-
-    score = score_noise * 0.4 + score_boundary * 0.3 + score_context * 0.3
+    score = (score_noise * NOISE_WEIGHT
+             + score_boundary * BOUNDARY_WEIGHT
+             + score_context * CONTEXT_WEIGHT)
 
     if score >= 0.8:
         grade = "A"
