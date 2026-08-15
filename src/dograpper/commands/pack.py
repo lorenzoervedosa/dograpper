@@ -189,10 +189,16 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             ctx.exit(1)
 
     # 3. List all files
+    # The queries file drives the ordering; it is never corpus content,
+    # even when it lives inside INPUT_DIR.
+    queries_realpath = os.path.realpath(for_queries_path) if for_queries_path else None
     all_files = []
     for root, _, files in os.walk(input_dir):
         for f in files:
-            all_files.append(os.path.join(root, f))
+            fpath = os.path.join(root, f)
+            if queries_realpath and os.path.realpath(fpath) == queries_realpath:
+                continue
+            all_files.append(fpath)
             
     # 4. Check empty
     if not all_files:
