@@ -471,6 +471,30 @@ dograpper pack ./docs -o ./chunks --strategy semantic --ignore "*.png"
 dograpper pack ./docs -o ./chunks --delta
 ```
 
+### `dograpper explain`
+
+Read-only preview of exactly what the LLM will receive per chunk —
+audit before uploading to NotebookLM or ingesting into a RAG pipeline.
+Nothing is written to disk.
+
+```bash
+dograpper explain ./chunks                  # list chunks (id, format, grade)
+dograpper explain ./chunks docs_chunk_01    # inspect one chunk
+dograpper explain ./chunks 01 --full        # bare index, full content
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--prefix` | `docs_chunk_` | Chunk filename prefix to inspect |
+| `--full` | `false` | Print full section contents instead of a 60-word preview |
+
+Per section it shows: the parsed `dograpper-context-v1` header (source,
+URL, breadcrumb, per-chunk readiness), cross-references from
+`cross_refs.json` (`references_to` / `referenced_by`), readiness detail
+from `llm-readiness.json`, and the content preview — including the
+`[-> chunk_id]` annotations exactly as the LLM sees them. Works with
+`md`, `txt` and `jsonl` packs.
+
 ### `dograpper sync`
 
 Convenience wrapper: `download` + `pack --delta` chained. Uses the

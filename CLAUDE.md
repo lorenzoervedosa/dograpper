@@ -27,6 +27,7 @@ src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
 │   ├── download.py         # Cascade 4-layer: llms.txt → sitemap → wget --mirror → Playwright bounded
+│   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
 │   └── sync.py             # Subcomando sync (download + pack em um passo)
@@ -42,6 +43,7 @@ src/dograpper/
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth
 │   └── wget_mirror.py      # run_wget_mirror() --mirror + run_wget_urls() -i; BROWSER_UA Chrome/120, --no-parent, --timestamping sempre
 └── utils/
+    ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
     ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy)
     ├── dry_run_report.py   # generate_report() — relatório formatado para --dry-run
@@ -65,6 +67,7 @@ tests/
 ├── test_download_cascade.py # Cascade 4-layer: layer-1/2/3/4 wins, below-threshold fall-through, headless, post-wget-i SPA, observability
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
+├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
 ├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo
 ├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, CLI
@@ -226,6 +229,9 @@ uv run dograpper pack ./test-docs -o ./chunks --format jsonl --cross-refs
 
 # Pack delta (apenas mudanças)
 uv run dograpper pack ./test-docs -o ./chunks --delta
+
+# Inspecionar o que o LLM recebe por chunk (read-only)
+uv run dograpper explain ./chunks docs_chunk_01
 
 # Sync (download + pack delta)
 uv run dograpper sync https://click.palletsprojects.com/en/stable/ -o ./test-docs
