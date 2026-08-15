@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from ..lib.config_loader import load_config
 from ..lib.ignore_parser import filter_files
-from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks
+from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, read_source_text
 
 logger = logging.getLogger(__name__)
 
@@ -237,25 +237,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     processed_texts = None
 
     if dedup_mode != "off":
-        from ..utils.html_stripper import strip_html as _strip_html
-        from ..utils.content_extractor import extract_content as _extract_content
         from ..utils.dedup import deduplicate
 
         processed_texts = {}
         for fpath in filtered_paths:
+            rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
             try:
-                with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
-                    raw = fh.read()
+                processed_texts[rel] = read_source_text(fpath, no_extract=no_ext)
             except Exception:
                 continue
-            rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
-            if fpath.lower().endswith(('.html', '.htm')):
-                if not no_ext:
-                    raw = _extract_content(raw)
-                text = _strip_html(raw)
-            else:
-                text = raw
-            processed_texts[rel] = text
 
         dedup_result = deduplicate(processed_texts, mode=dedup_mode, hamming_threshold=dedup_thresh)
         dedup_stats = dedup_result.stats
@@ -322,24 +312,12 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             # Reuse the extraction pass the dedup step already did.
             query_texts = processed_texts
         else:
-            # Same extraction as the dedup step above (first copy of this loop).
-            from ..utils.html_stripper import strip_html as _q_strip
-            from ..utils.content_extractor import extract_content as _q_extract
-
             query_texts = {}
             for rel, fpath in rel_map.items():
                 try:
-                    with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
-                        raw = fh.read()
+                    query_texts[rel] = read_source_text(fpath, no_extract=no_ext)
                 except Exception:
                     continue
-                if fpath.lower().endswith(('.html', '.htm')):
-                    if not no_ext:
-                        raw = _q_extract(raw)
-                    text = _q_strip(raw)
-                else:
-                    text = raw
-                query_texts[rel] = text
 
         query_pack_result = order_files_by_queries(
             list(rel_map.keys()), query_texts, query_list)
