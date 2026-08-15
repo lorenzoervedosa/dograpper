@@ -106,6 +106,15 @@ def _summary_counts(report: DriftReport) -> str:
             f"{len(report.removed)} removed")
 
 
+def _delta_file_groups(delta: dict):
+    """Added/Modified/Removed path lists from a delta_manifest.json dict,
+    each sorted ascending. Shared by both renderers."""
+    return [(label, sorted(delta.get(key, [])))
+            for label, key in (("Added", "added"),
+                               ("Modified", "modified"),
+                               ("Removed", "removed"))]
+
+
 def render_markdown(report: DriftReport, delta: Optional[dict] = None) -> str:
     """Render the drift report as markdown (PR-comment friendly).
 
@@ -145,9 +154,7 @@ def render_markdown(report: DriftReport, delta: Optional[dict] = None) -> str:
     if delta is None:
         lines.append("_No source drift recorded._")
     else:
-        groups = [("Added", delta.get("added", [])),
-                  ("Modified", delta.get("modified", [])),
-                  ("Removed", delta.get("removed", []))]
+        groups = _delta_file_groups(delta)
         if not any(paths for _, paths in groups):
             lines.append("_No source file changes._")
         else:
@@ -155,7 +162,7 @@ def render_markdown(report: DriftReport, delta: Optional[dict] = None) -> str:
                 if not paths:
                     continue
                 lines += [f"**{label} files ({len(paths)})**", ""]
-                lines += [f"- `{p}`" for p in sorted(paths)]
+                lines += [f"- `{p}`" for p in paths]
                 lines.append("")
             lines.pop()  # trailing blank line
 
@@ -197,9 +204,7 @@ def render_text(report: DriftReport, delta: Optional[dict] = None) -> str:
     if delta is None:
         lines.append("Source file drift: no source drift recorded")
     else:
-        groups = [("Added", delta.get("added", [])),
-                  ("Modified", delta.get("modified", [])),
-                  ("Removed", delta.get("removed", []))]
+        groups = _delta_file_groups(delta)
         if not any(paths for _, paths in groups):
             lines.append("Source file drift: no source file changes")
         else:
@@ -208,6 +213,6 @@ def render_text(report: DriftReport, delta: Optional[dict] = None) -> str:
                 if not paths:
                     continue
                 lines.append(f"  {label} files ({len(paths)}):")
-                lines += [f"    {p}" for p in sorted(paths)]
+                lines += [f"    {p}" for p in paths]
 
     return "\n".join(lines)
