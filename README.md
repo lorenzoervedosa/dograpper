@@ -55,12 +55,15 @@ Override the default root: `DOGRAPPER_HOME=/custom/path dograpper doctor --insta
 |------|--------|---------|-------------|
 | 0 | any | success | — |
 | 1 | doctor (default) | one or more deps missing | run `dograpper doctor --install` |
+| 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
+| 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
+| 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
-| 3 | download/crawl | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
 | 10 | install.sh | SHA256 mismatch | retry install, report issue |
 | 20 | install.sh | unsupported architecture | — |
 | 21 | install.sh | unsupported OS | — |
+| 30 | install.sh | binary or checksum download failed | check network/proxy, retry |
 
 ---
 
@@ -150,7 +153,7 @@ dograpper sync https://flask.palletsprojects.com/en/stable/ -o ./flask-docs
 # For RAG: JSONL export with cross-references
 dograpper pack ./flask-docs -o ./chunks --format jsonl --cross-refs --score
 
-# Incremental updates (only reprocesses what changed)
+# Change-gated re-pack: no-op if nothing changed, full repack if anything did
 dograpper pack ./flask-docs -o ./chunks --delta
 ```
 
@@ -805,6 +808,7 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | `--verbose` | `-v` | `false` | Detailed log (DEBUG + `[cascade]` prefixes) |
 | `--quiet` | `-q` | `false` | Critical errors only |
 | `--config` | — | `.dograpper.json` | Configuration file |
+| `--version` | — | — | Print the installed version and exit |
 
 `--verbose` and `--quiet` are mutually exclusive.
 
@@ -923,7 +927,7 @@ Full spec: [docs/schema-v1.md](docs/schema-v1.md)
 | `cross_refs.json` | `--cross-refs` | Cross-reference graph between chunks |
 | `llm-readiness.json` | `--score` | Quality scores per chunk |
 | `readiness-report.html` | `--report` | Visual before/after report with penalty causes |
-| `IMPORT_GUIDE.md` | `--bundle notebooklm` | Upload guide with recommended ordering |
+| `IMPORT_GUIDE.md` | `--bundle` | Upload guide with recommended ordering (both `notebooklm` and `rag-standard`) |
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
 | `pack_state.json` | `--delta` | Corpus state as of this pack; the next `--delta` run diffs against it |
 | `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes) |
@@ -992,6 +996,11 @@ pack (gitignore syntax):
 The file can be customized via `--ignore-file` or complemented with
 inline `--ignore` (repeatable).
 
+Binary and image extensions (`.png`, `.jpg`, `.gif`, `.svg`, `.pdf`,
+`.zip`, `.tar.gz` and similar) are skipped automatically, unconditionally
+— they don't need `.docsignore` entries. Use it for pages and paths that
+are still text but you don't want packed.
+
 ---
 
 ## Output summary
@@ -1017,6 +1026,8 @@ Conditional extra lines (per enabled flag):
 | `--cross-refs` | `Cross-refs: ./chunks/cross_refs.json (N links, M unresolved)` |
 | `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, `Grade distribution` |
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
+| `--bundle` | `Import guide: <path>` |
+| `--for-queries` | `Query packing: ...` |
 
 Warnings appear when:
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
@@ -1092,30 +1103,48 @@ downloaded. Re-running (incremental) usually closes the gaps.
 
 ```
 src/dograpper/
-├── cli.py
+├── cli.py                    # Entry point, global flags (--verbose/--quiet/--config/--version)
 ├── commands/
-│   ├── download.py           # 4-layer cascade + orchestration
+│   ├── doctor.py              # Detect/install wget + chromium; --check-system-libs
+│   ├── download.py            # 4-layer cascade + orchestration
+│   ├── drift.py                # Diff two llm-readiness.json snapshots
+│   ├── eval.py                  # Golden Q&A hit-rate@k / MRR over a JSONL pack
+│   ├── explain.py                # Read-only preview of what an LLM receives per chunk
+│   ├── init.py                    # .dograpper.json wizard, per-target presets
 │   ├── pack.py
-│   └── sync.py               # download + pack delta
+│   ├── serve.py                    # Local MCP server (stdio) over a packed JSONL
+│   └── sync.py                # download + pack delta
 ├── lib/
 │   ├── chunker.py            # size/semantic strategies, boundary-aware
 │   ├── config_loader.py
+│   ├── eval_harness.py        # hit-rate@k / MRR computation
+│   ├── golden_qa.py            # Deterministic Q&A generation from heading breadcrumbs
 │   ├── ignore_parser.py
 │   ├── llms_txt_parser.py    # Layer 1 (stdlib-only)
-│   ├── sitemap_parser.py     # Layer 2 (recursive sitemapindex, gzip)
-│   ├── url_filter.py         # Same-netloc + path-prefix + depth
 │   ├── manifest.py           # Manifest + diff_manifests()
+│   ├── mcp_server.py           # JSON-RPC 2.0 protocol for `serve`
+│   ├── pack_artifacts.py       # Sidecar writers (cross-refs, delta, readiness, tokens)
+│   ├── pack_reader.py           # Loads JSONL chunks back for eval/explain/serve
+│   ├── pack_scoring.py          # LLM Readiness Score orchestration for `pack --score`
 │   ├── playwright_crawl.py   # Layer 4 (bounded hydration + seed_urls)
+│   ├── query_packer.py          # BM25 file ordering for `pack --for-queries`
+│   ├── readiness_diff.py        # Snapshot comparison for `drift`
+│   ├── retrieval.py             # Deterministic BM25 index (eval, serve)
+│   ├── sitemap_parser.py     # Layer 2 (recursive sitemapindex, gzip)
 │   ├── spa_detector.py       # Small-sample branch (N<5)
+│   ├── url_filter.py         # Same-netloc + path-prefix + depth
 │   └── wget_mirror.py        # Layer 3 (run_wget_mirror + run_wget_urls)
 └── utils/
+    ├── chunk_inspector.py      # Read-only chunk parsing for `explain`
     ├── content_extractor.py  # Smart extraction (strips boilerplate)
     ├── dedup.py              # Cross-file dedup (exact + fuzzy)
+    ├── dep_resolver.py         # Resolves wget/chromium under DOGRAPPER_HOME
     ├── dry_run_report.py
     ├── heading_extractor.py  # Headings + format_context_header (v1)
     ├── html_stripper.py
     ├── link_extractor.py     # Cross-refs between chunks
     ├── logger.py
+    ├── readiness_report.py     # HTML/terminal renderer for `pack --report`
     ├── scorer.py             # LLM Readiness Score
     ├── token_counter.py
     └── word_counter.py
@@ -1148,4 +1177,4 @@ practical examples in the footer.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
