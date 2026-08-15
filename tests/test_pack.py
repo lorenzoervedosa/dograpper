@@ -565,3 +565,37 @@ def test_pack_for_queries_warns_on_unreadable_file():
         assert result.exit_code == 0, result.output
         assert "cannot read" in result.output
         assert "locked.html" in result.output
+
+
+def test_pack_for_queries_composes_with_dedup():
+    """--for-queries + --dedup both, on a 5-doc corpus so the df filter
+    path is real: ordering applied, dedup ran, no crash."""
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        boiler = '<p>' + 'shared boilerplate footer navigation paragraph. ' * 4 + '</p>'
+        topics = {
+            'alpha.html': 'pytest testing fixtures runner assertions. ',
+            'bravo.html': 'configuration settings profile management. ',
+            'charlie.html': 'deployment release rollout automation. ',
+            'delta.html': 'frequently asked questions overview. ',
+            'zebra-install.html': 'installation pip package setup guide. ',
+        }
+        for name, topic in topics.items():
+            with open(os.path.join(d, name), 'w') as f:
+                f.write('<html><body><main><p>' + topic * 5 + '</p>'
+                        + boiler + '</main></body></html>')
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile, '--dedup', 'both',
+            '--max-words-per-chunk', '40'])
+
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+        assert "Dedup mode:" in result.output
+        # Query 1 (installation) puts zebra-install first despite its name.
+        with open(os.path.join(out, 'docs_chunk_01.md')) as f:
+            assert 'SOURCE: zebra-install.html' in f.read()
