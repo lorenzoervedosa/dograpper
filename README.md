@@ -408,7 +408,7 @@ Fields:
   "total_chunks": 5,
   "word_count": 4820,
   "url": "https://flask.palletsprojects.com/en/stable/quickstart/",
-  "llm_readiness": {"score": 0.92, "grade": "A"},
+  "llm_readiness": {"score": 0.92, "grade": "A", "noise_ratio": 0.08},
   "schema_version": "v1"
 }
 ```
@@ -441,8 +441,13 @@ Schema (required fields in **bold**, optional in italics):
 - **`content`** — extracted text
 - **`schema_version`** — `"v1"`
 - *`breadcrumb`, `chunk_index`, `total_chunks`* (with `--context-header` or `--score`)
-- *`url`* (when available via manifest)
+- *`url`* (with `--context-header` **and** a matching manifest entry — `--score`
+  alone never populates it)
 - *`readiness_grade`* (with `--score`)
+
+Field names diverge from the header format for word count, breadcrumb and
+readiness — see the full field-by-field spec, including the JSONL/header
+mapping table, in [docs/schema-v1.md](docs/schema-v1.md).
 
 #### LLM Readiness Score (`--score`)
 
@@ -899,7 +904,7 @@ Each chunk includes a structured and versioned JSON header (when
   "source": "flask.palletsprojects.com/en/stable/quickstart/index.html",
   "context_breadcrumb": ["Quickstart", "Routing"],
   "word_count": 4820,
-  "llm_readiness": {"score": 0.92, "grade": "A"},
+  "llm_readiness": {"score": 0.92, "grade": "A", "noise_ratio": 0.08},
   "schema_version": "v1"
 }
 -->
