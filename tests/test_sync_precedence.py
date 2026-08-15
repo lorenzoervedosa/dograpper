@@ -134,6 +134,43 @@ def test_direct_pack_precedence_unchanged():
         assert any(f.endswith(".md") for f in files), files
 
 
+def test_passthrough_tuples_cover_every_sync_flag():
+    # Drift guard: a new sync passthrough option MUST be added to
+    # _DOWNLOAD_PASSTHROUGH or _PACK_PASSTHROUGH, or issue #32 silently
+    # returns for that flag.
+    from dograpper.commands.sync import (
+        sync, _DOWNLOAD_PASSTHROUGH, _PACK_PASSTHROUGH)
+
+    own_params = {"url", "output", "chunks_dir", "help"}
+    all_flags = {p.name for p in sync.params} - own_params
+    covered = set(_DOWNLOAD_PASSTHROUGH) | set(_PACK_PASSTHROUGH)
+    assert all_flags == covered, (
+        f"sync flags not covered by passthrough tuples: "
+        f"{sorted(all_flags - covered)}; stale tuple entries: "
+        f"{sorted(covered - all_flags)}")
+
+
+def test_explicit_set_cleaned_up_when_download_raises(monkeypatch):
+    import click as _click
+
+    @_click.command()
+    def failing_download(**kwargs):
+        raise _click.ClickException("download blew up")
+
+    monkeypatch.setattr(
+        "dograpper.commands.download.download", failing_download)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        captured = {}
+
+        result = runner.invoke(
+            cli, ["sync", "https://docs.example.com", "-o", "docs"],
+            obj=captured)
+        assert result.exit_code != 0
+        assert "CLI_EXPLICIT_PARAMS" not in captured
+
+
 # ---------------------------------------------------------------------------
 # Unit: config_loader honors forwarded-explicit params
 # ---------------------------------------------------------------------------

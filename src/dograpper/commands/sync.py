@@ -3,6 +3,8 @@
 import click
 import logging
 
+from ..lib.config_loader import is_explicit_source
+
 logger = logging.getLogger(__name__)
 
 # sync's own option names forwarded to each stage. Used to detect which of
@@ -15,12 +17,8 @@ _PACK_PASSTHROUGH = ('max_words_per_chunk', 'max_chunks', 'strategy', 'format',
 
 
 def _explicit_params(ctx: click.Context, names) -> set:
-    explicit = set()
-    for name in names:
-        source = ctx.get_parameter_source(name)
-        if source and source.name in ('COMMANDLINE', 'ENVIRONMENT'):
-            explicit.add(name)
-    return explicit
+    return {name for name in names
+            if is_explicit_source(ctx.get_parameter_source(name))}
 
 
 @click.command(
@@ -81,39 +79,41 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
     chunks_output = chunks_dir or f"{output}/chunks"
     ctx.ensure_object(dict)
 
-    click.echo("=== Step 1: Download ===")
-    # 'output' is always user-derived on sync (-o is required)
-    ctx.obj['CLI_EXPLICIT_PARAMS'] = (
-        _explicit_params(ctx, _DOWNLOAD_PASSTHROUGH) | {'output'})
-    ctx.invoke(
-        download,
-        url=url,
-        output=output,
-        depth=depth,
-        headless=headless,
-        delay=delay,
-        include_extensions=include_extensions,
-    )
+    try:
+        click.echo("=== Step 1: Download ===")
+        # 'output' is always user-derived on sync (-o is required)
+        ctx.obj['CLI_EXPLICIT_PARAMS'] = (
+            _explicit_params(ctx, _DOWNLOAD_PASSTHROUGH) | {'output'})
+        ctx.invoke(
+            download,
+            url=url,
+            output=output,
+            depth=depth,
+            headless=headless,
+            delay=delay,
+            include_extensions=include_extensions,
+        )
 
-    click.echo("\n=== Step 2: Pack (delta) ===")
-    # 'output' comes from --chunks-dir/-o and 'delta' is sync's contract:
-    # both always win over config
-    ctx.obj['CLI_EXPLICIT_PARAMS'] = (
-        _explicit_params(ctx, _PACK_PASSTHROUGH) | {'output', 'delta'})
-    ctx.invoke(
-        pack,
-        input_dir=output,
-        output=chunks_output,
-        max_words_per_chunk=max_words_per_chunk,
-        max_chunks=max_chunks,
-        strategy=strategy,
-        format=format,
-        bundle=bundle,
-        context_header=context_header,
-        cross_refs=cross_refs,
-        score=score,
-        dedup=dedup,
-        show_tokens=show_tokens,
-        delta=True,
-    )
-    ctx.obj.pop('CLI_EXPLICIT_PARAMS', None)
+        click.echo("\n=== Step 2: Pack (delta) ===")
+        # 'output' comes from --chunks-dir/-o and 'delta' is sync's
+        # contract: both always win over config
+        ctx.obj['CLI_EXPLICIT_PARAMS'] = (
+            _explicit_params(ctx, _PACK_PASSTHROUGH) | {'output', 'delta'})
+        ctx.invoke(
+            pack,
+            input_dir=output,
+            output=chunks_output,
+            max_words_per_chunk=max_words_per_chunk,
+            max_chunks=max_chunks,
+            strategy=strategy,
+            format=format,
+            bundle=bundle,
+            context_header=context_header,
+            cross_refs=cross_refs,
+            score=score,
+            dedup=dedup,
+            show_tokens=show_tokens,
+            delta=True,
+        )
+    finally:
+        ctx.obj.pop('CLI_EXPLICIT_PARAMS', None)

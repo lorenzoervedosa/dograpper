@@ -7,6 +7,14 @@ import click
 
 logger = logging.getLogger(__name__)
 
+
+def is_explicit_source(source) -> bool:
+    """True if a click ParameterSource means the user set the value
+    explicitly (command line or environment). Single definition shared
+    with wrappers that forward params across ctx.invoke (sync)."""
+    return bool(source) and source.name in ('COMMANDLINE', 'ENVIRONMENT')
+
+
 def load_config(config_path: str, command_name: str, cli_params: dict, ctx: click.Context) -> dict:
     """
     Load JSON config, merging it with defaults and CLI parameters.
@@ -39,8 +47,7 @@ def load_config(config_path: str, command_name: str, cli_params: dict, ctx: clic
         value_from_cli = ctx.params.get(param_name)
 
         # If it was explicitly set via command line or env var, it wins
-        if (source and source.name in ('COMMANDLINE', 'ENVIRONMENT')) \
-                or param_name in forwarded_explicit:
+        if is_explicit_source(source) or param_name in forwarded_explicit:
             final_params[param_name] = value_from_cli
         else:
             # Otherwise, use JSON config if present
