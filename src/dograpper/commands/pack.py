@@ -8,9 +8,17 @@ from datetime import datetime, timezone
 
 from ..lib.config_loader import load_config
 from ..lib.ignore_parser import filter_files
-from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks
+from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, read_source_text
 
 logger = logging.getLogger(__name__)
+
+
+def _query_packing_summary(query_list, query_pack_result) -> str:
+    """Summary line shared by the normal and dry-run outputs."""
+    return (f"  Query packing:   {len(query_list)} queries, "
+            f"{query_pack_result.matched_count} files matched, "
+            f"{len(query_pack_result.unmatched_files)} unmatched")
+
 
 @click.command(
     epilog=(
@@ -75,8 +83,16 @@ logger = logging.getLogger(__name__)
 @click.option('--score', is_flag=True, default=False,
               help="Compute LLM Readiness Score per chunk. "
                    "Generates llm-readiness.json in the output.")
+@click.option('--for-queries', type=click.Path(), default=None,
+              help="Text file with one expected query per line. Reorders "
+                   "files by BM25 query affinity before chunking so content "
+                   "answering the same query is co-located. Requires "
+                   "--strategy size.")
+@click.option('--report/--no-report', default=False, show_default=True,
+              help="Write readiness-report.html with per-page before/after "
+                   "extraction data and score penalty causes. Implies --score.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -122,6 +138,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'manifest': manifest,
         'bundle': bundle,
         'score': score,
+        'for_queries': for_queries,
+        'report': report,
     }
     
     merged_params = load_config(config_path, 'pack', cli_params, ctx)
@@ -147,6 +165,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     manifest_path = merged_params.get('manifest', manifest)
     bundle_preset = merged_params.get('bundle', bundle)
     is_score = merged_params.get('score', score)
+    for_queries_path = merged_params.get('for_queries', for_queries)
+    is_report = merged_params.get('report', report)
 
     # 2b. Bundle overrides
     if bundle_preset == 'notebooklm':
@@ -161,11 +181,47 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             "XML format is deprecated since v1.x. Use 'md' (default) or 'jsonl'."
         )
 
+    # 2d. Query-oriented packing: load queries early (fail fast, no silent fallback)
+    query_list = None
+    if for_queries_path:
+        if strat == 'semantic':
+            click.echo("Error: --for-queries requires --strategy size "
+                       "(semantic grouping and query grouping are mutually "
+                       "exclusive).", err=True)
+            ctx.exit(1)
+        from ..lib.query_packer import load_queries
+        try:
+            query_list = load_queries(for_queries_path)
+        except OSError as e:
+            click.echo(f"Error: cannot read queries file "
+                       f"'{for_queries_path}': {e}", err=True)
+            ctx.exit(1)
+        if not query_list:
+            click.echo(f"Error: queries file '{for_queries_path}' "
+                       f"contains no queries.", err=True)
+            ctx.exit(1)
+
+    # 2e. Report validation and implied score
+    if is_report and is_dry_run:
+        raise click.ClickException(
+            "--report requires a real pack run (there is no final chunk text "
+            "in --dry-run)."
+        )
+    if is_report and not is_score:
+        is_score = True
+        click.echo("--report implies --score: enabling readiness scoring.")
+
     # 3. List all files
+    # The queries file drives the ordering; it is never corpus content,
+    # even when it lives inside INPUT_DIR.
+    queries_realpath = os.path.realpath(for_queries_path) if for_queries_path else None
     all_files = []
     for root, _, files in os.walk(input_dir):
         for f in files:
-            all_files.append(os.path.join(root, f))
+            fpath = os.path.join(root, f)
+            if queries_realpath and os.path.realpath(fpath) == queries_realpath:
+                continue
+            all_files.append(fpath)
             
     # 4. Check empty
     if not all_files:
@@ -209,25 +265,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     dedup_text_overrides = None
 
     if dedup_mode != "off":
-        from ..utils.html_stripper import strip_html as _strip_html
-        from ..utils.content_extractor import extract_content as _extract_content
         from ..utils.dedup import deduplicate
 
         processed_texts = {}
         for fpath in filtered_paths:
+            rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
             try:
-                with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
-                    raw = fh.read()
+                processed_texts[rel] = read_source_text(fpath, no_extract=no_ext)
             except Exception:
                 continue
-            rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
-            if fpath.lower().endswith(('.html', '.htm')):
-                if not no_ext:
-                    raw = _extract_content(raw)
-                text = _strip_html(raw)
-            else:
-                text = raw
-            processed_texts[rel] = text
 
         dedup_result = deduplicate(processed_texts, mode=dedup_mode, hamming_threshold=dedup_thresh)
         dedup_stats = dedup_result.stats
@@ -283,11 +329,38 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         except Exception:
             pass
 
+    # 7d. Query-oriented ordering (opt-in, after delta/dedup, before chunking)
+    query_pack_result = None
+    if query_list is not None:
+        from ..lib.query_packer import order_files_by_queries
+
+        rel_map = {os.path.relpath(f, input_dir).replace(os.sep, '/'): f
+                   for f in filtered_paths}
+        if dedup_mode != "off" and dedup_text_overrides is not None:
+            # Rank on the post-dedup texts — what actually gets written.
+            query_texts = dedup_text_overrides
+        else:
+            query_texts = {}
+            for rel, fpath in rel_map.items():
+                try:
+                    query_texts[rel] = read_source_text(fpath, no_extract=no_ext)
+                except Exception as e:
+                    click.echo(f"Warning: cannot read '{rel}' for query "
+                               f"ordering: {e}", err=True)
+
+        query_pack_result = order_files_by_queries(
+            list(rel_map.keys()), query_texts, query_list)
+        for assignment in query_pack_result.assignments:
+            if assignment.total_hits == 0:
+                click.echo(f"Warning: query matched no files: "
+                           f"'{assignment.query}'", err=True)
+        filtered_paths = [rel_map[rp] for rp in query_pack_result.ordered_paths]
+
     # 8. Execute chunking
     if strat == 'semantic':
         chunks = chunk_by_semantic(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts)
     else:
-        chunks = chunk_by_size(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts)
+        chunks = chunk_by_size(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts, preserve_order=query_pack_result is not None)
 
     # 8b. Bundle balancing (post-process)
     if bundle_preset == 'notebooklm':
@@ -407,16 +480,22 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             report_data.readiness_scores = dr_scores
             report_data.show_score = True
 
+        if query_pack_result is not None:
+            click.echo(_query_packing_summary(query_list, query_pack_result))
         click.echo(generate_report(report_data))
         return
 
     # 9c. LLM Readiness scoring (before write, so readiness can be injected into headers)
     readiness_scores = []
     readiness_map = None
+    report_pages = {}   # chunk_id -> List[PageReadiness] (only with --report)
     if is_score:
         from ..utils.scorer import score_chunk
         from ..utils.html_stripper import strip_html as _score_strip
         from ..utils.content_extractor import extract_content as _score_extract
+        if is_report:
+            from ..utils.scorer import calculate_noise_ratio, find_boundary_issues
+            from ..utils.readiness_report import PageReadiness, find_removed_blocks
 
         for chunk in chunks:
             chunk_id = f"{pref}{chunk.index:02d}"
@@ -426,48 +505,63 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             headings_count = 0
             max_heading_level = 0
             chunk_text_parts = []
+            chunk_pages = []
 
             for cf in chunk.files:
                 fpath = os.path.join(input_dir, cf.relative_path)
+                raw_text = None
+                extracted_text = None
                 if fpath.lower().endswith(('.html', '.htm')):
                     try:
                         with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
                             raw_html = fh.read()
-                        raw_total += len(_score_strip(raw_html).split())
+                        raw_text = _score_strip(raw_html)
                         if not no_ext:
-                            extracted_total += len(_score_strip(_score_extract(raw_html)).split())
+                            extracted_text = _score_strip(_score_extract(raw_html))
                         else:
-                            extracted_total += len(_score_strip(raw_html).split())
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        wc = len(open(fpath, 'r', encoding='utf-8', errors='replace').read().split())
-                        raw_total += wc
-                        extracted_total += wc
-                    except Exception:
-                        pass
-
-                if heading_map and cf.relative_path in heading_map:
-                    hdgs = heading_map[cf.relative_path]
-                    headings_count += len(hdgs)
-                    if hdgs:
-                        max_heading_level = max(max_heading_level, max(h.level for h in hdgs))
-
-                # Read content for boundary check
-                if dedup_text_overrides and cf.relative_path in dedup_text_overrides:
-                    chunk_text_parts.append(dedup_text_overrides[cf.relative_path])
+                            extracted_text = raw_text
+                        raw_total += len(raw_text.split())
+                        extracted_total += len(extracted_text.split())
+                    except Exception as e:
+                        logger.warning(f"[score] Skipping unprocessable file {cf.relative_path}: {e}")
                 else:
                     try:
                         with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
-                            raw = fh.read()
-                        if fpath.lower().endswith(('.html', '.htm')):
-                            if not no_ext:
-                                raw = _score_extract(raw)
-                            raw = _score_strip(raw)
-                        chunk_text_parts.append(raw)
-                    except Exception:
-                        pass
+                            raw_text = fh.read()
+                        extracted_text = raw_text
+                        wc = len(raw_text.split())
+                        raw_total += wc
+                        extracted_total += wc
+                    except Exception as e:
+                        logger.warning(f"[score] Skipping unreadable file {cf.relative_path}: {e}")
+
+                file_headings = []
+                if heading_map and cf.relative_path in heading_map:
+                    file_headings = heading_map[cf.relative_path]
+                    headings_count += len(file_headings)
+                    if file_headings:
+                        max_heading_level = max(max_heading_level, max(h.level for h in file_headings))
+
+                # Content for boundary check (dedup override wins over re-processed text)
+                if dedup_text_overrides and cf.relative_path in dedup_text_overrides:
+                    chunk_text_parts.append(dedup_text_overrides[cf.relative_path])
+                elif extracted_text is not None:
+                    chunk_text_parts.append(extracted_text)
+
+                if is_report and raw_text is not None and extracted_text is not None:
+                    page_raw = len(raw_text.split())
+                    page_extracted = len(extracted_text.split())
+                    chunk_pages.append(PageReadiness(
+                        relative_path=cf.relative_path,
+                        raw_words=page_raw,
+                        extracted_words=page_extracted,
+                        noise_ratio=calculate_noise_ratio(page_raw, page_extracted),
+                        headings_count=len(file_headings),
+                        max_heading_level=max((h.level for h in file_headings), default=0),
+                        first_headings=[h.text for h in file_headings[:3]],
+                        removed_samples=find_removed_blocks(raw_text, extracted_text),
+                        boundary_issues=find_boundary_issues(extracted_text),
+                    ))
 
             chunk_text = "\n\n".join(chunk_text_parts)
 
@@ -480,6 +574,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                 max_heading_level=max_heading_level,
             )
             readiness_scores.append(cs)
+
+            if is_report:
+                report_pages[chunk_id] = chunk_pages
 
         # Build readiness_map for header injection (md/txt) and JSONL grade
         if ctx_header or fmt == 'jsonl':
@@ -623,6 +720,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         with open(readiness_path, 'w', encoding='utf-8') as rf:
             json.dump(readiness_data, rf, indent=2)
 
+    # 10d-2. Readiness report — HTML with per-page before/after and penalty causes
+    report_path = None
+    if is_report and readiness_scores:
+        from ..utils.readiness_report import generate_html_report
+
+        report_path = os.path.join(output_dir, "readiness-report.html")
+        with open(report_path, 'w', encoding='utf-8') as rf:
+            rf.write(generate_html_report(readiness_scores, report_pages))
+
     # 10e. Token counting (opt-in)
     token_counts = []
     if s_tokens:
@@ -676,6 +782,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             pct = 0
         click.echo(f"  Words removed:     {dedup_stats.words_removed:,} (~{pct}%)")
 
+    if query_pack_result is not None:
+        click.echo(_query_packing_summary(query_list, query_pack_result))
+
     if is_delta and diff is not None:
         click.echo(f"  Delta:           {len(diff.added)} added, {len(diff.modified)} modified, {len(diff.removed)} removed")
         click.echo(f"  Delta manifest:  {os.path.join(output_dir, 'delta_manifest.json')}")
@@ -710,3 +819,13 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         
     if generated_chunk_count > max_c:
         click.echo(f"  \u26a0 Chunk count exceeds max-chunks limit ({generated_chunk_count} > {max_c})")
+
+    # 12. Readiness report terminal summary (after the normal pack summary)
+    if report_path is not None:
+        from ..utils.readiness_report import GRADE_COLORS, format_terminal_report
+        for grade, text in format_terminal_report(readiness_scores, report_path):
+            if grade is None:
+                click.echo(text)
+            else:
+                badge = click.style(f"[{grade}]", fg=GRADE_COLORS[grade], bold=True)
+                click.echo(f"  {badge} {text}")

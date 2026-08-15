@@ -190,6 +190,21 @@ def test_chunk_by_size_oversized_file():
         assert len(chunks) == 1
         assert chunks[0].total_words == 1000
 
+def test_chunk_by_size_preserve_order():
+    with tempfile.TemporaryDirectory() as d:
+        files = create_mock_files(d, [("a.md", 100), ("b.md", 100), ("c.md", 100)])
+        ordered = [files[2], files[0], files[1]]  # caller order: c, a, b
+        chunks = chunk_by_size(ordered, d, 250, preserve_order=True)
+        rels = [cf.relative_path for c in chunks for cf in c.files]
+        assert rels == ["c.md", "a.md", "b.md"]
+
+def test_chunk_by_size_default_still_sorts():
+    with tempfile.TemporaryDirectory() as d:
+        files = create_mock_files(d, [("a.md", 100), ("b.md", 100)])
+        chunks = chunk_by_size(list(reversed(files)), d, 250)
+        rels = [cf.relative_path for c in chunks for cf in c.files]
+        assert rels == ["a.md", "b.md"]
+
 def test_chunk_by_semantic_grouping():
     with tempfile.TemporaryDirectory() as d:
         files = create_mock_files(d, [
@@ -358,3 +373,248 @@ def test_config_invalid_json():
             
         assert "line" in str(exc.value)
         assert "column" in str(exc.value)
+
+# --- Query-oriented packing (--for-queries) ---
+
+def _make_query_tree(d):
+    """Two topic pages whose alphabetical order differs from query order."""
+    with open(os.path.join(d, 'alpha.html'), 'w') as f:
+        f.write('<html><body><main><h1>Testing</h1><p>'
+                + 'pytest testing fixtures runner assertions. ' * 8
+                + '</p></main></body></html>')
+    with open(os.path.join(d, 'zebra.html'), 'w') as f:
+        f.write('<html><body><main><h1>Install</h1><p>'
+                + 'installation pip package setup guide. ' * 8
+                + '</p></main></body></html>')
+
+
+def test_pack_for_queries_orders_chunks():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile,
+            '--max-words-per-chunk', '45', '--ignore', 'queries.txt'])
+
+        assert result.exit_code == 0, result.output
+        # Query 1 (installation) claims zebra.html → it leads chunk 01
+        # despite sorting after alpha.html.
+        with open(os.path.join(out, 'docs_chunk_01.md')) as f:
+            assert 'SOURCE: zebra.html' in f.read()
+        with open(os.path.join(out, 'docs_chunk_02.md')) as f:
+            assert 'SOURCE: alpha.html' in f.read()
+        assert "Query packing:" in result.output
+        assert "2 queries, 2 files matched, 0 unmatched" in result.output
+
+
+def test_pack_for_queries_missing_file_errors():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        result = runner.invoke(pack, [
+            d, '-o', os.path.join(d, 'out'),
+            '--for-queries', os.path.join(d, 'nope.txt')])
+        assert result.exit_code == 1
+        assert "cannot read queries file" in result.output
+
+
+def test_pack_for_queries_empty_file_errors():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("# only comments here\n\n")
+        result = runner.invoke(pack, [
+            d, '-o', os.path.join(d, 'out'), '--for-queries', qfile])
+        assert result.exit_code == 1
+        assert "contains no queries" in result.output
+
+
+def test_pack_for_queries_semantic_strategy_errors():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation\n")
+        result = runner.invoke(pack, [
+            d, '-o', os.path.join(d, 'out'), '--for-queries', qfile,
+            '--strategy', 'semantic'])
+        assert result.exit_code == 1
+        assert "--for-queries requires --strategy size" in result.output
+
+
+def test_pack_for_queries_zero_match_query_warns():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("xyzzynonexistent gibberish\ninstallation pip\n")
+        result = runner.invoke(pack, [
+            d, '-o', os.path.join(d, 'out'), '--for-queries', qfile,
+            '--ignore', 'queries.txt'])
+        assert result.exit_code == 0, result.output
+        assert "matched no files" in result.output
+        assert "xyzzynonexistent" in result.output
+
+
+def test_pack_for_queries_config_json_activates():
+    import json as _json
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs('docs')
+        _make_query_tree('docs')
+        with open('queries.txt', 'w') as f:
+            f.write("installation pip\n")
+        with open('.dograpper.json', 'w') as f:
+            _json.dump({"pack": {"for-queries": "queries.txt"}}, f)
+        result = runner.invoke(pack, ['docs', '-o', 'out'])
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+
+
+def test_pack_for_queries_explicit_cli_beats_config():
+    import json as _json
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs('docs')
+        _make_query_tree('docs')
+        with open('cli-queries.txt', 'w') as f:
+            f.write("installation pip\n")
+        # Config points to a missing file: if JSON won, pack would fail.
+        with open('.dograpper.json', 'w') as f:
+            _json.dump({"pack": {"for-queries": "missing.txt"}}, f)
+        result = runner.invoke(
+            pack, ['docs', '-o', 'out', '--for-queries', 'cli-queries.txt'])
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+
+
+def test_pack_for_queries_composes_with_bundle():
+    # Bundle presets cap max_chunks/max_words but never set the strategy,
+    # so --for-queries + --bundle is a valid combination; balance_chunks
+    # preserves the query-driven file order.
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile, '--bundle', 'notebooklm',
+            '--ignore', 'queries.txt'])
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+        # Fewer files than target chunks: one file per chunk, query order kept.
+        with open(os.path.join(out, 'docs_chunk_01.md')) as f:
+            assert 'zebra.html' in f.read()
+
+
+def test_pack_for_queries_file_inside_input_dir_not_packed():
+    """Reviewer repro: a queries file living inside INPUT_DIR (no --ignore)
+    must not join the corpus — and ordering must still apply."""
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile,
+            '--max-words-per-chunk', '45'])
+
+        assert result.exit_code == 0, result.output
+        chunk_blob = ""
+        for fn in os.listdir(out):
+            with open(os.path.join(out, fn), encoding='utf-8') as cf:
+                chunk_blob += cf.read()
+        assert "queries.txt" not in chunk_blob
+        with open(os.path.join(out, 'docs_chunk_01.md')) as f:
+            assert 'SOURCE: zebra.html' in f.read()
+        assert "2 files matched" in result.output
+
+
+def test_pack_for_queries_warns_on_unreadable_file():
+    if os.geteuid() == 0:
+        pytest.skip("permission-based test is meaningless as root")
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        locked = os.path.join(d, 'locked.html')
+        with open(locked, 'w') as f:
+            f.write('<html><body><p>secret content</p></body></html>')
+        os.chmod(locked, 0)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\n")
+        try:
+            result = runner.invoke(pack, [
+                d, '-o', os.path.join(d, 'out'), '--for-queries', qfile])
+        finally:
+            os.chmod(locked, 0o644)
+        assert result.exit_code == 0, result.output
+        assert "cannot read" in result.output
+        assert "locked.html" in result.output
+
+
+def test_pack_for_queries_composes_with_dedup():
+    """--for-queries + --dedup both, on a 5-doc corpus so the df filter
+    path is real: ordering applied, dedup ran, no crash."""
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        boiler = '<p>' + 'shared boilerplate footer navigation paragraph. ' * 4 + '</p>'
+        topics = {
+            'alpha.html': 'pytest testing fixtures runner assertions. ',
+            'bravo.html': 'configuration settings profile management. ',
+            'charlie.html': 'deployment release rollout automation. ',
+            'delta.html': 'frequently asked questions overview. ',
+            'zebra-install.html': 'installation pip package setup guide. ',
+        }
+        for name, topic in topics.items():
+            with open(os.path.join(d, name), 'w') as f:
+                f.write('<html><body><main><p>' + topic * 5 + '</p>'
+                        + boiler + '</main></body></html>')
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile, '--dedup', 'both',
+            '--max-words-per-chunk', '40'])
+
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+        assert "Dedup mode:" in result.output
+        # Query 1 (installation) puts zebra-install first despite its name.
+        with open(os.path.join(out, 'docs_chunk_01.md')) as f:
+            assert 'SOURCE: zebra-install.html' in f.read()
+
+
+def test_pack_for_queries_dry_run_shows_summary():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile, '--dry-run'])
+
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+        assert "2 queries, 2 files matched, 0 unmatched" in result.output
+        # dry-run must not write anything
+        assert not os.path.exists(out)

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 _DOWNLOAD_PASSTHROUGH = ('depth', 'headless', 'delay', 'include_extensions')
 _PACK_PASSTHROUGH = ('max_words_per_chunk', 'max_chunks', 'strategy', 'format',
                      'bundle', 'context_header', 'cross_refs', 'score',
-                     'dedup', 'show_tokens')
+                     'dedup', 'show_tokens', 'for_queries')
 
 
 def _explicit_params(ctx: click.Context, names) -> set:
@@ -60,18 +60,23 @@ def _explicit_params(ctx: click.Context, names) -> set:
               default='off', show_default=True)
 @click.option('--show-tokens', is_flag=True, default=False,
               help="Show per-chunk and total token count")
+@click.option('--for-queries', type=click.Path(), default=None,
+              help="Queries file for query-oriented packing (see pack --for-queries)")
 @click.pass_context
 def sync(ctx, url, output, depth, headless, delay, include_extensions,
          chunks_dir, max_words_per_chunk, max_chunks, strategy, format,
-         bundle, context_header, cross_refs, score, dedup, show_tokens):
+         bundle, context_header, cross_refs, score, dedup, show_tokens,
+         for_queries):
     """Incremental download + pack delta in a single command.
 
     Equivalent to:
       dograpper download <url> -o <output> [download flags]
       dograpper pack <output> -o <chunks-dir> --delta [pack flags]
 
-    All relevant pack flags (bundle, context-header, score, cross-refs,
-    dedup, etc.) are forwarded to the pack stage.
+    Forwarded pack flags: max-words-per-chunk, max-chunks, strategy,
+    format, bundle, context-header, cross-refs, score, dedup,
+    show-tokens. Calibration-only flags (e.g. pack's --report and
+    --dry-run) are deliberately not exposed here.
     """
     from .download import download
     from .pack import pack
@@ -113,6 +118,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
             score=score,
             dedup=dedup,
             show_tokens=show_tokens,
+            for_queries=for_queries,
             delta=True,
         )
     finally:

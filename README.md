@@ -308,6 +308,8 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--manifest` | — | `.dograpper-manifest.json` | Download manifest used for delta comparison |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
+| `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
+| `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
 
 #### Pack internal pipeline
 
@@ -418,6 +420,30 @@ Results are saved to `llm-readiness.json`. When combined with
 `--context-header` or `--format jsonl`, the grade is injected into
 headers/records.
 
+#### Readiness report (`--report`)
+
+Visual companion to `--score` (implied if absent): writes a
+self-contained `readiness-report.html` in the output directory and
+prints a colorized worst-first summary after the pack summary.
+
+The report makes each penalty tangible:
+
+- **noise** — per-page before/after word counts plus samples of the
+  blocks removed by extraction (first 5 per page, in document order);
+- **boundary** — the line and snippet of each broken ` ``` ` fence or
+  unmatched `<pre>` tag, attributed to its source page (line numbers
+  are relative to that page's extracted content);
+- **context depth** — the headings found per page (or the absence of
+  headings as the cause).
+
+Chunks are sorted worst-first (C grades on top) so calibration effort
+goes where it pays off. Incompatible with `--dry-run`: the report needs
+the final chunk text.
+
+```bash
+dograpper pack ./docs -o ./chunks --report
+```
+
 #### Presets (`--bundle`)
 
 Shortcuts for common combinations. The preset **sets defaults**;
@@ -449,6 +475,38 @@ before the final pack.
   the same chunk before applying the limit. Preserves thematic
   cohesion. Groups larger than the limit are subdivided.
 
+#### Query-oriented packing (`--for-queries`)
+
+Reorders source files by query affinity **before** chunking, so content
+relevant to the same expected question lands in the same chunk. Takes a
+text file with one query per line (blank lines and `#` comments are
+skipped):
+
+```
+# queries.txt — what users will actually ask
+how do I declare options
+testing CLI applications
+```
+
+Each query claims its BM25-matching files (greedy, in file order); files
+matched by no query go last in alphabetical order. Query terms that
+appear in more than half of the source files are ignored when matching —
+they carry no co-location signal (this filter only kicks in on corpora
+of 5+ files, so small `--delta` subsets still match normally; under
+`--delta` the ranking corpus is the delta subset). Fully deterministic —
+same corpus + same queries file = same chunk layout. The summary reports
+the assignment: `Query packing:   3 queries, 12 files matched, 4 unmatched`.
+
+Greedy assignment favors earlier queries: the filter mitigates — it does
+not solve — one query absorbing most of the corpus (measured 29/40 files
+claimed by the first query on the click docs corpus even with the
+filter). Put your most specific queries first.
+
+Incompatible with `--strategy semantic` (two mutually exclusive grouping
+policies — the CLI errors instead of silently overriding). Composes with
+`--delta`, `--dedup`, `--score`, `--context-header`, `--format jsonl`
+and `--bundle`.
+
 #### Examples
 
 ```bash
@@ -472,6 +530,9 @@ dograpper pack ./docs -o ./chunks --strategy semantic --ignore "*.png"
 
 # Incremental updates (delta)
 dograpper pack ./docs -o ./chunks --delta
+
+# Co-locate content by expected user queries
+dograpper pack ./docs -o ./chunks --for-queries queries.txt
 ```
 
 ### `dograpper explain`
@@ -521,6 +582,7 @@ dograpper sync <url> -o <dir> [options]
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |
 | `--score` | — | `false` | LLM Readiness (passed to `pack`) |
+| `--for-queries` | — | *(none)* | Queries file for query-oriented packing (passed to `pack`) |
 
 `pack` is always executed with an implicit `--delta` — it only
 reprocesses files that changed in the mirror.
@@ -767,6 +829,7 @@ Full spec: [docs/schema-v1.md](docs/schema-v1.md)
 | `docs_chunk_*.jsonl` | `--format jsonl` | One JSON line per source file |
 | `cross_refs.json` | `--cross-refs` | Cross-reference graph between chunks |
 | `llm-readiness.json` | `--score` | Quality scores per chunk |
+| `readiness-report.html` | `--report` | Visual before/after report with penalty causes |
 | `IMPORT_GUIDE.md` | `--bundle notebooklm` | Upload guide with recommended ordering |
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
 | `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes) |
