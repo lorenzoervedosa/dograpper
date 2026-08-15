@@ -21,6 +21,14 @@ usando atribuição gulosa sobre o engine BM25 já existente em
 - Documentos indexados em ordem `sorted(rel_paths)`; cada query, na
   ordem do arquivo, reivindica seus hits com `score > 0` ainda não
   atribuídos, mantendo a ordem `(-score, doc_id)` do engine.
+- Termos comuns da query são descartados antes da busca: termo presente
+  em mais da metade do corpus (`COMMON_TERM_DF_RATIO = 0.5`) não carrega
+  sinal de co-localização. Sem esse filtro, o idf do BM25 (sempre > 0
+  nesta formulação, sem lista de stopwords) faz uma primeira query em
+  linguagem natural ("how do I...") absorver quase todo o corpus via
+  "how"/"a"/"to", degenerando a ordenação. O filtro vive em
+  `query_packer` — `lib/retrieval.py` fica intacto (eval e serve
+  mantêm sua semântica).
 - Arquivos sem match ficam por último, em ordem alfabética.
 - Determinismo total: mesmo corpus + mesmo arquivo de queries = mesmo
   layout de chunks (tokenização estável, desempate por `doc_id`).
@@ -39,4 +47,6 @@ usando atribuição gulosa sobre o engine BM25 já existente em
   versionável junto com a config.
 - Erros de arquivo ausente/vazio falham alto e cedo (`exit 1`), sem
   fallback silencioso para ordem alfabética.
-- Query sem nenhum match gera warning (não erro) e o pack continua.
+- Query sem nenhum match gera warning (não erro) e o pack continua —
+  inclusive quando todos os termos da query foram descartados como
+  comuns (corpus pequeno ou query só de palavras ubíquas).

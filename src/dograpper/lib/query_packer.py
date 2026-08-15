@@ -9,7 +9,13 @@ library layer — no click, no CLI concerns.
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from .retrieval import build_index
+from .retrieval import build_index, tokenize
+
+# Invariant: a query term present in more than this fraction of the
+# corpus carries no co-location signal and is ignored when matching
+# (BM25 idf is always > 0 here, so without this filter a stopword-laden
+# first query would claim nearly every file).
+COMMON_TERM_DF_RATIO = 0.5
 
 
 @dataclass
@@ -55,7 +61,8 @@ def order_files_by_queries(rel_paths, texts: Dict[str, str],
     """Reorder ``rel_paths`` by greedy BM25 assignment to ``queries``.
 
     Docs are indexed in sorted(rel_paths) order; each query (in file
-    order) claims its still-unassigned hits with score > 0, keeping the
+    order) drops its corpus-common terms (COMMON_TERM_DF_RATIO), then
+    claims its still-unassigned hits with score > 0, keeping the
     engine's (-score, doc_id) hit order. Unassigned files go last,
     sorted. Fully deterministic.
     """
@@ -65,7 +72,12 @@ def order_files_by_queries(rel_paths, texts: Dict[str, str],
     assigned = set()
     assignments = []
     for query in queries:
-        hits = index.search(query, k=len(docs))
+        # tokenize is idempotent on its own output, so re-joining the
+        # surviving terms searches exactly those terms.
+        discriminative = " ".join(
+            t for t in tokenize(query)
+            if index.df.get(t, 0) <= COMMON_TERM_DF_RATIO * index.n_docs)
+        hits = index.search(discriminative, k=len(docs))
         assignment = QueryAssignment(query=query)
         for hit in hits:
             if hit.score <= 0:
