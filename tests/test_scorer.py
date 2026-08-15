@@ -10,6 +10,7 @@ from dograpper.utils.scorer import (
     check_boundary_integrity,
     calculate_context_depth,
     calculate_grade,
+    find_boundary_issues,
     score_chunk,
 )
 from dograpper.commands.pack import pack
@@ -51,6 +52,45 @@ class TestBoundaryIntegrity:
     def test_multiple_fences(self):
         text = "```\nblock1\n```\n\n```\nblock2\n```"
         assert check_boundary_integrity(text) is True
+
+
+class TestFindBoundaryIssues:
+    def test_balanced_text_no_issues(self):
+        text = "```python\ncode\n```\n\n<pre>snippet</pre>\n\nRegular text."
+        assert find_boundary_issues(text) == []
+
+    def test_plain_text_no_issues(self):
+        assert find_boundary_issues("Just regular text.") == []
+
+    def test_odd_fences_reports_last_fence(self):
+        text = "intro\n```python\ncode\n```\nmore\n```js\ntail"
+        issues = find_boundary_issues(text)
+        assert len(issues) == 1
+        assert issues[0].kind == "code_fence"
+        assert issues[0].line == 6
+        assert issues[0].snippet == "```js"
+
+    def test_unclosed_pre_reports_first_unmatched_opener(self):
+        text = '<pre>a</pre>\nmiddle\n<pre class="x">b'
+        issues = find_boundary_issues(text)
+        assert len(issues) == 1
+        assert issues[0].kind == "pre_tag"
+        assert issues[0].line == 3
+        assert issues[0].snippet == '<pre class="x">b'
+
+    def test_surplus_pre_closer_reports_first_surplus(self):
+        text = "</pre>\n<pre>a</pre>"
+        issues = find_boundary_issues(text)
+        assert len(issues) == 1
+        assert issues[0].kind == "pre_tag"
+        assert issues[0].line == 1
+        assert issues[0].snippet == "</pre>"
+
+    def test_fence_and_pre_issues_together(self):
+        text = "```\ncode\n\n<pre>never closed"
+        issues = find_boundary_issues(text)
+        kinds = [i.kind for i in issues]
+        assert kinds == ["code_fence", "pre_tag"]
 
 
 class TestContextDepth:

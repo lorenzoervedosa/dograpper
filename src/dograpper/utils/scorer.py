@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from typing import List
 
 
 @dataclass
@@ -15,6 +16,14 @@ class ChunkScore:
     grade: str
 
 
+@dataclass
+class BoundaryIssue:
+    """A broken structural block located in the text."""
+    kind: str      # "code_fence" or "pre_tag"
+    line: int      # 1-based line number
+    snippet: str   # the offending line
+
+
 def calculate_noise_ratio(raw_words: int, extracted_words: int) -> float:
     """Proportion of words removed by extraction (boilerplate).
 
@@ -26,6 +35,51 @@ def calculate_noise_ratio(raw_words: int, extracted_words: int) -> float:
     return max(0.0, min(1.0, noise))
 
 
+def _line_at(text: str, pos: int) -> tuple:
+    """Return (1-based line number, full line content) for a char position."""
+    line_number = text.count('\n', 0, pos) + 1
+    start = text.rfind('\n', 0, pos) + 1
+    end = text.find('\n', pos)
+    if end == -1:
+        end = len(text)
+    return line_number, text[start:end]
+
+
+def find_boundary_issues(text: str) -> List[BoundaryIssue]:
+    """Locate broken structural blocks in the text.
+
+    Detects:
+    - Unbalanced ``` fences (odd count) -> one issue at the last fence
+    - Unbalanced <pre>...</pre> tags -> one issue at the first unmatched
+      opener (or first surplus closer when closers exceed openers)
+    """
+    issues = []
+
+    fences = list(re.finditer(r'```', text))
+    if len(fences) % 2 != 0:
+        line, snippet = _line_at(text, fences[-1].start())
+        issues.append(BoundaryIssue(kind="code_fence", line=line, snippet=snippet))
+
+    opens = [(m.start(), 'open') for m in re.finditer(r'<pre[\s>]', text, re.IGNORECASE)]
+    closes = [(m.start(), 'close') for m in re.finditer(r'</pre>', text, re.IGNORECASE)]
+    if len(opens) != len(closes):
+        # Pair tags in document order to locate the offender
+        stack = []
+        first_surplus_close = None
+        for pos, kind in sorted(opens + closes):
+            if kind == 'open':
+                stack.append(pos)
+            elif stack:
+                stack.pop()
+            elif first_surplus_close is None:
+                first_surplus_close = pos
+        pos = stack[0] if len(opens) > len(closes) else first_surplus_close
+        line, snippet = _line_at(text, pos)
+        issues.append(BoundaryIssue(kind="pre_tag", line=line, snippet=snippet))
+
+    return issues
+
+
 def check_boundary_integrity(text: str) -> bool:
     """Check whether the text contains broken structural blocks.
 
@@ -33,16 +87,7 @@ def check_boundary_integrity(text: str) -> bool:
     - Unbalanced ``` fences (odd count)
     - Unbalanced <pre>...</pre> tags
     """
-    fence_count = len(re.findall(r'```', text))
-    if fence_count % 2 != 0:
-        return False
-
-    pre_open = len(re.findall(r'<pre[\s>]', text, re.IGNORECASE))
-    pre_close = len(re.findall(r'</pre>', text, re.IGNORECASE))
-    if pre_open != pre_close:
-        return False
-
-    return True
+    return len(find_boundary_issues(text)) == 0
 
 
 def calculate_context_depth(headings_count: int, max_level: int) -> int:
