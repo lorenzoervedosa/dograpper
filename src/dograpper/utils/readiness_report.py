@@ -6,6 +6,7 @@ builders: no I/O, no click — styling is applied by the command layer.
 """
 
 import html as html_mod
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List
 
@@ -41,13 +42,19 @@ def find_removed_blocks(
 
     Blocks are split on \\n\\n and compared as stripped strings; blocks
     removed by extraction are returned in document order, capped at
-    max_samples and truncated to max_chars each.
+    max_samples and truncated to max_chars each. Comparison is a
+    multiset: a block kept once but repeated in raw still surfaces.
     """
-    extracted_blocks = {b.strip() for b in extracted_text.split("\n\n")}
-    removed = [
-        b.strip() for b in raw_text.split("\n\n")
-        if b.strip() and b.strip() not in extracted_blocks
-    ]
+    extracted_counts = Counter(b.strip() for b in extracted_text.split("\n\n"))
+    removed = []
+    for block in raw_text.split("\n\n"):
+        key = block.strip()
+        if not key:
+            continue
+        if extracted_counts[key] > 0:
+            extracted_counts[key] -= 1
+        else:
+            removed.append(key)
     return [b[:max_chars] for b in removed[:max_samples]]
 
 

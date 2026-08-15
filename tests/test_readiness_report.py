@@ -61,6 +61,13 @@ class TestFindRemovedBlocks:
         extracted = "content"
         assert find_removed_blocks(raw, extracted) == ["noise"]
 
+    def test_duplicate_removed_block_surfaces(self):
+        # Identical nav markup repeated in raw but kept only once in the
+        # extracted text: one removal must surface, not zero.
+        raw = "Nav menu\n\ncontent\n\nNav menu"
+        extracted = "Nav menu\n\ncontent"
+        assert find_removed_blocks(raw, extracted) == ["Nav menu"]
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: generate_html_report
