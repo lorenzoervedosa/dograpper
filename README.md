@@ -461,7 +461,9 @@ testing CLI applications
 ```
 
 Each query claims its BM25-matching files (greedy, in file order); files
-matched by no query go last in alphabetical order. Fully deterministic —
+matched by no query go last in alphabetical order. Query terms that
+appear in more than half of the source files are ignored when matching —
+they carry no co-location signal. Fully deterministic —
 same corpus + same queries file = same chunk layout. The summary reports
 the assignment: `Query packing: 3 queries, 12 files matched, 4 unmatched`.
 
