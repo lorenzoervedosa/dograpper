@@ -489,7 +489,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                 elif extracted_text is not None:
                     chunk_text_parts.append(extracted_text)
 
-                if is_report and raw_text is not None:
+                if is_report and raw_text is not None and extracted_text is not None:
                     page_raw = len(raw_text.split())
                     page_extracted = len(extracted_text.split())
                     chunk_pages.append(PageReadiness(

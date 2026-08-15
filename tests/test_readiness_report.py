@@ -288,6 +288,25 @@ class TestReportCLI:
             assert not os.path.exists(os.path.join(output_dir, "readiness-report.html"))
             assert "Readiness report (worst first):" not in result.output
 
+    def test_report_survives_extraction_failure(self):
+        """Regression: a page whose extraction raises (e.g. a valueless
+        attribute like <div class>) must not abort the whole pack run."""
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = os.path.join(tmp, "docs")
+            output_dir = os.path.join(tmp, "chunks")
+            _make_html_tree(input_dir)
+            with open(os.path.join(input_dir, "malformed.html"), "w", encoding="utf-8") as f:
+                f.write("<html><body><div class><p>content with broken attribute</p>"
+                        "</div></body></html>")
+
+            result = runner.invoke(pack, [
+                input_dir, "-o", output_dir, "--report",
+            ], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            assert os.path.exists(os.path.join(output_dir, "readiness-report.html"))
+
     def test_report_from_config_file(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
