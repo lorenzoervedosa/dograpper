@@ -28,6 +28,9 @@ class PageReadiness:
     max_heading_level: int = 0
     first_headings: List[str] = field(default_factory=list)
     removed_samples: List[str] = field(default_factory=list)
+    # Boundary issues located in THIS page's extracted text (line numbers
+    # are relative to it, not to the written chunk file).
+    boundary_issues: List = field(default_factory=list)
 
 
 def find_removed_blocks(
@@ -98,12 +101,11 @@ def _grade_badge(grade: str) -> str:
 def generate_html_report(
     scores: list,
     pages_by_chunk: Dict[str, List[PageReadiness]],
-    issues_by_chunk: dict,
 ) -> str:
     """Build the self-contained HTML readiness report as a string.
 
-    scores: list of ChunkScore; pages_by_chunk / issues_by_chunk map
-    chunk_id to its PageReadiness list / BoundaryIssue list.
+    scores: list of ChunkScore; pages_by_chunk maps chunk_id to its
+    PageReadiness list (each page carries its own boundary_issues).
     """
     ordered = _sort_worst_first(scores)
     avg_score = sum(s.score for s in scores) / len(scores) if scores else 0.0
@@ -135,7 +137,6 @@ def generate_html_report(
     # --- Per chunk, worst-first ---
     for s in ordered:
         pages = pages_by_chunk.get(s.chunk_id, [])
-        issues = issues_by_chunk.get(s.chunk_id, [])
 
         out.append('<div class="chunk">')
         out.append(f"<h2>{_esc(s.chunk_id)} {_grade_badge(s.grade)} "
@@ -163,15 +164,23 @@ def generate_html_report(
         else:
             out.append('<p class="muted">No per-page data collected.</p>')
 
-        # Boundary penalty: issue locations/snippets
+        # Boundary penalty: per-page issue locations/snippets
         boundary_label = "OK" if s.boundary_integrity else "BROKEN"
         out.append(f'<p class="penalty">Boundary integrity: {boundary_label}</p>')
-        if issues:
-            for issue in issues:
-                out.append(
-                    f'<p class="issue">{_esc(issue.kind)} at line {issue.line}: '
+        page_issue_lines = []
+        for p in pages:
+            for issue in p.boundary_issues:
+                page_issue_lines.append(
+                    f'<p class="issue">{_esc(p.relative_path)} &mdash; '
+                    f"{_esc(issue.kind)} at line {issue.line} "
+                    f"(line within this page's extracted content): "
                     f"{_esc(issue.snippet)}</p>"
                 )
+        if page_issue_lines:
+            out.extend(page_issue_lines)
+        elif not s.boundary_integrity:
+            out.append('<p class="muted">Broken blocks not attributable to a '
+                       "single page (introduced by chunk assembly or dedup).</p>")
         else:
             out.append('<p class="muted">No broken blocks detected.</p>')
 

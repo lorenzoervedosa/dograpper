@@ -93,13 +93,10 @@ def _sample_inputs():
             extracted_words=800,
             noise_ratio=0.6,
             removed_samples=["Cookie banner text", "<script>alert('x')</script>"],
+            boundary_issues=[BoundaryIssue(kind="code_fence", line=12, snippet="```python")],
         )],
     }
-    issues = {
-        "docs_chunk_01": [],
-        "docs_chunk_02": [BoundaryIssue(kind="code_fence", line=12, snippet="```python")],
-    }
-    return scores, pages, issues
+    return scores, pages
 
 
 class TestGenerateHtmlReport:
@@ -131,7 +128,7 @@ class TestGenerateHtmlReport:
             _score("docs_chunk_03", 0.50, "B"),
             _score("docs_chunk_01", 0.50, "B"),
         ]
-        report = generate_html_report(scores, {}, {})
+        report = generate_html_report(scores, {})
         assert report.index("docs_chunk_01") < report.index("docs_chunk_03")
 
     def test_grade_css_classes(self):
@@ -144,10 +141,26 @@ class TestGenerateHtmlReport:
         assert "Cookie banner text" in report
         assert "Nav menu" in report
 
-    def test_boundary_penalty_shows_issue_location(self):
+    def test_boundary_penalty_shows_per_page_issue_location(self):
         report = generate_html_report(*_sample_inputs())
         assert "```python" in report
-        assert "12" in report
+        assert "line 12" in report
+        # Attribution: issue names its source page and says the line is
+        # relative to that page's extracted content, not the chunk file.
+        issue_pos = report.index("code_fence")
+        assert "docs/bad.html" in report[issue_pos - 200:issue_pos + 200]
+        assert "extracted content" in report
+
+    def test_broken_boundary_without_page_issues_shows_fallback(self):
+        scores = [_score("docs_chunk_01", 0.40, "C", boundary=False, depth=0)]
+        pages = {"docs_chunk_01": [PageReadiness(
+            relative_path="docs/a.html",
+            raw_words=100,
+            extracted_words=100,
+            noise_ratio=0.0,
+        )]}
+        report = generate_html_report(scores, pages)
+        assert "not attributable" in report
 
     def test_context_penalty_shows_headings_or_absence(self):
         report = generate_html_report(*_sample_inputs())

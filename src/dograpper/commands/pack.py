@@ -429,7 +429,6 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     readiness_scores = []
     readiness_map = None
     report_pages = {}   # chunk_id -> List[PageReadiness] (only with --report)
-    report_issues = {}  # chunk_id -> List[BoundaryIssue] (only with --report)
     if is_score:
         from ..utils.scorer import score_chunk
         from ..utils.html_stripper import strip_html as _score_strip
@@ -501,6 +500,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                         max_heading_level=max((h.level for h in file_headings), default=0),
                         first_headings=[h.text for h in file_headings[:3]],
                         removed_samples=find_removed_blocks(raw_text, extracted_text),
+                        boundary_issues=find_boundary_issues(extracted_text),
                     ))
 
             chunk_text = "\n\n".join(chunk_text_parts)
@@ -517,7 +517,6 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
             if is_report:
                 report_pages[chunk_id] = chunk_pages
-                report_issues[chunk_id] = find_boundary_issues(chunk_text)
 
         # Build readiness_map for header injection (md/txt) and JSONL grade
         if ctx_header or fmt == 'jsonl':
@@ -668,7 +667,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
         report_path = os.path.join(output_dir, "readiness-report.html")
         with open(report_path, 'w', encoding='utf-8') as rf:
-            rf.write(generate_html_report(readiness_scores, report_pages, report_issues))
+            rf.write(generate_html_report(readiness_scores, report_pages))
 
     # 10e. Token counting (opt-in)
     token_counts = []

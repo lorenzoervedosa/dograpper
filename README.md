@@ -426,8 +426,9 @@ The report makes each penalty tangible:
 
 - **noise** — per-page before/after word counts plus samples of the
   blocks removed by extraction (first 5 per page, in document order);
-- **boundary** — the exact line and snippet of each broken ` ``` `
-  fence or unmatched `<pre>` tag in the chunk text;
+- **boundary** — the line and snippet of each broken ` ``` ` fence or
+  unmatched `<pre>` tag, attributed to its source page (line numbers
+  are relative to that page's extracted content);
 - **context depth** — the headings found per page (or the absence of
   headings as the cause).
 
