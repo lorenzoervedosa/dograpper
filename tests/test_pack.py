@@ -516,3 +516,29 @@ def test_pack_for_queries_composes_with_bundle():
         # Fewer files than target chunks: one file per chunk, query order kept.
         with open(os.path.join(out, 'docs_chunk_01.md')) as f:
             assert 'zebra.html' in f.read()
+
+
+def test_pack_for_queries_file_inside_input_dir_not_packed():
+    """Reviewer repro: a queries file living inside INPUT_DIR (no --ignore)
+    must not join the corpus — and ordering must still apply."""
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile,
+            '--max-words-per-chunk', '45'])
+
+        assert result.exit_code == 0, result.output
+        chunk_blob = ""
+        for fn in os.listdir(out):
+            with open(os.path.join(out, fn), encoding='utf-8') as cf:
+                chunk_blob += cf.read()
+        assert "queries.txt" not in chunk_blob
+        with open(os.path.join(out, 'docs_chunk_01.md')) as f:
+            assert 'SOURCE: zebra.html' in f.read()
+        assert "2 files matched" in result.output
