@@ -599,3 +599,22 @@ def test_pack_for_queries_composes_with_dedup():
         # Query 1 (installation) puts zebra-install first despite its name.
         with open(os.path.join(out, 'docs_chunk_01.md')) as f:
             assert 'SOURCE: zebra-install.html' in f.read()
+
+
+def test_pack_for_queries_dry_run_shows_summary():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        _make_query_tree(d)
+        qfile = os.path.join(d, 'queries.txt')
+        with open(qfile, 'w') as f:
+            f.write("installation pip\npytest testing\n")
+
+        out = os.path.join(d, 'out')
+        result = runner.invoke(pack, [
+            d, '-o', out, '--for-queries', qfile, '--dry-run'])
+
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+        assert "2 queries, 2 files matched, 0 unmatched" in result.output
+        # dry-run must not write anything
+        assert not os.path.exists(out)
