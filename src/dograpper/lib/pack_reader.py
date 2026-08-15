@@ -22,11 +22,21 @@ class PackedChunk:
     words: int = 0
 
 
-def load_chunks(chunks_dir: str, prefix: str = "docs_chunk_") -> List[PackedChunk]:
-    """Load all ``<prefix>*.jsonl`` chunk files under ``chunks_dir``."""
-    pattern = os.path.join(chunks_dir, f"{prefix}*.jsonl")
+def load_chunks(chunks_dir: str, prefix: str = "docs_chunk_",
+                files: List[str] = None) -> List[PackedChunk]:
+    """Load JSONL chunk files under ``chunks_dir``.
+
+    By default loads all ``<prefix>*.jsonl``; pass ``files`` (paths) to
+    load an exact set instead — prefix globbing is ambiguous once chunk
+    indices grow a digit (``docs_chunk_10`` also matches
+    ``docs_chunk_100.jsonl``).
+    """
+    if files is not None:
+        paths = sorted(files)
+    else:
+        paths = sorted(glob.glob(os.path.join(chunks_dir, f"{prefix}*.jsonl")))
     chunks: List[PackedChunk] = []
-    for path in sorted(glob.glob(pattern)):
+    for path in paths:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
