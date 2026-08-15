@@ -8,9 +8,6 @@ file plugs into the standard config precedence: defaults < JSON < CLI.
 import json
 import os
 import click
-import logging
-
-logger = logging.getLogger(__name__)
 
 # Preset registry: target -> (description, config dict).
 # Keys use the hyphenated form consumed by config_loader.
@@ -86,11 +83,13 @@ def build_preset_config(target: str) -> dict:
               help="Ingestion target preset. Prompted interactively when omitted.")
 @click.option('--yes', '-y', is_flag=True, default=False,
               help="Non-interactive mode: write without prompting (requires --target).")
-@click.option('--output', '-o', 'output_path', type=click.Path(), default=".dograpper.json",
-              show_default=True, help="Where to write the generated config.")
+@click.option('--output', '-o', 'output_path', type=click.Path(), default=None,
+              help="Where to write the generated config "
+                   "[default: the global --config path, i.e. .dograpper.json].")
 @click.option('--force', '-f', is_flag=True, default=False,
               help="Overwrite an existing config file.")
-def init(target: str, yes: bool, output_path: str, force: bool):
+@click.pass_context
+def init(ctx: click.Context, target: str, yes: bool, output_path: str, force: bool):
     """Generate a .dograpper.json config for your ingestion target.
 
     Interactive by default: pick a target (notebooklm, rag, claude-project),
@@ -99,6 +98,18 @@ def init(target: str, yes: bool, output_path: str, force: bool):
     """
     if yes and target is None:
         raise click.UsageError("--yes requires --target (non-interactive mode).")
+
+    ctx.ensure_object(dict)
+    if output_path is None:
+        output_path = ctx.obj.get('CONFIG_PATH', '.dograpper.json')
+
+    # Overwrite guard runs before any prompt so the wizard never asks
+    # questions it may discard.
+    if os.path.exists(output_path) and not force:
+        if yes:
+            raise click.ClickException(
+                f"{output_path} already exists. Use --force to overwrite.")
+        click.confirm(f"{output_path} already exists. Overwrite?", abort=True)
 
     if target is None:
         click.echo("Available targets:")
@@ -110,10 +121,6 @@ def init(target: str, yes: bool, output_path: str, force: bool):
     config = build_preset_config(target)
     rendered = json.dumps(config, indent=2, ensure_ascii=False)
 
-    if os.path.exists(output_path) and not force:
-        raise click.ClickException(
-            f"{output_path} already exists. Use --force to overwrite.")
-
     click.echo(f"\nGenerated config for target '{target}':\n")
     click.echo(rendered)
     click.echo()
@@ -121,10 +128,18 @@ def init(target: str, yes: bool, output_path: str, force: bool):
     if not yes:
         click.confirm(f"Write to {output_path}?", abort=True)
 
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(rendered + "\n")
 
     click.echo(f"Config written to {output_path}")
     click.echo("\nNext steps:")
-    click.echo("  dograpper download <url> -o ./docs")
-    click.echo("  dograpper pack ./docs -o ./chunks")
+    if output_path != ".dograpper.json":
+        click.echo(f"  dograpper --config {output_path} download <url> -o ./docs")
+        click.echo(f"  dograpper --config {output_path} pack ./docs -o ./chunks")
+    else:
+        click.echo("  dograpper download <url> -o ./docs")
+        click.echo("  dograpper pack ./docs -o ./chunks")

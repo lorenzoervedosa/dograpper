@@ -513,9 +513,9 @@ dograpper sync https://react.dev -o ./react-docs --headless --delay 500
 
 ### `dograpper init`
 
-Onboarding wizard: generates a ready-to-use `.dograpper.json` for your
-ingestion target, reusing the `--bundle` presets. Interactive by default;
-`--target` + `--yes` for scripts.
+Onboarding wizard: generates a ready-to-use `.dograpper.json` tuned for
+your ingestion target. Interactive by default; `--target` + `--yes` for
+scripts.
 
 ```bash
 dograpper init                          # interactive wizard
@@ -526,16 +526,20 @@ dograpper init --target rag --yes       # non-interactive
 |---|---|---|---|
 | `--target` | `-t` | *(prompted)* | `notebooklm` \| `rag` \| `claude-project` |
 | `--yes` | `-y` | `false` | Non-interactive mode (requires `--target`) |
-| `--output` | `-o` | `.dograpper.json` | Where to write the config |
+| `--output` | `-o` | global `--config` path | Where to write the config |
 | `--force` | `-f` | `false` | Overwrite an existing config file |
 
 Targets:
 
-- **`notebooklm`** — ≤50 balanced `md` chunks (`--bundle notebooklm`), semantic
-  strategy, context headers, readiness score, dedup.
-- **`rag`** — `jsonl` records with context headers, cross-references and
-  readiness score.
-- **`claude-project`** — compact `md` chunks (≤100k words) with context headers.
+- **`notebooklm`** — the `--bundle notebooklm` preset (≤50 balanced `md`
+  chunks), semantic strategy, context headers, readiness score, dedup.
+- **`rag`** — `jsonl` records with context headers, cross-references,
+  readiness score and dedup.
+- **`claude-project`** — compact `md` chunks (≤100k words), semantic
+  strategy, context headers, readiness score and dedup.
+
+Writing to a non-default path prints the `--config <path>` invocation
+needed to consume it.
 
 The generated file plugs into the standard config precedence
 (defaults < `.dograpper.json` < explicit CLI flags) — any flag you pass
