@@ -30,6 +30,7 @@ src/dograpper/
 │   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
+│   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
 │   └── sync.py             # Subcomando sync (download + pack em um passo)
 ├── lib/
 │   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile, write_chunks() (md, txt, jsonl)
@@ -37,6 +38,7 @@ src/dograpper/
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
 │   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build
+│   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
 │   ├── playwright_crawl.py # Crawler headless; hidratação bounded (domcontentloaded 10s + a[href] 5s + 500ms); aceita seed_urls
 │   ├── sitemap_parser.py   # fetch_sitemap() — sitemap.xml + sitemapindex recursivo, gzip, same-netloc guard (SITEMAP_NS)
 │   ├── spa_detector.py     # is_spa() via html.parser; small-sample branch (N<5) + errors='replace' encoding
@@ -73,6 +75,7 @@ tests/
 ├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, CLI
 ├── test_link_extractor.py  # Link extraction, cross-ref index, annotation, CLI integration
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
+├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
 ├── test_pack.py            # word_counter, ignore_parser, chunker, write_chunks, CLI integration
 ├── test_scorer.py          # LLM Readiness Score: noise_ratio, boundary, context_depth, grades, CLI
 ├── test_sitemap_parser.py  # fetch_sitemap: namespace, urlset, gzip, sitemapindex recursivo, cross-host reject, 404, UA
@@ -232,6 +235,9 @@ uv run dograpper pack ./test-docs -o ./chunks --delta
 
 # Inspecionar o que o LLM recebe por chunk (read-only)
 uv run dograpper explain ./chunks docs_chunk_01
+
+# Servir o pack como servidor MCP local (stdio)
+uv run dograpper serve ./chunks
 
 # Sync (download + pack delta)
 uv run dograpper sync https://click.palletsprojects.com/en/stable/ -o ./test-docs
