@@ -204,3 +204,31 @@ def test_load_config_without_obj_unaffected(tmp_path):
     ctx = _bare_ctx({"format": "md"}, None)
     merged = load_config(str(config), "pack", {"format": "md"}, ctx)
     assert merged["format"] == "jsonl"
+
+
+def test_sync_for_queries_explicit_beats_config(stub_download):
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        with open("cli-queries.txt", "w", encoding="utf-8") as f:
+            f.write("documentation content\n")
+        # Config points to a missing file: if JSON won, pack would fail.
+        _write_config({"for-queries": "missing.txt"})
+        result = runner.invoke(
+            cli, ["sync", "https://docs.example.com", "-o", "docs",
+                  "--for-queries", "cli-queries.txt"])
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
+
+
+def test_sync_for_queries_config_beats_defaults(stub_download):
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        with open("queries.txt", "w", encoding="utf-8") as f:
+            f.write("documentation content\n")
+        _write_config({"for-queries": "queries.txt"})
+        result = runner.invoke(
+            cli, ["sync", "https://docs.example.com", "-o", "docs"])
+        assert result.exit_code == 0, result.output
+        assert "Query packing:" in result.output
