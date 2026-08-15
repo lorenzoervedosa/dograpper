@@ -56,6 +56,9 @@ def parse_chunk_sections(text: str) -> List[ChunkSection]:
     matches = list(V1_HEADER_RE.finditer(text))
     if matches:
         sections = []
+        leading = text[:matches[0].start()].strip("\n")
+        if leading.strip():
+            sections.append(ChunkSection(content=leading))
         for i, m in enumerate(matches):
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             content = text[m.end():end].strip("\n")
@@ -75,6 +78,9 @@ def parse_chunk_sections(text: str) -> List[ChunkSection]:
                       or list(TXT_SOURCE_RE.finditer(text)))
     if source_matches:
         sections = []
+        leading = text[:source_matches[0].start()].strip("\n")
+        if leading.strip():
+            sections.append(ChunkSection(content=leading))
         for i, m in enumerate(source_matches):
             end = (source_matches[i + 1].start()
                    if i + 1 < len(source_matches) else len(text))

@@ -74,7 +74,10 @@ def explain(ctx, chunks_dir, chunk_id, prefix, full):
         click.echo(f"Chunks in {chunks_dir}:")
         for info in chunks:
             entry = readiness_for(readiness, info.chunk_id)
-            grade = f"  grade {entry['grade']} ({entry['score']})" if entry else ""
+            grade = ""
+            if entry:
+                grade = (f"  grade {entry.get('grade', '?')} "
+                         f"({entry.get('score', '?')})")
             click.echo(f"  {info.chunk_id}.{info.format}{grade}")
         click.echo("\nRun `dograpper explain <chunks-dir> <chunk-id>` to inspect one.")
         return
@@ -87,15 +90,20 @@ def explain(ctx, chunks_dir, chunk_id, prefix, full):
         click.echo(f"Error: chunk '{wanted}' not found. Available: {available}", err=True)
         ctx.exit(1)
     info = matching[0]
+    if len(matching) > 1:
+        others = ", ".join(f".{c.format}" for c in matching[1:])
+        click.echo(f"Note: {info.chunk_id} also exists as {others}; "
+                   f"inspecting .{info.format}")
 
     click.echo(f"Chunk:  {info.chunk_id}.{info.format}")
 
     entry = readiness_for(readiness, info.chunk_id)
     if entry:
-        click.echo(f"Readiness: grade {entry['grade']} (score {entry['score']}, "
-                   f"noise_ratio {entry['noise_ratio']}, "
-                   f"boundary_integrity {entry['boundary_integrity']}, "
-                   f"context_depth {entry['context_depth']})")
+        click.echo(f"Readiness: grade {entry.get('grade', '?')} "
+                   f"(score {entry.get('score', '?')}, "
+                   f"noise_ratio {entry.get('noise_ratio', '?')}, "
+                   f"boundary_integrity {entry.get('boundary_integrity', '?')}, "
+                   f"context_depth {entry.get('context_depth', '?')})")
 
     refs = cross_refs_for(cross_refs, info.chunk_id)
     if refs:
@@ -107,8 +115,7 @@ def explain(ctx, chunks_dir, chunk_id, prefix, full):
 
     if info.format == "jsonl":
         from ..lib.pack_reader import load_chunks
-        # Using the chunk id as prefix globs exactly this chunk's file.
-        records = load_chunks(chunks_dir, prefix=info.chunk_id)
+        records = load_chunks(chunks_dir, files=[info.path])
 
         click.echo(f"Records: {len(records)}\n")
         for rec in records:

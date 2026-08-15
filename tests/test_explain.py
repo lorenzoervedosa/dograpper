@@ -84,6 +84,23 @@ def test_parse_sections_txt_source_markers():
     assert sections[0].content == "Plain content"
 
 
+def test_parse_sections_keeps_preamble_before_first_header():
+    text = "# Chunk 01 of 01\n\n## Files in this chunk\n\n---\n\n" + V1_CHUNK
+    sections = parse_chunk_sections(text)
+    assert len(sections) == 3
+    assert "# Chunk 01 of 01" in sections[0].content
+    assert sections[0].header is None
+    assert sections[1].source == "guide/intro.html"
+
+
+def test_parse_sections_keeps_preamble_before_source_marker():
+    text = "Index preamble\n\n<!-- SOURCE: a.html -->\n\nContent A"
+    sections = parse_chunk_sections(text)
+    assert len(sections) == 2
+    assert sections[0].content == "Index preamble"
+    assert sections[1].source == "a.html"
+
+
 def test_parse_sections_no_markers_single_section():
     sections = parse_chunk_sections("Just raw text.")
     assert len(sections) == 1
@@ -206,6 +223,57 @@ def test_explain_chunk_jsonl_records():
         assert "00_guide/intro.html" in result.output
         assert "User Guide > Introduction" in result.output
         assert "Grade: A" in result.output
+
+
+def test_explain_txt_chunk_via_cli():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs("chunks", exist_ok=True)
+        with open("chunks/docs_chunk_00.txt", "w", encoding="utf-8") as f:
+            f.write("=== SOURCE: a.html ===\n\nPlain text body here")
+        result = runner.invoke(cli, ["explain", "chunks", "docs_chunk_00"])
+        assert result.exit_code == 0, result.output
+        assert "a.html" in result.output
+        assert "Plain text body here" in result.output
+
+
+def test_explain_ambiguous_format_notes_alternative():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_pack_fixture("md")
+        with open("chunks/docs_chunk_00.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps({"id": "00_a.html", "source": "a.html",
+                                "words": 2, "content": "hi there"}) + "\n")
+        result = runner.invoke(cli, ["explain", "chunks", "docs_chunk_00"])
+        assert result.exit_code == 0, result.output
+        assert "also exists as .md" in result.output
+
+
+def test_explain_jsonl_prefix_collision_loads_exact_file():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs("chunks", exist_ok=True)
+        with open("chunks/docs_chunk_10.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps({"id": "10_a.html", "source": "a.html",
+                                "words": 2, "content": "from ten"}) + "\n")
+        with open("chunks/docs_chunk_100.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps({"id": "100_b.html", "source": "b.html",
+                                "words": 2, "content": "from hundred"}) + "\n")
+        result = runner.invoke(cli, ["explain", "chunks", "docs_chunk_10"])
+        assert result.exit_code == 0, result.output
+        assert "from ten" in result.output
+        assert "from hundred" not in result.output
+
+
+def test_explain_readiness_missing_keys_tolerated():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_pack_fixture("md")
+        with open("chunks/llm-readiness.json", "w", encoding="utf-8") as f:
+            json.dump({"chunks": [{"chunk_id": "docs_chunk_00"}]}, f)
+        result = runner.invoke(cli, ["explain", "chunks", "docs_chunk_00"])
+        assert result.exit_code == 0, result.output
+        assert "grade ?" in result.output
 
 
 def test_explain_unknown_chunk_errors():
