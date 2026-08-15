@@ -463,7 +463,9 @@ testing CLI applications
 Each query claims its BM25-matching files (greedy, in file order); files
 matched by no query go last in alphabetical order. Query terms that
 appear in more than half of the source files are ignored when matching —
-they carry no co-location signal. Fully deterministic —
+they carry no co-location signal (this filter only kicks in on corpora
+of 5+ files, so small `--delta` subsets still match normally; under
+`--delta` the ranking corpus is the delta subset). Fully deterministic —
 same corpus + same queries file = same chunk layout. The summary reports
 the assignment: `Query packing: 3 queries, 12 files matched, 4 unmatched`.
 

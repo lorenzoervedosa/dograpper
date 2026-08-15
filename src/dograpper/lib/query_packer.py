@@ -17,6 +17,12 @@ from .retrieval import build_index, tokenize
 # first query would claim nearly every file).
 COMMON_TERM_DF_RATIO = 0.5
 
+# The df filter exists to stop one query from absorbing a LARGE corpus;
+# below this floor (e.g. a --delta subset of 1-2 files) it only creates
+# spurious zero-match warnings — an n=1 corpus must still match a query
+# quoting its exact content.
+MIN_DOCS_FOR_DF_FILTER = 5
+
 
 @dataclass
 class _Doc:
@@ -72,12 +78,15 @@ def order_files_by_queries(rel_paths, texts: Dict[str, str],
     assigned = set()
     assignments = []
     for query in queries:
-        # tokenize is idempotent on its own output, so re-joining the
-        # surviving terms searches exactly those terms.
-        discriminative = " ".join(
-            t for t in tokenize(query)
-            if index.df.get(t, 0) <= COMMON_TERM_DF_RATIO * index.n_docs)
-        hits = index.search(discriminative, k=len(docs))
+        if index.n_docs >= MIN_DOCS_FOR_DF_FILTER:
+            # tokenize is idempotent on its own output, so re-joining the
+            # surviving terms searches exactly those terms.
+            search_query = " ".join(
+                t for t in tokenize(query)
+                if index.df.get(t, 0) <= COMMON_TERM_DF_RATIO * index.n_docs)
+        else:
+            search_query = query
+        hits = index.search(search_query, k=len(docs))
         assignment = QueryAssignment(query=query)
         for hit in hits:
             if hit.score <= 0:

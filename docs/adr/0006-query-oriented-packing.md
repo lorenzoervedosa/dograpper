@@ -29,6 +29,13 @@ usando atribuição gulosa sobre o engine BM25 já existente em
   "how"/"a"/"to", degenerando a ordenação. O filtro vive em
   `query_packer` — `lib/retrieval.py` fica intacto (eval e serve
   mantêm sua semântica).
+- O filtro só se aplica a corpora com `MIN_DOCS_FOR_DF_FILTER = 5` ou
+  mais documentos: ele existe para impedir que uma query absorva um
+  corpus GRANDE; abaixo do piso (ex.: subset de `--delta` com 1-2
+  arquivos) todo termo relevante é "ubíquo" por construção e o filtro
+  só geraria warnings espúrios de zero-match.
+- Sob `--delta`, o corpus de ranking é o subset delta (consistente com
+  a semântica de delta: só arquivos alterados são reprocessados).
 - Arquivos sem match ficam por último, em ordem alfabética.
 - Determinismo total: mesmo corpus + mesmo arquivo de queries = mesmo
   layout de chunks (tokenização estável, desempate por `doc_id`).
