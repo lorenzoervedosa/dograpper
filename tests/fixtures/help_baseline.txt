@@ -24,6 +24,7 @@ Options:
 Commands:
   doctor    Detect, report, and install heavy dependencies (wget, chromium).
   download  Mirror a documentation site locally for offline processing.
+  drift     Report context drift between two llm-readiness.json snapshots.
   eval      Validate packed context empirically via golden Q&A hit-rate.
   explain   Preview what the LLM will receive for a packed chunk.
   init      Generate a .dograpper.json config for your ingestion target.

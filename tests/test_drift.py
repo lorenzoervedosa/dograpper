@@ -1,5 +1,11 @@
 """Tests for lib/readiness_diff.py and the `dograpper drift` subcommand."""
 
+import json
+import os
+
+from click.testing import CliRunner
+
+from dograpper.cli import cli
 from dograpper.lib.readiness_diff import (
     compare_readiness,
     render_markdown,
@@ -251,3 +257,150 @@ Source file drift:
     assert output.endswith(expected_tail)
     assert output.startswith("Context drift report\n====================\n"
                              "Summary: no drift | avg score 7.33 -> 7.33")
+
+
+# ---------------------------------------------------------------------------
+# CLI: dograpper drift
+# ---------------------------------------------------------------------------
+
+def _write_json(path, payload):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def test_drift_cli_happy_path_markdown():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("old.json", OLD)
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json", "--old", "old.json"])
+        assert result.exit_code == 0, result.output
+        assert result.output.startswith("<!-- dograpper-drift -->\n")
+        assert "1 added, 1 modified, 1 removed" in result.output
+        assert "grade B → A" in result.output
+
+
+def test_drift_cli_text_format():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("old.json", OLD)
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json",
+                                     "--old", "old.json", "--format", "text"])
+        assert result.exit_code == 0, result.output
+        assert result.output.startswith("Context drift report\n")
+        assert "grade B -> A" in result.output
+
+
+def test_drift_cli_first_run_without_old():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json"])
+        assert result.exit_code == 0, result.output
+        assert "First run" in result.output
+        assert "3 added, 0 modified, 0 removed" in result.output
+
+
+def test_drift_cli_new_file_missing_errors():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["drift", "--new", "absent.json"])
+        assert result.exit_code == 1
+        assert "absent.json" in result.output
+
+
+def test_drift_cli_new_file_unparseable_errors():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        with open("broken.json", "w", encoding="utf-8") as f:
+            f.write("{not json")
+        result = runner.invoke(cli, ["drift", "--new", "broken.json"])
+        assert result.exit_code == 1
+        assert "broken.json" in result.output
+
+
+def test_drift_cli_old_given_but_missing_errors():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json",
+                                     "--old", "absent.json"])
+        assert result.exit_code == 1
+        assert "absent.json" in result.output
+
+
+def test_drift_cli_delta_manifest_missing_is_tolerated():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("old.json", OLD)
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json", "--old", "old.json",
+                                     "--delta-manifest", "absent.json"])
+        assert result.exit_code == 0, result.output
+        assert "No source drift recorded" in result.output
+
+
+def test_drift_cli_delta_manifest_present_lists_files():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("old.json", OLD)
+        _write_json("new.json", NEW)
+        _write_json("delta.json", {"added": ["docs/new.html"],
+                                   "modified": [], "removed": []})
+        result = runner.invoke(cli, ["drift", "--new", "new.json", "--old", "old.json",
+                                     "--delta-manifest", "delta.json"])
+        assert result.exit_code == 0, result.output
+        assert "docs/new.html" in result.output
+
+
+def test_drift_cli_fail_on_drift_exits_1_when_drift():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("old.json", OLD)
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json",
+                                     "--old", "old.json", "--fail-on-drift"])
+        assert result.exit_code == 1
+        # The report is still written before failing
+        assert "<!-- dograpper-drift -->" in result.output
+
+
+def test_drift_cli_fail_on_drift_exits_0_when_no_drift():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("old.json", OLD)
+        _write_json("new.json", OLD)
+        result = runner.invoke(cli, ["drift", "--new", "new.json",
+                                     "--old", "old.json", "--fail-on-drift"])
+        assert result.exit_code == 0, result.output
+
+
+def test_drift_cli_fail_on_drift_first_run_counts_as_drift():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json", "--fail-on-drift"])
+        assert result.exit_code == 1
+
+
+def test_drift_cli_output_writes_file_only():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("old.json", OLD)
+        _write_json("new.json", NEW)
+        result = runner.invoke(cli, ["drift", "--new", "new.json", "--old", "old.json",
+                                     "--output", "report.md"])
+        assert result.exit_code == 0, result.output
+        assert result.output == ""
+        assert os.path.exists("report.md")
+        with open("report.md", encoding="utf-8") as f:
+            content = f.read()
+        assert content.startswith("<!-- dograpper-drift -->\n")
+
+
+def test_drift_is_in_help():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "drift" in result.output
