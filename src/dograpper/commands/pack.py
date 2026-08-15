@@ -462,8 +462,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                             extracted_text = raw_text
                         raw_total += len(raw_text.split())
                         extracted_total += len(extracted_text.split())
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"[score] Skipping unprocessable file {cf.relative_path}: {e}")
                 else:
                     try:
                         with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
@@ -472,8 +472,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                         wc = len(raw_text.split())
                         raw_total += wc
                         extracted_total += wc
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"[score] Skipping unreadable file {cf.relative_path}: {e}")
 
                 file_headings = []
                 if heading_map and cf.relative_path in heading_map:
