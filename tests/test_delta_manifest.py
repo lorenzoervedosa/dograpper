@@ -9,7 +9,14 @@ from dograpper.lib.manifest import (
     Manifest, ManifestEntry, ManifestDiff,
     diff_manifests, build_manifest, save_manifest, load_manifest,
 )
-from dograpper.commands.pack import pack
+from dograpper.commands.pack import PACK_STATE_FILENAME, pack
+
+
+def _seed_pack_state(input_dir, output_dir):
+    """Record the corpus as already packed, the way a real delta run would."""
+    os.makedirs(output_dir, exist_ok=True)
+    save_manifest(build_manifest(base_url="", output_dir=input_dir),
+                  os.path.join(output_dir, PACK_STATE_FILENAME))
 
 
 # --- Unit tests for diff_manifests ---
@@ -151,7 +158,11 @@ def test_delta_first_pack_all_added():
 
 
 def test_delta_modified_file_only():
-    """After saving a manifest, modifying one file should only pack that file."""
+    """Modifying one file fires the gate; the run that follows is a full pack.
+
+    Until ADR-0008 this packed only the changed file, which renumbered the
+    chunks from 01 and overwrote the artifacts of everything else (#39).
+    """
     runner = CliRunner()
     with tempfile.TemporaryDirectory() as tmpdir:
         input_dir = os.path.join(tmpdir, "docs")
@@ -163,9 +174,8 @@ def test_delta_modified_file_only():
             "b.txt": "foo bar baz qux quux",
         })
 
-        # Build and save a manifest as the "old" state
-        old_manifest = build_manifest(base_url="", output_dir=input_dir)
-        save_manifest(old_manifest, manifest_path)
+        # Record the corpus as already packed
+        _seed_pack_state(input_dir, output_dir)
 
         # Wait a moment and modify one file so mtime changes
         time.sleep(0.05)
@@ -173,16 +183,19 @@ def test_delta_modified_file_only():
             f.write("modified content here now different")
 
         result = runner.invoke(pack, [
-            input_dir, '-o', output_dir,
-            '--delta', '--manifest', manifest_path,
+            input_dir, '-o', output_dir, '--delta',
         ], catch_exceptions=False)
 
         assert result.exit_code == 0
         assert "1 modified" in result.output
+        assert "Files processed: 2" in result.output
 
         delta_path = os.path.join(output_dir, "delta_manifest.json")
         data = json.load(open(delta_path))
         assert "b.txt" in data["modified"]
+        # Both files are in the pack, not just the modified one.
+        packed = [f for cg in data["chunks_generated"] for f in cg["files"]]
+        assert sorted(packed) == ["a.txt", "b.txt"]
 
 
 def test_delta_no_changes():
@@ -197,19 +210,17 @@ def test_delta_no_changes():
             "a.txt": "hello world one two three",
         })
 
-        # Build and save manifest matching current state
-        old_manifest = build_manifest(base_url="", output_dir=input_dir)
-        save_manifest(old_manifest, manifest_path)
+        # Record a state matching the current corpus
+        _seed_pack_state(input_dir, output_dir)
 
         result = runner.invoke(pack, [
-            input_dir, '-o', output_dir,
-            '--delta', '--manifest', manifest_path,
+            input_dir, '-o', output_dir, '--delta',
         ], catch_exceptions=False)
 
         assert result.exit_code == 0
         assert "no files changed" in result.output.lower()
         # No chunks should be written
-        assert not os.path.exists(output_dir) or len(os.listdir(output_dir)) == 0
+        assert [f for f in os.listdir(output_dir) if f != PACK_STATE_FILENAME] == []
 
 
 def test_delta_manifest_json_fields():
@@ -218,6 +229,7 @@ def test_delta_manifest_json_fields():
     with tempfile.TemporaryDirectory() as tmpdir:
         input_dir = os.path.join(tmpdir, "docs")
         output_dir = os.path.join(tmpdir, "chunks")
+        manifest_path = os.path.join(tmpdir, "manifest.json")
 
         _make_test_dir(input_dir, {
             "a.txt": "hello world",
@@ -225,6 +237,7 @@ def test_delta_manifest_json_fields():
 
         result = runner.invoke(pack, [
             input_dir, '-o', output_dir, '--delta',
+            '--manifest', manifest_path,
         ], catch_exceptions=False)
 
         assert result.exit_code == 0

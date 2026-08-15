@@ -142,6 +142,30 @@ class ManifestDiff:
     removed: list
 
 
+def narrow_diff_to_paths(diff: ManifestDiff, manifest: Manifest,
+                         rel_paths) -> ManifestDiff:
+    """Narrow *diff* to the files a pack run would actually include.
+
+    Manifest keys are URL-relative (wget's ``<netloc>/`` prefix stripped),
+    so ``local_path`` is what maps them back onto the filesystem-relative
+    paths the caller works with. Removals are always kept: a file that
+    disappeared changes the output even though it can no longer be matched
+    against the current file list.
+    """
+    rel_paths = set(rel_paths)
+
+    def _kept(key: str) -> bool:
+        entry = manifest.files.get(key)
+        local = (entry.local_path or key) if entry else key
+        return local in rel_paths
+
+    return ManifestDiff(
+        added=[k for k in diff.added if _kept(k)],
+        modified=[k for k in diff.modified if _kept(k)],
+        removed=list(diff.removed),
+    )
+
+
 def diff_manifests(old: Optional[Manifest], new: Manifest) -> ManifestDiff:
     """Compare two manifests and return the differences."""
     if old is None:
