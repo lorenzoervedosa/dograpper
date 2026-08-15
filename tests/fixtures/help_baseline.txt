@@ -25,6 +25,7 @@ Commands:
   doctor    Detect, report, and install heavy dependencies (wget, chromium).
   download  Mirror a documentation site locally for offline processing.
   eval      Validate packed context empirically via golden Q&A hit-rate.
+  explain   Preview what the LLM will receive for a packed chunk.
   init      Generate a .dograpper.json config for your ingestion target.
   pack      Process and group files into chunks optimized for LLM ingestion.
   sync      Incremental download + pack delta in a single command.
