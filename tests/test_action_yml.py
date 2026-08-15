@@ -43,3 +43,49 @@ def test_action_yml_has_branding():
     assert "branding:" in content
     assert "icon:" in content
     assert "color:" in content
+
+
+def test_action_yml_refresh_is_download_plus_full_pack():
+    content = _content()
+    assert "dograpper download" in content
+    assert "dograpper pack" in content
+    assert "dograpper sync" not in content
+
+
+def test_action_yml_never_invokes_delta():
+    # pack --delta writes a PARTIAL llm-readiness.json (only re-chunked
+    # files, renumbered from 01) over the full snapshot, corrupting the
+    # drift diff from the second run onward (ADR-0007). The action must
+    # always run a full pack. Also covers --delta-manifest. Comments may
+    # mention the flag; invocation lines must not.
+    invocations = [line for line in _content().splitlines()
+                   if "dograpper " in line and not line.lstrip().startswith("#")]
+    assert invocations, "no dograpper invocations found in action.yml"
+    for line in invocations:
+        assert "--delta" not in line, f"delta flag in invocation: {line!r}"
+
+
+def test_action_yml_scores_the_pack():
+    assert "--score" in _content()
+
+
+def test_action_yml_source_drift_comes_from_git():
+    assert "git status --porcelain" in _content()
+
+
+def test_action_yml_uses_per_invocation_temp_dir():
+    assert "mktemp -d" in _content()
+
+
+def test_action_yml_installs_into_a_venv():
+    assert "python3 -m venv" in _content()
+
+
+def test_action_yml_validates_mode_input():
+    assert "Invalid mode" in _content()
+
+
+def test_action_yml_comment_lookup_takes_first_page_hit():
+    # gh api --paginate applies --jq per page: without head -n1 a comment
+    # id could be emitted once per page.
+    assert "head -n1" in _content()
