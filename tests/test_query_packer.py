@@ -5,7 +5,11 @@ import tempfile
 
 import pytest
 
-from dograpper.lib.query_packer import load_queries, order_files_by_queries
+from dograpper.lib.query_packer import (
+    load_queries,
+    order_files_by_queries,
+    order_source_files,
+)
 
 
 # --- load_queries ---
@@ -172,3 +176,63 @@ def test_order_files_by_queries_small_corpus_skips_df_filter():
     assert result.assignments[0].files == ["a.html", "b.html"]
     assert result.assignments[0].total_hits == 2
     assert result.unmatched_files == []
+
+
+# --- order_source_files (the seam pack uses) ---
+
+def _corpus(tmp_path):
+    (tmp_path / "install.html").write_text(
+        "<main><p>Run pip install to set up the package.</p></main>",
+        encoding="utf-8")
+    (tmp_path / "logging.html").write_text(
+        "<main><p>Configure logging verbosity and handlers.</p></main>",
+        encoding="utf-8")
+    return [str(tmp_path / "install.html"), str(tmp_path / "logging.html")]
+
+
+def test_order_source_files_returns_absolute_paths_ranked_by_query(tmp_path):
+    paths = _corpus(tmp_path)
+
+    ordering = order_source_files(paths, str(tmp_path),
+                                  ["how do I configure logging"], no_extract=False)
+
+    assert sorted(ordering.paths) == sorted(paths)
+    assert os.path.basename(ordering.paths[0]) == "logging.html"
+    assert ordering.result.matched_count == 1
+
+
+def test_order_source_files_warns_on_a_query_that_matches_nothing(tmp_path):
+    paths = _corpus(tmp_path)
+
+    ordering = order_source_files(paths, str(tmp_path),
+                                  ["kubernetes cluster autoscaling"],
+                                  no_extract=False)
+
+    assert any("matched no files" in w for w in ordering.warnings)
+    # Unmatched files still come through, so nothing is silently dropped.
+    assert sorted(ordering.paths) == sorted(paths)
+
+
+def test_order_source_files_ranks_on_the_overrides_when_given(tmp_path):
+    """Post-dedup text must drive the ranking, not a re-read of the source."""
+    paths = _corpus(tmp_path)
+
+    ordering = order_source_files(
+        paths, str(tmp_path), ["kubernetes cluster autoscaling"],
+        no_extract=False,
+        text_overrides={"install.html": "kubernetes cluster autoscaling guide",
+                        "logging.html": "unrelated prose"})
+
+    assert os.path.basename(ordering.paths[0]) == "install.html"
+    assert not [w for w in ordering.warnings if "matched no files" in w]
+
+
+def test_order_source_files_warns_on_unreadable_source(tmp_path):
+    paths = _corpus(tmp_path)
+    missing = str(tmp_path / "vanished.html")
+
+    ordering = order_source_files(paths + [missing], str(tmp_path),
+                                  ["logging"], no_extract=False)
+
+    assert any("cannot read 'vanished.html'" in w for w in ordering.warnings)
+    assert len(ordering.paths) == 3

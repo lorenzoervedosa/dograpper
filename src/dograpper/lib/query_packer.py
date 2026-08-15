@@ -6,6 +6,7 @@ Reuses the deterministic BM25 engine from lib/retrieval.py. Pure
 library layer — no click, no CLI concerns.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List
 
@@ -104,4 +105,52 @@ def order_files_by_queries(rel_paths, texts: Dict[str, str],
         assignments=assignments,
         unmatched_files=unmatched,
         matched_count=len(assigned),
+    )
+
+
+@dataclass
+class QueryOrdering:
+    """Result of reordering a pack run's source files by query affinity."""
+    paths: List[str] = field(default_factory=list)       # absolute, in order
+    result: QueryPackResult = None                       # type: ignore[assignment]
+    warnings: List[str] = field(default_factory=list)    # for the caller to emit
+
+
+def order_source_files(filtered_paths: List[str], input_dir: str,
+                       queries: List[str], no_extract: bool,
+                       text_overrides: Dict[str, str] = None) -> QueryOrdering:
+    """Reorder a pack run's files by BM25 affinity to *queries*.
+
+    ``text_overrides`` is the post-dedup text keyed by relative path: when
+    dedup ran, ranking must happen on what actually gets written, not on a
+    re-read of the source. Warnings are returned rather than printed so this
+    layer stays free of CLI concerns.
+    """
+    from .chunker import read_source_text
+
+    warnings: List[str] = []
+    rel_map = {os.path.relpath(f, input_dir).replace(os.sep, '/'): f
+               for f in filtered_paths}
+
+    if text_overrides is not None:
+        texts = text_overrides
+    else:
+        texts = {}
+        for rel, fpath in rel_map.items():
+            try:
+                texts[rel] = read_source_text(fpath, no_extract=no_extract)
+            except Exception as e:
+                warnings.append(f"Warning: cannot read '{rel}' for query "
+                                f"ordering: {e}")
+
+    result = order_files_by_queries(list(rel_map.keys()), texts, queries)
+    for assignment in result.assignments:
+        if assignment.total_hits == 0:
+            warnings.append(f"Warning: query matched no files: "
+                            f"'{assignment.query}'")
+
+    return QueryOrdering(
+        paths=[rel_map[rp] for rp in result.ordered_paths],
+        result=result,
+        warnings=warnings,
     )
