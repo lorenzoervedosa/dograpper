@@ -57,3 +57,11 @@ usando atribuição gulosa sobre o engine BM25 já existente em
 - Query sem nenhum match gera warning (não erro) e o pack continua —
   inclusive quando todos os termos da query foram descartados como
   comuns (corpus pequeno ou query só de palavras ubíquas).
+- Viés residual da primeira query: o filtro de termos comuns MITIGA a
+  absorção gulosa, não a resolve. No corpus de docs do click (40
+  arquivos), a primeira query ainda reivindicou 29/40 arquivos via
+  termos de domínio moderadamente comuns abaixo do corte de 0.5
+  ("options", "default", "command"). Atribuição gulosa favorece
+  estruturalmente as queries mais cedo no arquivo — ordene as queries
+  da mais específica para a mais genérica. Mitigações adicionais
+  (corte menor, cap por query, round-robin) exigiriam novo ADR.
