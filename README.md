@@ -305,6 +305,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--manifest` | — | `.dograpper-manifest.json` | Download manifest used for delta comparison |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
+| `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
 
 #### Pack internal pipeline
@@ -471,6 +472,38 @@ before the final pack.
   the same chunk before applying the limit. Preserves thematic
   cohesion. Groups larger than the limit are subdivided.
 
+#### Query-oriented packing (`--for-queries`)
+
+Reorders source files by query affinity **before** chunking, so content
+relevant to the same expected question lands in the same chunk. Takes a
+text file with one query per line (blank lines and `#` comments are
+skipped):
+
+```
+# queries.txt — what users will actually ask
+how do I declare options
+testing CLI applications
+```
+
+Each query claims its BM25-matching files (greedy, in file order); files
+matched by no query go last in alphabetical order. Query terms that
+appear in more than half of the source files are ignored when matching —
+they carry no co-location signal (this filter only kicks in on corpora
+of 5+ files, so small `--delta` subsets still match normally; under
+`--delta` the ranking corpus is the delta subset). Fully deterministic —
+same corpus + same queries file = same chunk layout. The summary reports
+the assignment: `Query packing:   3 queries, 12 files matched, 4 unmatched`.
+
+Greedy assignment favors earlier queries: the filter mitigates — it does
+not solve — one query absorbing most of the corpus (measured 29/40 files
+claimed by the first query on the click docs corpus even with the
+filter). Put your most specific queries first.
+
+Incompatible with `--strategy semantic` (two mutually exclusive grouping
+policies — the CLI errors instead of silently overriding). Composes with
+`--delta`, `--dedup`, `--score`, `--context-header`, `--format jsonl`
+and `--bundle`.
+
 #### Examples
 
 ```bash
@@ -494,6 +527,9 @@ dograpper pack ./docs -o ./chunks --strategy semantic --ignore "*.png"
 
 # Incremental updates (delta)
 dograpper pack ./docs -o ./chunks --delta
+
+# Co-locate content by expected user queries
+dograpper pack ./docs -o ./chunks --for-queries queries.txt
 ```
 
 ### `dograpper explain`
@@ -543,6 +579,7 @@ dograpper sync <url> -o <dir> [options]
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |
 | `--score` | — | `false` | LLM Readiness (passed to `pack`) |
+| `--for-queries` | — | *(none)* | Queries file for query-oriented packing (passed to `pack`) |
 
 `pack` is always executed with an implicit `--delta` — it only
 reprocesses files that changed in the mirror.

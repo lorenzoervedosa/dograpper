@@ -23,11 +23,15 @@ class Chunk:
     files: List[ChunkFile] = field(default_factory=list)
     total_words: int = 0
 
-def chunk_by_size(files: List[str], base_dir: str, max_words: int, no_extract: bool = False, word_counts: Dict[str, int] = None) -> List[Chunk]:
-    """Group incoming files in chunks keeping them under the soft limit max_words per chunk."""
+def chunk_by_size(files: List[str], base_dir: str, max_words: int, no_extract: bool = False, word_counts: Dict[str, int] = None, preserve_order: bool = False) -> List[Chunk]:
+    """Group incoming files in chunks keeping them under the soft limit max_words per chunk.
 
-    # Sort alphabetically to keep things predictable
-    sorted_files = sorted(files)
+    With ``preserve_order=True`` the caller's list order is respected
+    (used by ``pack --for-queries``); otherwise files are sorted
+    alphabetically to keep things predictable.
+    """
+
+    sorted_files = list(files) if preserve_order else sorted(files)
 
     chunks = []
     current_chunk = Chunk(index=1)
@@ -275,19 +279,29 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
     return guide_path
 
 
+def read_source_text(path: str, no_extract: bool = False) -> str:
+    """Read a source file applying the standard extraction policy:
+    HTML files go through extract_content (unless no_extract) and then
+    strip_html; everything else is returned raw. Reads with
+    errors='replace'. Raises on unreadable files — callers choose
+    their own failure policy.
+    """
+    with open(path, 'r', encoding='utf-8', errors='replace') as source_f:
+        content = source_f.read()
+    if path.lower().endswith(('.html', '.htm')):
+        if not no_extract:
+            content = extract_content(content)
+        content = strip_html(content)
+    return content
+
+
 def _read_source_content(base_dir: str, cf: ChunkFile, no_extract: bool = False, text_overrides: Dict[str, str] = None) -> str:
     """Read a source file from disk, stripping HTML markup if applicable."""
     if text_overrides and cf.relative_path in text_overrides:
         return text_overrides[cf.relative_path]
     true_filepath = os.path.join(base_dir, cf.relative_path)
     try:
-        with open(true_filepath, 'r', encoding='utf-8', errors='replace') as source_f:
-            content = source_f.read()
-        if cf.relative_path.lower().endswith(('.html', '.htm')):
-            if not no_extract:
-                content = extract_content(content)
-            content = strip_html(content)
-        return content
+        return read_source_text(true_filepath, no_extract=no_extract)
     except Exception as e:
         logger.error(f"Failed to copy contents of {cf.relative_path}: {e}")
         return f"[Excluded unreadable blob: {e}]"
