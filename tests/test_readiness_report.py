@@ -109,8 +109,8 @@ class TestGenerateHtmlReport:
 
     def test_summary_header(self):
         report = generate_html_report(*_sample_inputs())
-        assert "0.60" in report          # avg of 0.90 and 0.30
-        assert "2" in report             # total chunks
+        assert "Total chunks: <strong>2</strong>" in report
+        assert "Average score: <strong>0.60</strong>" in report  # avg of 0.90 and 0.30
 
     def test_contains_per_page_before_after(self):
         report = generate_html_report(*_sample_inputs())
