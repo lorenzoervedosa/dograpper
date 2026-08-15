@@ -8,6 +8,7 @@ annotates plain text with chunk pointers.
 import json
 import logging
 import posixpath
+import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import List, Dict
@@ -168,6 +169,11 @@ def annotate_cross_refs(
     occurrence of ``link_text`` in *text* is suffixed with
     ``[-> chunk_id]``.  Only the first occurrence is touched to
     avoid false positives.  Unresolved links are skipped.
+
+    The match is word-boundary-aware: ``link_text`` is only annotated
+    when it is not adjacent to a word character, so short link text
+    (e.g. "Install") does not corrupt an unrelated word that merely
+    contains it as a substring (e.g. "Installation").
     """
     annotated = set()  # link_text values already processed
 
@@ -181,8 +187,11 @@ def annotate_cross_refs(
             continue
 
         marker = f"{lt} [-> {target_chunk}]"
-        # Replace only the first occurrence
-        new_text = text.replace(lt, marker, 1)
+        # Replace only the first occurrence, and only when not adjacent to
+        # a word character on either side (a plain \b fails here because
+        # link text often starts/ends in punctuation, e.g. "C++").
+        pattern = re.compile(r"(?<!\w)" + re.escape(lt) + r"(?!\w)")
+        new_text = pattern.sub(lambda m: marker, text, count=1)
         if new_text != text:
             text = new_text
             annotated.add(lt)

@@ -46,6 +46,13 @@ and fixes alone are a PATCH bump.
 
 ## [Unreleased]
 
+### Fixed
+
+- `pack --cross-refs` no longer corrupts words where a link's text is a
+  substring of an unrelated word in the chunk (e.g. link text "Install"
+  inside the word "Installation"). `annotate_cross_refs` now matches on
+  word boundaries instead of doing a plain substring replace. ([#55])
+
 ## [0.4.0] - 2026-08-15
 
 ### Added
@@ -112,3 +119,4 @@ and fixes alone are a PATCH bump.
 [#2]: https://github.com/lorenzoervedosa/dograpper/issues/2
 [#39]: https://github.com/lorenzoervedosa/dograpper/issues/39
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
+[#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
