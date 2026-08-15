@@ -28,4 +28,5 @@ Commands:
   explain   Preview what the LLM will receive for a packed chunk.
   init      Generate a .dograpper.json config for your ingestion target.
   pack      Process and group files into chunks optimized for LLM ingestion.
+  serve     Serve the packed context as a local MCP server (stdio).
   sync      Incremental download + pack delta in a single command.
