@@ -74,6 +74,7 @@ tests/
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
 ├── test_claude_md_inventory.py # Guard estrutural do CLAUDE.md: árvore completa e referências de caminho válidas
+├── test_changelog.py       # Guard estrutural do CHANGELOG.md: seções válidas, ordem, versão casando com pyproject
 ├── test_cli_regression.py  # Baseline literal de `dograpper --help` (tests/fixtures/help_baseline.txt)
 ├── test_cli_smoke.py       # Help, flags obrigatórias, mutual exclusion
 ├── test_config.py          # Precedência, JSON inválido, arquivo ausente
@@ -170,6 +171,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_action_yml.py` | Antes de alterar `action.yml` (inputs/outputs/marcador exigidos) |
 | `tests/test_bundle_notebooklm.py` | Antes de alterar lógica de `--bundle` |
 | `tests/test_boundary_chunking.py` | Antes de alterar `_split_text_by_words` |
+| `CHANGELOG.md` | **Toda vez que a mudança for observável pelo usuário.** O cabeçalho do arquivo define a regra: o que ganha entrada, em qual seção, e quando (no mesmo PR, em `## [Unreleased]`) |
 | `docs/schema-v1.md` | Referência do schema `dograpper-context-v1` — manter sincronizado com `heading_extractor.py` e `chunker.py` |
 | `tests/test_doctor.py` | Antes de alterar `commands/doctor.py` (detecção, `--install`, lock, `--check-system-libs`) |
 | `tests/test_dep_resolver.py` | Antes de alterar `utils/dep_resolver.py` ou a semântica de `DOGRAPPER_HOME` |
@@ -185,6 +187,8 @@ uv run dograpper pack ./test-docs -o ./chunks
 6. **Config precedência é inviolável**: defaults do click < `.dograpper.json` < flags CLI explícitas. Usa `ctx.get_parameter_source()` para distinguir. Não simplificar esse mecanismo.
 7. **Encoding tolerante.** Leitura de arquivos sempre com `errors="replace"`. O CLI não deve crashar por causa de caracteres estranhos em HTMLs baixados.
 8. Ignorar (não ler) tudo que estiver em `./temporario/`
+9. **Mudança observável pelo usuário exige entrada no `CHANGELOG.md`**, em `## [Unreleased]`, no mesmo PR. Observável = superfície do CLI (comando, flag, output, exit code), arquivos escritos ou seu formato, comportamento da Action, ou requisito de instalação. `refactor`/`test`/`chore`/`ci`/`build`/`docs` não geram entrada — se gerariam, o commit foi tipado errado. A regra completa está no cabeçalho do `CHANGELOG.md`; `tests/test_changelog.py` guarda a parte mecânica.
+10. **Release**: renomear `## [Unreleased]` para `## [X.Y.Z] - AAAA-MM-DD`, abrir uma `## [Unreleased]` vazia e bumpar `version` no `pyproject.toml` no mesmo commit. `dograpper --version` lê o metadata do pacote instalado — tag sem bump publica binário que se identifica errado.
 
 ## Padrões de commit e branch
 
