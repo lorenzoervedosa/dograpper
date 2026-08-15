@@ -214,6 +214,15 @@ def test_render_markdown_delta_manifest_empty_lists():
     assert output.endswith("### Source file drift\n\n_No source file changes._")
 
 
+def test_render_markdown_negative_score_delta():
+    report = compare_readiness(
+        _readiness([("docs_chunk_01", 8.5, "A")]),
+        _readiness([("docs_chunk_01", 7.0, "B")]),
+    )
+    output = render_markdown(report, None)
+    assert "- `docs_chunk_01` — grade A → B, score 8.50 → 7.00 (-1.50)" in output
+
+
 # ---------------------------------------------------------------------------
 # render_text
 # ---------------------------------------------------------------------------
@@ -257,6 +266,15 @@ Source file drift:
     assert output.endswith(expected_tail)
     assert output.startswith("Context drift report\n====================\n"
                              "Summary: no drift | avg score 7.33 -> 7.33")
+
+
+def test_render_text_negative_score_delta():
+    report = compare_readiness(
+        _readiness([("docs_chunk_01", 8.5, "A")]),
+        _readiness([("docs_chunk_01", 7.0, "B")]),
+    )
+    output = render_text(report, None)
+    assert "  docs_chunk_01  grade A -> B  score 8.50 -> 7.00 (-1.50)" in output
 
 
 # ---------------------------------------------------------------------------
