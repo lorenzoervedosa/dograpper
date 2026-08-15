@@ -17,6 +17,12 @@ estado (mirror de docs, chunks, `llm-readiness.json` e o
 diretório de trabalho, não dentro de `chunks-dir`) sobreviva entre
 execuções, versionado no repositório do usuário.
 
+> **Atualização (ADR-0008)**: a limitação descrita abaixo foi corrigida
+> — `pack --delta` virou um portão de mudança e não escreve mais
+> artefatos parciais. A decisão 3 (a Action usa pack completo) segue
+> valendo, agora por outro motivo. Ver
+> [ADR-0008](0008-delta-as-a-change-gate.md).
+
 **Limitação conhecida de `pack --delta`** (reproduzida empiricamente em
 review; issue própria a ser aberta): `pack --delta --score` escreve um
 `llm-readiness.json` PARCIAL — apenas os arquivos re-chunkados,

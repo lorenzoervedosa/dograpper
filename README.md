@@ -304,8 +304,8 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--dedup-threshold` | — | `3` | Maximum Hamming distance for fuzzy dedup (0-10) |
 | `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON) |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` |
-| `--delta` | — | `false` | Reprocess only files changed since the last pack |
-| `--manifest` | — | `.dograpper-manifest.json` | Download manifest used for delta comparison |
+| `--delta` | — | `false` | Skip the run entirely when nothing changed since the last pack; pack in full when something did |
+| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header` |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
@@ -492,8 +492,8 @@ Each query claims its BM25-matching files (greedy, in file order); files
 matched by no query go last in alphabetical order. Query terms that
 appear in more than half of the source files are ignored when matching —
 they carry no co-location signal (this filter only kicks in on corpora
-of 5+ files, so small `--delta` subsets still match normally; under
-`--delta` the ranking corpus is the delta subset). Fully deterministic —
+of 5+ files). The ranking corpus is always the full packed set, `--delta`
+included, since a delta run that fires is a full pack. Fully deterministic —
 same corpus + same queries file = same chunk layout. The summary reports
 the assignment: `Query packing:   3 queries, 12 files matched, 4 unmatched`.
 
@@ -528,7 +528,7 @@ dograpper pack ./docs -o ./chunks --dry-run --dedup both --score --show-tokens
 # Group by module, filter images
 dograpper pack ./docs -o ./chunks --strategy semantic --ignore "*.png"
 
-# Incremental updates (delta)
+# Only re-pack when the sources actually changed
 dograpper pack ./docs -o ./chunks --delta
 
 # Co-locate content by expected user queries
@@ -584,8 +584,10 @@ dograpper sync <url> -o <dir> [options]
 | `--score` | — | `false` | LLM Readiness (passed to `pack`) |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (passed to `pack`) |
 
-`pack` is always executed with an implicit `--delta` — it only
-reprocesses files that changed in the mirror.
+`pack` is always executed with an implicit `--delta`: when the mirror
+came back unchanged the pack step is skipped entirely, and when
+anything changed the chunks are rebuilt in full. See
+[ADR-0008](docs/adr/0008-delta-as-a-change-gate.md).
 
 #### Examples
 
@@ -631,13 +633,13 @@ place instead of posting a new one.
 **Caveats**: chunk ids (`docs_chunk_NN`) are positional and can be
 renumbered by upstream content changes, so chunk-level drift is
 best-effort; the source-file lists from `delta_manifest.json` are exact.
-For a meaningful snapshot diff, generate both snapshots with a **full**
-`pack --score`: `pack --delta --score` rewrites `llm-readiness.json`
-with only the re-chunked files, renumbered from 01. `--delta-manifest`
-is meant for local use right after a `pack --delta` run — the manifest
-on disk reflects the *last* delta run and can be stale (or absent) if
-nothing changed; the GitHub Action does not use it and derives source
-drift from git instead.
+Snapshots from a `--delta` run are directly comparable since
+[ADR-0008](docs/adr/0008-delta-as-a-change-gate.md) — a delta run that
+fires writes a complete `llm-readiness.json`. `--delta-manifest` is
+meant for local use right after a `pack --delta` run — the file on disk
+reflects the *last* delta run and can be stale (or absent) if nothing
+changed; the GitHub Action does not use it and derives source drift
+from git instead.
 
 ### `dograpper init`
 
@@ -728,13 +730,13 @@ posts/updates a single drift report comment on the pull request. The
 comment's source-file section comes from `git status` over `input-dir`
 — exact lists, since the docs are versioned.
 
-The action deliberately never runs `pack --delta`: a delta pack rewrites
-`llm-readiness.json` with only the re-chunked files (renumbered from
-01), which would corrupt the snapshot diff from the second run onward
+The action always runs a full `pack --score`, never `pack --delta`.
+The original reason — a delta pack corrupting the snapshot — is gone
+since [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md); what remains
+is that incrementality already lives at the download layer (wget
+timestamping + manifest) and a full pack over unchanged sources is
+deterministic, so no upstream change means an empty drift
 (see [ADR-0007](docs/adr/0007-freshness-action-and-drift-command.md)).
-Incrementality lives at the download layer (wget timestamping +
-manifest); a full pack over unchanged sources is deterministic, so no
-upstream change means an empty drift.
 
 It assumes **ubuntu runners** (python3, wget, `jq` and the `gh` CLI are
 preinstalled) and that the docs mirror, the chunks directory (with
@@ -832,6 +834,7 @@ Full spec: [docs/schema-v1.md](docs/schema-v1.md)
 | `readiness-report.html` | `--report` | Visual before/after report with penalty causes |
 | `IMPORT_GUIDE.md` | `--bundle notebooklm` | Upload guide with recommended ordering |
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
+| `pack_state.json` | `--delta` | Corpus state as of this pack; the next `--delta` run diffs against it |
 | `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes) |
 
 ---
@@ -963,11 +966,19 @@ path-prefix). Covers Mintlify (sub-sitemap at
 with `-v` to see the decision in the log
 (`sitemap: skipping out-of-scope sub-sitemap`).
 
-### `pack --delta` reprocesses everything on the first run
+### `pack --delta` packs everything on the first run
 
-Expected behavior: delta compares against the previous run's manifest.
-The first run has no baseline, so every file is "added". Subsequent
-runs use `.dograpper-manifest.json` + mtimes.
+Expected behavior. `--delta` diffs the corpus against
+`<output-dir>/pack_state.json`, written at the end of every successful
+delta run. The first run has no baseline, so every file counts as
+"added" and the pack runs in full.
+
+### `pack --delta` re-packs every file even though only one changed
+
+Also expected. `--delta` decides *whether* to pack, not *which* files
+to pack: partial runs renumbered the chunks from 01 and overwrote the
+artifacts of the files they did not touch. See
+[ADR-0008](docs/adr/0008-delta-as-a-change-gate.md).
 
 ### Chunks too large for NotebookLM
 

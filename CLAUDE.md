@@ -38,7 +38,7 @@ src/dograpper/
 │   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source)
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
-│   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build
+│   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build, diff e narrow_diff_to_paths
 │   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
 │   ├── pack_artifacts.py   # Sidecars do pack: cross_refs.json, delta_manifest.json, llm-readiness.json, report HTML, tokens
 │   ├── pack_scoring.py     # score_chunks() — readiness por chunk + páginas do --report, lê cada fonte uma vez
@@ -71,7 +71,8 @@ tests/
 ├── test_content_extractor.py # Extração inteligente: semantic, density, blacklist, edge cases, CLI
 ├── test_context_v1.py      # Formato dograpper-context-v1: JSON header, campos opcionais, schema
 ├── test_dedup.py           # Dedup: _split_blocks, _simhash, _hamming_distance, exact/fuzzy/both, CLI
-├── test_delta_manifest.py  # Delta pack: reprocessamento incremental via manifest
+├── test_delta_artifacts.py # Delta como portão de mudança: artefatos completos, pack_state.json, fluxo sync (ADR-0008)
+├── test_delta_manifest.py  # Delta: diff_manifests e o contrato do delta_manifest.json
 ├── test_download.py        # wget mock, SPA detector, manifest roundtrip, UA/headers, run_wget_urls, bounded hydration
 ├── test_download_cascade.py # Cascade 4-layer: layer-1/2/3/4 wins, below-threshold fall-through, headless, post-wget-i SPA, observability
 ├── test_drift.py           # Drift: compare_readiness, renders markdown/text (literais), CLI (first run, fail-on-drift, --output)
@@ -141,6 +142,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_context_v1.py` | Antes de alterar o formato `dograpper-context-v1` em `utils/heading_extractor.py` |
 | `tests/test_jsonl_format.py` | Antes de alterar a escrita JSONL em `lib/chunker.py` |
 | `tests/test_delta_manifest.py` | Antes de alterar `lib/manifest.py` ou lógica de `--delta` |
+| `tests/test_delta_artifacts.py` | Antes de alterar o portão de `--delta` em `commands/pack.py` ou `PACK_STATE_FILENAME` (semântica fixada na ADR-0008) |
 | `tests/test_drift.py` | Antes de alterar `lib/readiness_diff.py` ou `commands/drift.py` (formatos markdown/text são literais testados) |
 | `tests/test_action_yml.py` | Antes de alterar `action.yml` (inputs/outputs/marcador exigidos) |
 | `tests/test_bundle_notebooklm.py` | Antes de alterar lógica de `--bundle` |
