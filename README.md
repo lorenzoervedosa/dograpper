@@ -305,6 +305,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--manifest` | — | `.dograpper-manifest.json` | Download manifest used for delta comparison |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
+| `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 
 #### Pack internal pipeline
 
@@ -446,6 +447,29 @@ before the final pack.
   the same chunk before applying the limit. Preserves thematic
   cohesion. Groups larger than the limit are subdivided.
 
+#### Query-oriented packing (`--for-queries`)
+
+Reorders source files by query affinity **before** chunking, so content
+relevant to the same expected question lands in the same chunk. Takes a
+text file with one query per line (blank lines and `#` comments are
+skipped):
+
+```
+# queries.txt — what users will actually ask
+how do I declare options
+testing CLI applications
+```
+
+Each query claims its BM25-matching files (greedy, in file order); files
+matched by no query go last in alphabetical order. Fully deterministic —
+same corpus + same queries file = same chunk layout. The summary reports
+the assignment: `Query packing: 3 queries, 12 files matched, 4 unmatched`.
+
+Incompatible with `--strategy semantic` (two mutually exclusive grouping
+policies — the CLI errors instead of silently overriding). Composes with
+`--delta`, `--dedup`, `--score`, `--context-header`, `--format jsonl`
+and `--bundle`.
+
 #### Examples
 
 ```bash
@@ -469,6 +493,9 @@ dograpper pack ./docs -o ./chunks --strategy semantic --ignore "*.png"
 
 # Incremental updates (delta)
 dograpper pack ./docs -o ./chunks --delta
+
+# Co-locate content by expected user queries
+dograpper pack ./docs -o ./chunks --for-queries queries.txt
 ```
 
 ### `dograpper explain`
@@ -518,6 +545,7 @@ dograpper sync <url> -o <dir> [options]
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |
 | `--score` | — | `false` | LLM Readiness (passed to `pack`) |
+| `--for-queries` | — | *(none)* | Queries file for query-oriented packing (passed to `pack`) |
 
 `pack` is always executed with an implicit `--delta` — it only
 reprocesses files that changed in the mirror.
