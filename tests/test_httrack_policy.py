@@ -177,7 +177,7 @@ class _WindowZstd:
         pass
 
     def decompressobj(self):
-        return object()
+        return types.SimpleNamespace(eof=False, unused_data=b"")
 
 
 def test_zstandard_without_window_cap_is_refused(monkeypatch):
@@ -187,3 +187,18 @@ def test_zstandard_without_window_cap_is_refused(monkeypatch):
     assert policy.decoder_module("zstd") is None
     _fake(monkeypatch, "zstandard", ZstdDecompressor=_WindowZstd)
     assert "zstd" in policy.accept_encoding()
+
+
+@pytest.mark.parametrize("missing", ["eof", "unused_data"])
+def test_zstandard_without_frame_end_api_is_refused(monkeypatch, missing):
+    attrs = {"eof": False, "unused_data": b""}
+    del attrs[missing]
+
+    class Old(_WindowZstd):
+        def decompressobj(self):
+            return types.SimpleNamespace(**attrs)
+
+    monkeypatch.setitem(sys.modules, "compression.zstd", None)  # force ImportError
+    _fake(monkeypatch, "zstandard", ZstdDecompressor=Old)
+    assert "zstd" not in policy.accept_encoding()
+    assert policy.decoder_module("zstd") is None

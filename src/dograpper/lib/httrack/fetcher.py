@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 MAX_BODY_BYTES = 64 * 1024 * 1024  # raw stream and every decoded stage
 MAX_ENCODINGS = 2
+MAX_MEMBERS = 64  # gzip members / zstd frames per body; more is an error, never a partial body
 MAX_ROBOTS_REDIRECTS = 5
 RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 504})  # 503 only with Retry-After
 REDIRECTS = frozenset({301, 302, 303, 307, 308})
@@ -45,27 +46,34 @@ def _check(out) -> None:
         raise ValueError("body too large")
 
 
-def _zlib(data: bytes, wbits: int, members: bool = False) -> bytes:
-    out, rest = bytearray(), data
-    while True:  # gzip allows concatenated members (RFC 1952); anything else is an error
-        d = zlib.decompressobj(wbits)
-        out += d.decompress(rest, MAX_BODY_BYTES - len(out) + 1)
-        _check(out)
-        if not d.eof:
-            raise ValueError("truncated compressed stream")
-        rest = d.unused_data
-        if not (members and rest):
-            break
-    if rest:
-        raise ValueError("trailing data after compressed stream")
-    return bytes(out)
+def _members(data: bytes, new, count: int = MAX_MEMBERS, max_length: bool = True) -> bytes:
+    """Every back-to-back member/frame (at most `count`), all or nothing, in time linear in
+    len(data). Input goes in bounded slices: the decoders copy what they do not consume into
+    unused_data, so feeding the whole remainder per member would be quadratic."""
+    # a decoder without max_length gets tiny slices (a zstd block expands <= 128 KiB per few bytes)
+    view, pos, out, step = memoryview(data), 0, bytearray(), CHUNK if max_length else 64
+    for _ in range(count):
+        d = new()
+        while not d.eof:
+            if pos >= len(data):
+                raise ValueError("truncated compressed stream")
+            piece = view[pos:pos + step]
+            pos += len(piece)
+            out += d.decompress(piece, MAX_BODY_BYTES - len(out) + 1) if max_length \
+                else d.decompress(piece)
+            _check(out)
+        pos -= len(d.unused_data)
+        if pos == len(data):
+            return bytes(out)
+    raise ValueError("trailing data after compressed stream" if count == 1
+                     else "too many compressed members")
 
 
 def _deflate(data: bytes) -> bytes:
     try:
-        return _zlib(data, zlib.MAX_WBITS)
-    except zlib.error:
-        return _zlib(data, -zlib.MAX_WBITS)  # raw deflate, as many servers send
+        return _members(data, lambda: zlib.decompressobj(zlib.MAX_WBITS), 1)
+    except zlib.error:  # raw deflate, as many servers send
+        return _members(data, lambda: zlib.decompressobj(-zlib.MAX_WBITS), 1)
 
 
 def _brotli(mod, data: bytes) -> bytes:
@@ -84,29 +92,11 @@ def _brotli(mod, data: bytes) -> bytes:
 
 def _zstd(mod, data: bytes) -> bytes:
     """All frames, bounded in total; junk, truncation or an oversized window is an error."""
-    out, pos, stdlib = bytearray(), 0, mod.__name__ == "compression.zstd"
-    while pos < len(data):
-        if stdlib:
-            d = mod.ZstdDecompressor(options={mod.DecompressionParameter.window_log_max:
-                                              ZSTD_MAX_WINDOW.bit_length() - 1})
-            out += d.decompress(data[pos:], MAX_BODY_BYTES - len(out) + 1)
-            _check(out)
-            if not d.eof:
-                raise ValueError("truncated compressed stream")
-            pos = len(data) - len(d.unused_data)
-            continue
-        d = mod.ZstdDecompressor(max_window_size=ZSTD_MAX_WINDOW).decompressobj()
-        while not d.eof:
-            if pos >= len(data):
-                raise ValueError("truncated compressed stream")
-            # tiny input slices bound the output of any single call (a zstd block expands <= 128 KiB per few bytes)
-            piece, pos = data[pos:pos + 64], pos + 64
-            chunk = d.decompress(piece)
-            if len(out) + len(chunk) > MAX_BODY_BYTES:
-                raise ValueError("body too large")
-            out += chunk
-        pos = min(pos, len(data)) - len(d.unused_data)
-    return bytes(out)
+    if mod.__name__ == "compression.zstd":
+        opts = {mod.DecompressionParameter.window_log_max: ZSTD_MAX_WINDOW.bit_length() - 1}
+        return _members(data, lambda: mod.ZstdDecompressor(options=opts))
+    return _members(data, lambda: mod.ZstdDecompressor(max_window_size=ZSTD_MAX_WINDOW)
+                    .decompressobj(), max_length=False)
 
 
 def _decode(body: bytes, encoding: str) -> bytes:
@@ -117,7 +107,7 @@ def _decode(body: bytes, encoding: str) -> bytes:
         raise ValueError("too many stacked content-encodings")
     for enc in reversed(encs):
         if enc in ("gzip", "x-gzip"):
-            body = _zlib(body, 16 + zlib.MAX_WBITS, members=True)
+            body = _members(body, lambda: zlib.decompressobj(16 + zlib.MAX_WBITS))
         elif enc == "deflate":
             body = _deflate(body)
         elif enc in ("br", "zstd") and (mod := decoder_module(enc)) is not None:

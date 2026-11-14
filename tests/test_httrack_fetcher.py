@@ -1,4 +1,5 @@
 import gzip
+import random
 import time
 import logging
 import threading
@@ -505,6 +506,57 @@ def test_gzip_members_bounded_in_total(monkeypatch):
     member = gzip.compress(b"a" * 1000)
     with pytest.raises(ValueError, match="body too large"):
         fetcher_mod._decode(member * 2, "gzip")
+
+
+def test_gzip_member_cap_and_bounded_input_slices(monkeypatch):
+    rnd, n = random.Random(0), fetcher_mod.MAX_MEMBERS
+    parts = [rnd.randbytes(2048) for _ in range(n)]  # incompressible: body spans several CHUNKs
+    body = b"".join(gzip.compress(p) for p in parts)
+    seen, real = [], zlib.decompressobj
+
+    class Spy:  # feeding the whole remainder per member is what made decoding quadratic
+        def __init__(self, *a):
+            self.d = real(*a)
+
+        def decompress(self, data, *a):
+            seen.append(len(data))
+            return self.d.decompress(data, *a)
+
+        def __getattr__(self, name):
+            return getattr(self.d, name)
+
+    monkeypatch.setattr(zlib, "decompressobj", Spy)
+    assert fetcher_mod._decode(body, "gzip") == b"".join(parts)
+    assert len(body) > 2 * fetcher_mod.CHUNK and max(seen) <= fetcher_mod.CHUNK
+    with pytest.raises(ValueError, match="too many compressed members"):
+        fetcher_mod._decode(body + gzip.compress(b"x"), "gzip")
+
+
+def test_many_tiny_gzip_members_rejected_fast():
+    one = gzip.compress(b"x")
+    assert fetcher_mod._decode(one * 64, "gzip") == b"x" * 64
+    with pytest.raises(ValueError, match="too many compressed members"):
+        fetcher_mod._decode(one * 65, "gzip")
+    body = gzip.compress(b"") * 100_000  # ~2 MB; took ~3 s before the cap
+    t = time.perf_counter()
+    with pytest.raises(ValueError, match="too many compressed members"):
+        fetcher_mod._decode(body, "gzip")
+    assert time.perf_counter() - t < 0.5
+
+
+@pytest.mark.parametrize("name", ["compression.zstd", "zstandard"])
+def test_zstd_frame_cap_and_fast_rejection(name):
+    mod = pytest.importorskip(name)
+    if not policy_mod._importable(name):
+        pytest.skip(f"installed {name} lacks the bounded API")
+    one = mod.compress(b"x")
+    assert fetcher_mod._zstd(mod, one * 64) == b"x" * 64
+    with pytest.raises(ValueError, match="too many compressed members"):
+        fetcher_mod._zstd(mod, one * 65)
+    t = time.perf_counter()
+    with pytest.raises(ValueError, match="too many compressed members"):
+        fetcher_mod._zstd(mod, mod.compress(b"") * 100_000)
+    assert time.perf_counter() - t < 0.5
 
 
 def test_brotli_multi_call_continuation():

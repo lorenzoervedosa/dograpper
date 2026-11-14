@@ -79,11 +79,12 @@ def _importable(name: str) -> bool:
             mod.Decompressor().process(b"", output_buffer_limit=1)
         except TypeError:
             return False
-    if name == "zstandard":  # needs a window cap and the incremental decompressobj
+    if name == "zstandard":  # needs a window cap and a decompressobj that reports frame end
         try:
-            mod.ZstdDecompressor(max_window_size=ZSTD_MAX_WINDOW).decompressobj()
+            d = mod.ZstdDecompressor(max_window_size=ZSTD_MAX_WINDOW).decompressobj()
         except (TypeError, AttributeError):
             return False
+        return hasattr(d, "eof") and hasattr(d, "unused_data")
     if name == "compression.zstd":
         return hasattr(mod, "DecompressionParameter")
     return True
