@@ -3,6 +3,8 @@
 import gzip
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from dograpper.lib.sitemap_parser import SITEMAP_NS, fetch_sitemap
 
 
@@ -234,3 +236,36 @@ def test_extra_candidate_cross_host_rejected():
                          extra_candidates=["https://evil.example/s.xml"]) == []
     assert "https://evil.example/s.xml" not in calls
     assert calls[0] == "https://site.io/sitemap.xml"
+
+
+def test_malformed_extra_candidate_skipped_with_warning(caplog):
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return _urlset(["https://site.io/a"]) if url == "https://site.io/sitemap.xml" else None
+
+    with caplog.at_level("WARNING"):
+        urls = fetch_sitemap("https://site.io/", fetch=fetch,
+                             extra_candidates=["http://[bad/s.xml"])
+    assert urls == ["https://site.io/a"]
+    assert calls == ["https://site.io/sitemap.xml"]
+    assert any("unusable candidate" in r.getMessage() for r in caplog.records)
+
+
+def test_malformed_sub_sitemap_loc_skipped():
+    pages = {
+        "https://site.io/sitemap.xml": _sitemapindex(["http://[bad/s.xml", "https://site.io/s.xml"]),
+        "https://site.io/s.xml": _urlset(["https://site.io/a"]),
+    }
+    assert fetch_sitemap("https://site.io/", fetch=pages.get) == ["https://site.io/a"]
+
+
+@pytest.mark.parametrize("body", [
+    gzip.compress(_urlset(["https://site.io/a"]), mtime=0)[:30],         # EOFError
+    b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03not deflate data at all",  # zlib.error
+], ids=["truncated", "not-deflate"])
+def test_corrupt_gzip_sitemap_is_skipped(body):
+    with patch("dograpper.lib.sitemap_parser.urlopen", return_value=_mock_response(200, body)):
+        assert fetch_sitemap("https://site.io/") == []
+    assert fetch_sitemap("https://site.io/", fetch=lambda u: body) == []

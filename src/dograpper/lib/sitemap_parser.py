@@ -15,11 +15,13 @@ from __future__ import annotations
 import gzip
 import logging
 import xml.etree.ElementTree as ET
+import zlib
 from typing import Callable, List, Sequence, Set
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
+from ..utils.redact import redact_url
 from .wget_mirror import BROWSER_HEADERS, BROWSER_UA
 
 logger = logging.getLogger(__name__)
@@ -58,7 +60,7 @@ def _gunzip(url: str, data: bytes) -> bytes | None:
     if data[:2] == b"\x1f\x8b" or url.endswith(".gz"):
         try:
             data = gzip.decompress(data)
-        except OSError as exc:
+        except (OSError, EOFError, zlib.error) as exc:  # bad header, truncated, corrupt
             logger.warning(f"sitemap: gzip decompress failed for {url}: {exc}")
             return None
     return data
@@ -100,7 +102,10 @@ def _sub_sitemap_in_scope(sub_url: str, base_netloc: str, base_prefix: str) -> b
     identifies the user's project, so path-prefix alone is enough to keep
     recursion scoped without leaking into unrelated projects.
     """
-    sub_parsed = urlparse(sub_url)
+    try:
+        sub_parsed = urlparse(sub_url)
+    except ValueError:  # e.g. "http://[bad" from an untrusted sitemapindex
+        return False
     if not sub_parsed.netloc or sub_parsed.netloc == base_netloc:
         return True
     sub_prefix = _canonical_prefix(sub_parsed.path.rsplit("/", 1)[0])
@@ -194,8 +199,13 @@ def fetch_sitemap(
     visited: Set[str] = set()
 
     for candidate in (*extra_candidates, *CANDIDATE_PATHS):
-        candidate_url = urljoin(root, candidate)
-        if urlparse(candidate_url).netloc != base_netloc:
+        try:  # robots.txt hints are untrusted: "http://[bad" raises ValueError
+            candidate_url = urljoin(root, candidate)
+            candidate_netloc = urlparse(candidate_url).netloc
+        except ValueError:
+            logger.warning(f"sitemap: skipping unusable candidate {redact_url(candidate)}")
+            continue
+        if candidate_netloc != base_netloc:
             logger.info(f"sitemap: rejecting cross-host candidate {candidate_url}")
             continue
         logger.debug(f"sitemap: probing {candidate_url}")
