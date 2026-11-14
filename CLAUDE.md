@@ -35,7 +35,7 @@ src/dograpper/
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
 │   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
-│   └── sync.py             # Subcomando sync (download + pack em um passo)
+│   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader e as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py)
 ├── lib/
 │   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile, write_chunks() (md, txt, jsonl)
 │   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source)

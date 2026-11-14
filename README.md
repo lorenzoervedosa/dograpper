@@ -310,10 +310,14 @@ Precedence is unchanged: defaults < JSON < explicit CLI.
 - **`httrack`** — a pure-Python fetcher that reproduces HTTrack 3.51 on the
   wire (header set and order, `Accept-Encoding`, TLS settings) and in
   behavior (robots.txt longest-match, retries, pacing). Layers 1 and 2
-  discover URLs through the same identity; the seeded URLs are then fetched
-  by the new engine.
+  discover URLs through the same identity, following up to 5 same-host
+  redirects with a robots.txt check before every hop; the seeded URLs are
+  then fetched by the new engine.
 
-`[httrack]` flags (an error under `--downloader wget`):
+`[httrack]` flags (an error under `--downloader wget` when given on the
+command line, or set away from its default in `.dograpper.json`). Their
+`.dograpper.json` keys get the same type and range checks as the flags, so
+`"no-robots": "false"` means false and `"retries": 1.5` is rejected:
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -349,7 +353,7 @@ interpreter bundles a recent OpenSSL. The release binary is built that way.
 'dograpper[httrack]'`) installs `brotli>=1.2` and `zstandard>=0.22`, which let
 the profile advertise and decode `br` / `zstd` over TLS. Without them it
 advertises only what it can decode. Python 3.14's stdlib `compression.zstd`
-is used when available.
+is used when available. The release binary includes this extra.
 
 **Current gaps (fail loud, exit 1).** Under `httrack`, recursive crawling
 (cascade layer 3 when no llms.txt/sitemap wins) and the Playwright fallback
@@ -696,6 +700,8 @@ dograpper sync <url> -o <dir> [options]
 | `--headless` | — | `false` | Playwright direct (passed to `download`) |
 | `--delay` | — | `0` | Rate limiting in ms (passed to `download`) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
+| `--downloader` | — | `wget` | `wget` \| `httrack` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
 | `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |
@@ -1165,8 +1171,9 @@ downloaded. Re-running (incremental) usually closes the gaps.
 src/dograpper/
 ├── cli.py                    # Entry point, global flags (--verbose/--quiet/--config/--version)
 ├── commands/
+│   ├── _httrack_profile.py    # `download --downloader httrack`: options, discovery fetch, seeded run
 │   ├── doctor.py              # Detect/install wget + chromium; --check-system-libs
-│   ├── download.py            # 4-layer cascade + orchestration
+│   ├── download.py            # Options + --downloader dispatch; 4-layer cascade (wget)
 │   ├── drift.py                # Diff two llm-readiness.json snapshots
 │   ├── eval.py                  # Golden Q&A hit-rate@k / MRR over a JSONL pack
 │   ├── explain.py                # Read-only preview of what an LLM receives per chunk
@@ -1179,6 +1186,15 @@ src/dograpper/
 │   ├── config_loader.py
 │   ├── eval_harness.py        # hit-rate@k / MRR computation
 │   ├── golden_qa.py            # Deterministic Q&A generation from heading breadcrumbs
+│   ├── httrack/                # httrack profile engine (stdlib; br/zstd via the extra)
+│   │   ├── challenge.py        # Cloudflare challenge detection
+│   │   ├── crawl.py            # Seeded-list fetch, writes only clean 2xx bodies
+│   │   ├── escape.py           # HTTrack percent-escaping (wire target + robots rules)
+│   │   ├── fetcher.py          # Paced, retrying HTTP client with HTTrack's identity
+│   │   ├── naming.py           # HTTrack-style local file names
+│   │   ├── policy.py           # Limits/clamps, request headers, TLS context
+│   │   ├── report.py           # End-of-run report
+│   │   └── robots.py           # robots.txt parser (RFC 9309 + HTTrack rules)
 │   ├── ignore_parser.py
 │   ├── llms_txt_parser.py    # Layer 1 (stdlib-only)
 │   ├── manifest.py           # Manifest + diff_manifests()
@@ -1195,6 +1211,7 @@ src/dograpper/
 │   ├── url_filter.py         # Same-netloc + path-prefix + depth
 │   └── wget_mirror.py        # Layer 3 (run_wget_mirror + run_wget_urls)
 └── utils/
+    ├── atomic_write.py         # Temp file + os.replace writes
     ├── chunk_inspector.py      # Read-only chunk parsing for `explain`
     ├── content_extractor.py  # Smart extraction (strips boilerplate)
     ├── dedup.py              # Cross-file dedup (exact + fuzzy)
@@ -1205,6 +1222,7 @@ src/dograpper/
     ├── link_extractor.py     # Cross-refs between chunks
     ├── logger.py
     ├── readiness_report.py     # HTML/terminal renderer for `pack --report`
+    ├── redact.py               # Log-safe URLs (no credentials, escaped controls)
     ├── scorer.py             # LLM Readiness Score
     ├── token_counter.py
     └── word_counter.py
