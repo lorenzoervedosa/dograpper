@@ -1,10 +1,12 @@
 """HTTrack-style local file naming, layout-compatible with wget --adjust-extension.
 
-``<output>/<host>/<path>``: directory URLs become ``index.html``, HTML responses
-without ``.html``/``.htm`` get ``.html``. Pure path computation: never creates
-directories or files.
+``<output>/<host>/<path>``: directory URLs become ``index.html``. HTML responses
+without ``.html``/``.htm`` get ``.html``: like HTTrack, it replaces a dynamic or
+HTML-family extension (``foo.cgi?q=45`` -> ``foo<hash>.html``) and is appended to
+anything else. Characters HTTrack forbids in saved names become ``_``. Pure path
+computation: never creates directories or files.
 
-Out of scope: segments illegal on Windows filesystems, over-long names.
+Out of scope: Windows reserved names (CON, NUL...), trailing dots/spaces, over-long names.
 """
 
 import hashlib
@@ -13,6 +15,13 @@ import threading
 from urllib.parse import unquote, urlsplit
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+# htsname.c: replaced by "_" in every saved name, on every platform
+_FORBIDDEN = {c: "_" for c in [*range(32), 127, *map(ord, '~\\:*?"<>|')]}
+# htsmime.c hts_ext_dynamic + htslib.c ishtml_ext (and a bare trailing dot): an HTML page
+# gets .html in place of these, not after them (htsname.c, R14)
+_REPLACED_EXTS = frozenset({".php3", ".php", ".php4", ".php2", ".cgi", ".asp", ".jsp", ".pl",
+                            ".cfm", ".nsf", ".shtml", ".phtml", ".htmlx", ".shtm", ".phtm",
+                            ".htmx", "."})
 
 
 class NameRegistry:
@@ -46,8 +55,9 @@ class NameRegistry:
 
     def _compute(self, parts, content_type: str | None) -> str | None:
         host = parts.hostname
-        if not host or "\x00" in parts.geturl() or "\\" in host or host in (".", ".."):
+        if not host or "\x00" in parts.geturl() or host in (".", ".."):
             return None
+        host = host.translate(_FORBIDDEN)
         try:
             port = parts.port
         except ValueError:
@@ -56,9 +66,10 @@ class NameRegistry:
         if port is not None and port != _DEFAULT_PORTS.get(parts.scheme):
             host = f"{host}:{port}"
 
-        decoded = unquote(parts.path).replace("\\", "/")
+        decoded = unquote(parts.path)
         if "\x00" in decoded:
             return None
+        decoded = decoded.translate(_FORBIDDEN)
         is_dir = decoded.rsplit("/", 1)[-1] in ("", ".", "..")
         segs: list[str] = []
         for seg in decoded.split("/"):
@@ -75,7 +86,7 @@ class NameRegistry:
             stem += hashlib.md5(parts.query.encode()).hexdigest()[:4]
         is_html = (content_type or "").split(";")[0].strip().lower() == "text/html"
         if is_html and ext.lower() not in (".html", ".htm"):
-            ext += ".html"
+            ext = ".html" if ext.lower() in _REPLACED_EXTS else ext + ".html"
         full = os.path.realpath(os.path.join(self._root, host, *segs, stem + ext))
         if os.path.commonpath([self._root, full]) != self._root:
             return None

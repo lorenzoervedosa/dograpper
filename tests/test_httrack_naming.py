@@ -27,9 +27,32 @@ def test_html_extension_adjusted(tmp_path):
     d = os.path.join(root, "e.com")
     assert reg.assign("http://e.com/page", "Text/HTML; charset=utf-8") == os.path.join(d, "page.html")
     assert reg.assign("http://e.com/a.htm", "text/html") == os.path.join(d, "a.htm")
-    assert reg.assign("http://e.com/b.php", "text/html") == os.path.join(d, "b.php.html")
+    assert reg.assign("http://e.com/b.php", "text/html") == os.path.join(d, "b.html")  # R14
     assert reg.assign("http://e.com/c", None) == os.path.join(d, "c")
     assert reg.assign("http://e.com/d", "application/pdf") == os.path.join(d, "d")
+
+
+def test_html_replaces_dynamic_and_html_family_extensions_like_httrack(tmp_path):
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "e.com")
+    h = lambda q: hashlib.md5(q.encode()).hexdigest()[:4]  # noqa: E731
+    assert reg.assign("http://e.com/page.php?x=1", "text/html") == os.path.join(d, f"page{h('x=1')}.html")
+    assert reg.assign("http://e.com/foo.cgi?q=45", "text/html") == os.path.join(d, f"foo{h('q=45')}.html")
+    for name in ("a.ASP", "b.jsp", "c.pl", "d.cfm", "e.nsf", "f.php3", "g.shtml", "h.phtml", "i."):
+        assert reg.assign(f"http://e.com/{name}", "text/html") == os.path.join(d, name.split(".")[0] + ".html")
+    # an unknown token is part of the name: appended to, not replaced
+    assert reg.assign("http://e.com/article-1.884291", "text/html") == os.path.join(d, "article-1.884291.html")
+    assert reg.assign("http://e.com/x.php", "application/pdf") == os.path.join(d, "x.php")
+
+
+def test_forbidden_characters_become_underscores(tmp_path):
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "h")
+    assert reg.assign("http://h/a%1b%5b31mX%0aY", "text/html") == os.path.join(d, "a_[31mX_Y.html")
+    got = reg.assign("http://h/d%7Ce/a~b%5Cc%3Ad%2Ae%3Ff%22g%3Ch%3Ei%7Cj%7Fk%09l", None)
+    assert got == os.path.join(d, "d_e", "a_b_c_d_e_f_g_h_i_j_k_l")
+    assert reg.assign("http://a\x1bb.com/x", None) == os.path.join(root, "a_b.com", "x")
+    assert reg.assign("http://h/%E4%BD%A0%C3%A9", None) == os.path.join(d, "你é")  # non-ASCII kept
 
 
 def test_query_hash_suffix(tmp_path):
