@@ -41,6 +41,8 @@ src/dograpper/
 │   ├── eval_harness.py     # evaluate() — hit-rate@k e MRR sobre pares golden, com breakdown por readiness grade
 │   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
 │   ├── httrack/
+│   │   ├── challenge.py    # is_challenge() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/)
+│   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After, decode de Content-Encoding
 │   │   ├── policy.py       # build_policy() clamps + request_headers() idênticos ao HTTrack 3.51 + make_ssl_context() (perfil TLS) + accept_encoding()
 │   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap)
 │   ├── ignore_parser.py    # filter_files() com pathspec
@@ -100,6 +102,7 @@ tests/
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
 ├── test_golden_qa.py       # generate_golden_qa: um par por chunk, heading mais profundo, determinismo
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
+├── test_httrack_fetcher.py # Fetcher: retries, gate de Retry-After, pacing com relógio fake, decode gzip/deflate, ordem dos headers, robots_for, is_challenge
 ├── test_httrack_robots.py  # parse_robots: grupos, longest-match, Allow vence empate, wildcard/$, Crawl-delay, Sitemap, caps, corpo HTML sem regras
 ├── test_httrack_policy.py  # Policy: clamps, headers vs fixture httrack_wire, Accept-Encoding, contexto TLS, ClientHello (OpenSSL >= 3.5)
 ├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo
@@ -161,6 +164,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_dedup.py` | Antes de alterar `utils/dedup.py` ou a integração de dedup em `commands/pack.py` |
 | `tests/test_dry_run.py` | Antes de alterar `utils/dry_run_report.py` ou a lógica de dry-run em `commands/pack.py` |
 | `tests/test_heading_extractor.py` | Antes de alterar `utils/heading_extractor.py` ou a lógica de context-header em `commands/pack.py` |
+| `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py` ou `lib/httrack/challenge.py` |
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |
 | `tests/test_init_wizard.py` | Antes de alterar `commands/init.py` ou os presets `TARGETS` |
