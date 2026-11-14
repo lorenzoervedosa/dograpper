@@ -42,9 +42,11 @@ src/dograpper/
 │   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
 │   ├── httrack/
 │   │   ├── challenge.py    # is_challenge() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/)
+│   │   ├── crawl.py        # fetch_url_list() — lista semeada: cada URL é start URL (navigate), robots, /cdn-cgi/ fora de escopo, redirects same-host (até 5), só 2xx não-desafio é escrito (atômico), front_failed; ThreadPool com Fetcher e NameRegistry compartilhados
 │   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, robots com redirects same-host
 │   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path>, index.html, .html por content-type, hash md5[:4] da query, sufixo -N em colisão, thread-safe; None se o caminho escapa de output_dir
 │   │   ├── policy.py       # build_policy() clamps + request_headers() idênticos ao HTTrack 3.51 + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
+│   │   ├── report.py       # RunReport (contagens por status, challenged, robots_blocked, out_of_scope, errors, partial) + format_report() — URLs já redigidas
 │   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap)
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
@@ -104,6 +106,7 @@ tests/
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
 ├── test_golden_qa.py       # generate_golden_qa: um par por chunk, heading mais profundo, determinismo
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
+├── test_httrack_crawl.py   # fetch_url_list: só 2xx não-desafio escrito, robots, redirects, front_failed, max_links, filtro de extensão, conflito de escrita, format_report
 ├── test_httrack_fetcher.py # Fetcher: retries, gate de Retry-After, pacing com relógio fake, decode gzip/deflate, ordem dos headers, robots_for, is_challenge
 ├── test_httrack_naming.py  # NameRegistry: index.html, extensão .html, hash de query, colisão -N e estabilidade, traversal/symlink rejeitados, thread-safety
 ├── test_httrack_robots.py  # parse_robots: grupos, longest-match, Allow vence empate, wildcard/$, Crawl-delay, Sitemap, caps, corpo HTML sem regras
@@ -168,6 +171,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_dedup.py` | Antes de alterar `utils/dedup.py` ou a integração de dedup em `commands/pack.py` |
 | `tests/test_dry_run.py` | Antes de alterar `utils/dry_run_report.py` ou a lógica de dry-run em `commands/pack.py` |
 | `tests/test_heading_extractor.py` | Antes de alterar `utils/heading_extractor.py` ou a lógica de context-header em `commands/pack.py` |
+| `tests/test_httrack_crawl.py` | Antes de alterar `lib/httrack/crawl.py` ou `lib/httrack/report.py` |
 | `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py` ou `lib/httrack/challenge.py` |
 | `tests/test_httrack_naming.py` | Antes de alterar `lib/httrack/naming.py` |
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
