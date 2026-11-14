@@ -38,6 +38,31 @@ def test_disable_security_limits_lifts_clamps_not_retry_after_cap():
     assert p.max_retry_after == 3600
 
 
+def test_retry_after_cap_warns(caplog):
+    with caplog.at_level(logging.WARNING, logger=policy.logger.name):
+        assert build_policy(max_retry_after=3600).max_retry_after == 3600
+    assert caplog.records == []
+    with caplog.at_level(logging.WARNING, logger=policy.logger.name):
+        p = build_policy(max_retry_after=99999, disable_security_limits=True)
+    assert p.max_retry_after == 3600
+    assert "max_retry_after=99999" in caplog.text and "3600" in caplog.text
+
+
+@pytest.mark.parametrize("kw", [
+    {"connections": 0}, {"connections": -1}, {"max_conn_rate": 0}, {"max_bandwidth": 0},
+    {"timeout": 0}, {"timeout": float("nan")}, {"max_links": 0}, {"retries": -1},
+    {"max_retry_after": -1}, {"delay_ms": -1},
+])
+def test_out_of_range_values_fail_at_build_time(kw):
+    with pytest.raises(ValueError, match=next(iter(kw))):
+        build_policy(**kw)
+
+
+def test_zero_retries_retry_after_and_delay_are_valid():
+    p = build_policy(retries=0, max_retry_after=0, delay_ms=0)
+    assert (p.retries, p.max_retry_after, p.delay_ms) == (0, 0, 0)
+
+
 def test_default_user_agent_has_version_and_no_url():
     ua = build_policy().user_agent
     assert ua.startswith("Mozilla/5.0 (compatible; dograpper/") and "http" not in ua

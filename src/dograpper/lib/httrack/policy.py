@@ -55,6 +55,20 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  timeout: float = 120.0, retries: int = 2, max_links: int = 100_000,
                  max_retry_after: int = 60, delay_ms: int = 0, obey_robots: bool = True,
                  disable_security_limits: bool = False) -> HttrackPolicy:
+    # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
+    for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
+                        ("max_bandwidth", max_bandwidth), ("timeout", timeout),
+                        ("max_links", max_links)):
+        if not value > 0:
+            raise ValueError(f"{name} must be positive, got {value!r}")
+    for name, value in (("retries", retries), ("max_retry_after", max_retry_after),
+                        ("delay_ms", delay_ms)):
+        if not value >= 0:
+            raise ValueError(f"{name} must not be negative, got {value!r}")
+    if max_retry_after > MAX_RETRY_AFTER_CAP:
+        logger.warning("max_retry_after=%s exceeds the hard maximum; clamped to %s",
+                       max_retry_after, MAX_RETRY_AFTER_CAP)
+        max_retry_after = MAX_RETRY_AFTER_CAP
     off = disable_security_limits
     return HttrackPolicy(
         user_agent=user_agent or DEFAULT_USER_AGENT,
@@ -64,7 +78,7 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         timeout=timeout,
         retries=retries,
         max_links=max_links,
-        max_retry_after=min(max_retry_after, MAX_RETRY_AFTER_CAP),
+        max_retry_after=max_retry_after,
         delay_ms=delay_ms,
         obey_robots=obey_robots,
     )
