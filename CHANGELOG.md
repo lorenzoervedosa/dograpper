@@ -46,6 +46,17 @@ and fixes alone are a PATCH bump.
 
 ## [Unreleased]
 
+### Added
+
+- `download --downloader httrack` (and the same flags on `sync`): a pure-Python
+  fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
+  (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
+  `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
+  `--max-retry-after`, `--disable-security-limits`). Recursive crawl and the
+  Playwright fallback fail loud under this profile for now.
+- `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
+  response decoding for the httrack profile.
+
 ### Fixed
 
 - `pack --cross-refs` no longer corrupts words where a link's text is a

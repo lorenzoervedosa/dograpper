@@ -6,7 +6,7 @@ CLI em Python que implementa uma pipeline de engenharia de contexto
 determinístico para ingestão em LLMs estáticos. Transforma documentação
 HTML em contexto estruturado, dedupicado, pontuado e versionado — pronto
 para NotebookLM, RAG pipelines, Claude Projects e fine-tuning. Três
-subcomandos: `download` (espelha site via wget/playwright), `pack`
+subcomandos: `download` (espelha site via wget/playwright, ou perfil httrack), `pack`
 (processa e agrupa em chunks otimizados) e `sync` (download + pack delta).
 
 ## Stack técnica
@@ -17,7 +17,7 @@ subcomandos: `download` (espelha site via wget/playwright), `pack`
 - **Filtro de arquivos**: pathspec (sintaxe gitignore)
 - **Crawling SPA**: playwright (dependência opcional, import condicional)
 - **Token counting**: tiktoken (dependência obrigatória)
-- **Download padrão**: wget (dependência do sistema)
+- **Download padrão**: wget (dependência do sistema); perfil opt-in `--downloader httrack` (Python puro, `lib/httrack/`; extra `httrack` = brotli + zstandard; exige OpenSSL >= 3.5 para o handshake idêntico)
 - **Testes**: pytest com click.testing.CliRunner
 
 ## Estrutura do repositório

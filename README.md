@@ -58,6 +58,7 @@ Override the default root: `DOGRAPPER_HOME=/custom/path dograpper doctor --insta
 | 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
+| 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
 | 10 | install.sh | SHA256 mismatch | retry install, report issue |
@@ -246,6 +247,7 @@ dograpper download <url> -o <directory> [options]
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions (csv) |
 | `--manifest` | — | `.dograpper-manifest.json` | Cache file path |
+| `--downloader` | — | `wget` | Download backend: `wget` or `httrack` (see [Downloader profiles](#downloader-profiles)) |
 
 #### Discovery cascade (4 layers)
 
@@ -296,6 +298,64 @@ INFO: [cascade] layer-2 sitemap: raw=120 in-scope=120
 INFO: [cascade] layer-2 sitemap: WIN (>=3)
 INFO: [cascade] layer-3 wget -i: fetching 120 URLs from sitemap.xml
 ```
+
+#### Downloader profiles
+
+`--downloader` picks the backend for the fetch step (also accepted by `sync`,
+which forwards every flag below, and as `"downloader"` in `.dograpper.json`).
+Precedence is unchanged: defaults < JSON < explicit CLI.
+
+- **`wget`** (default) — unchanged: the cascade above, with `wget` and
+  Playwright.
+- **`httrack`** — a pure-Python fetcher that reproduces HTTrack 3.51 on the
+  wire (header set and order, `Accept-Encoding`, TLS settings) and in
+  behavior (robots.txt longest-match, retries, pacing). Layers 1 and 2
+  discover URLs through the same identity; the seeded URLs are then fetched
+  by the new engine.
+
+`[httrack]` flags (an error under `--downloader wget`):
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--user-agent` | `Mozilla/5.0 (compatible; dograpper/<version>)` | User-Agent header |
+| `--no-robots` | off | Ignore robots.txt |
+| `--connections` | `4` | Parallel connections (clamped to 8) |
+| `--max-conn-rate` | `5.0` | Max connections opened per second (clamped to 5) |
+| `--max-bandwidth` | `100000` | Max bytes/second (clamped to 10000000) |
+| `--timeout` | `120` | Per-request timeout, seconds |
+| `--retries` | `2` | Retries per URL |
+| `--max-links` | `100000` | Max URLs fetched per run |
+| `--max-retry-after` | `60` | Max seconds honored from `Retry-After` / `Crawl-delay` (hard cap 3600) |
+| `--disable-security-limits` | off | Lift the connection, rate and bandwidth clamps |
+
+`--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
+protect the corpus:
+
+- Error and challenge bodies (non-2xx, Cloudflare interstitials) are never
+  stored; they are counted in the end-of-run report.
+- robots.txt `Crawl-delay` is honored (HTTrack ignores it).
+- The discovery cascade is kept (llms.txt, sitemap).
+- Nothing is purged from the output directory.
+- TLS certificate verification stays on.
+- robots rules are matched on the percent-escaped target, per RFC 9309;
+  redirects when fetching robots.txt are followed on the same host only.
+
+**OpenSSL >= 3.5.** The TLS handshake only matches HTTrack's on OpenSSL 3.5
+or newer; on older builds `dograpper` warns and some CDNs may reject the
+connection. Run on a uv-managed Python (`uv python install 3.13`), whose
+interpreter bundles a recent OpenSSL. The release binary is built that way.
+
+**Brotli and zstd.** `uv sync --extra httrack` (or `pip install
+'dograpper[httrack]'`) installs `brotli>=1.2` and `zstandard>=0.22`, which let
+the profile advertise and decode `br` / `zstd` over TLS. Without them it
+advertises only what it can decode. Python 3.14's stdlib `compression.zstd`
+is used when available.
+
+**Current gaps (fail loud, exit 1).** Under `httrack`, recursive crawling
+(cascade layer 3 when no llms.txt/sitemap wins) and the Playwright fallback
+are not implemented yet; use `--downloader wget` for those sites. Link
+rewriting also lands later, so `pack --cross-refs` finds fewer references in
+httrack-fetched trees.
 
 #### Incremental
 
