@@ -91,7 +91,7 @@ def test_headers_match_httrack_fixture(fix_key, kind, referer):
         elif line.startswith("Accept-Encoding: "):
             line = "Accept-Encoding: " + policy.accept_encoding()
         expected.append(line)
-    got = request_headers(p, "localhost:8443", kind=kind, referer=referer)
+    got = request_headers(p, "localhost:8443", kind=kind, referer=referer, scheme="https")
     assert [f"{k}: {v}" for k, v in got] == expected
 
 
@@ -134,13 +134,13 @@ def test_plain_http_to_trustworthy_origin_sends_fetch_metadata_without_uir(host)
 @pytest.mark.parametrize("ua", ["X/1", "Mozilla/5.0", "mozilla/5.0 (x)", "Mozilla/4.0 (x)"])
 def test_non_browser_user_agent_sends_no_fetch_metadata(ua):
     got = request_headers(build_policy(user_agent=ua), "example.com", kind="navigate",
-                          referer=None)
+                          referer=None, scheme="https")
     assert _names(got) == ["Connection", "Host", "User-Agent", "Accept",
                            "Accept-Language", "Accept-Encoding"]
 
 
 def test_linked_without_referer_is_not_same_origin():
-    got = dict(request_headers(build_policy(), "example.com", kind="linked", referer=None))
+    got = dict(request_headers(build_policy(), "example.com", kind="linked", referer=None, scheme="https"))
     assert got["Sec-Fetch-Site"] == "none" and "Referer" not in got
 
 

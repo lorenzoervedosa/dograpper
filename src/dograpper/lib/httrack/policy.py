@@ -166,9 +166,8 @@ def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
 
 
 def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str | None,
-                    scheme: str = "https") -> list[tuple[str, str]]:
-    """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked.
-    scheme defaults to https, the scheme of the wire fixtures."""
+                    scheme: str) -> list[tuple[str, str]]:
+    """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked."""
     if kind not in ("robots", "navigate", "linked"):
         raise ValueError(f"unknown request kind: {kind!r}")
     secure = scheme == "https"
