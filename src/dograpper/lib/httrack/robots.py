@@ -101,7 +101,7 @@ def parse_robots(text: str, agent_token: str = "dograpper") -> RobotsRules:
             in_agents = True
             continue
         if key == "sitemap":
-            if value:
+            if value and not truncated:  # HTTrack drops a cut Sitemap line
                 sitemaps.append(value)
             continue
         if key in ("allow", "disallow", "crawl-delay"):

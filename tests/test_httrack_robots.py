@@ -123,3 +123,9 @@ def test_percent_escape_hex_case_insensitive():
     assert not r.allowed("/caf%C3%A9") and not r.allowed("/caf%c3%a9")
     assert not r.allowed("/x%2fy")
     assert r.allowed("/cafe")
+
+
+def test_truncated_sitemap_line_discarded():
+    long = "http://h/" + "a" * 1100 + ".xml"
+    r = parse_robots(f"Sitemap: {long}\nSitemap: http://h/ok.xml\n")
+    assert r.sitemaps == ("http://h/ok.xml",)
