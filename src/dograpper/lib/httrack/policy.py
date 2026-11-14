@@ -68,14 +68,22 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
 
 
 def _importable(name: str) -> bool:
+    """True when `name` imports and can decode within an output bound (fetcher relies on it)."""
     try:
-        importlib.import_module(name)
+        mod = importlib.import_module(name)
     except ImportError:
         return False
+    if name == "brotli":  # output_buffer_limit arrived in brotli 1.2.0
+        try:
+            mod.Decompressor().process(b"", output_buffer_limit=1)
+        except TypeError:
+            return False
+    if name == "zstandard":
+        return hasattr(mod, "frame_content_size")
     return True
 
 
-_DECODER_MODULES = {"br": ("brotli",), "zstd": ("zstandard", "compression.zstd")}
+_DECODER_MODULES = {"br": ("brotli",), "zstd": ("compression.zstd", "zstandard")}
 
 
 def _decoder_modname(encoding: str) -> str | None:

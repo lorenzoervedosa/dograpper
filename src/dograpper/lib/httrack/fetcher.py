@@ -63,12 +63,16 @@ def _deflate(data: bytes) -> bytes:
 
 def _brotli(mod, data: bytes) -> bytes:
     d, out = mod.Decompressor(), bytearray()
-    for i in range(0, len(data), 1024):  # small input slices bound each output burst
-        out += d.process(data[i:i + 1024])
-        _check(out)
-    if not d.is_finished():
-        raise ValueError("truncated compressed stream")
-    return bytes(out)
+    chunk = d.process(data, output_buffer_limit=CHUNK)
+    while True:
+        if len(out) + len(chunk) > MAX_BODY_BYTES:  # projected size, before appending
+            raise ValueError("body too large")
+        out += chunk
+        if d.is_finished():
+            return bytes(out)
+        chunk = d.process(b"", output_buffer_limit=CHUNK)
+        if not chunk and d.can_accept_more_data():  # wants input we do not have
+            raise ValueError("truncated compressed stream")
 
 
 def _zstd(mod, data: bytes) -> bytes:
@@ -79,15 +83,26 @@ def _zstd(mod, data: bytes) -> bytes:
         if not d.eof:
             raise ValueError("truncated compressed stream")
         return out
-    # shortcut: the zstandard package's stream_reader has no eof flag, so truncation goes undetected there
-    out, reader = bytearray(), mod.ZstdDecompressor().stream_reader(io.BytesIO(data))
-    while chunk := reader.read(CHUNK):
-        out += chunk
-        _check(out)
-    return bytes(out)
+    # zstandard: a declared frame size is allocated up front, so reject it before decoding
+    if mod.frame_content_size(data) > MAX_BODY_BYTES:
+        raise ValueError("body too large")
+    try:
+        out = mod.ZstdDecompressor().decompress(data, max_output_size=MAX_BODY_BYTES + 1)
+    except mod.ZstdError:
+        # same error for truncated and over-limit frames: a bounded stream read tells them apart
+        total, reader = 0, mod.ZstdDecompressor().stream_reader(io.BytesIO(data))
+        while chunk := reader.read(CHUNK):
+            total += len(chunk)
+            if total > MAX_BODY_BYTES:
+                raise ValueError("body too large") from None
+        raise ValueError("truncated compressed stream") from None
+    _check(out)
+    return out
 
 
 def _decode(body: bytes, encoding: str) -> bytes:
+    if not body:  # 204/3xx and HEAD-like replies carry an empty body whatever the encoding
+        return body
     encs = [e.strip().lower() for e in encoding.split(",") if e.strip()]
     if len(encs) > MAX_ENCODINGS:
         raise ValueError("too many stacked content-encodings")
@@ -266,12 +281,12 @@ class Fetcher:
             if (status in RETRY_STATUSES or (status == 503 and ra is not None)) \
                     and attempt <= self.policy.retries:
                 continue
+            res.location = hdrs.get("location")  # independent of body decoding
             try:
                 res.body = _decode(raw, hdrs.get("content-encoding", ""))
             except Exception as exc:  # zlib/brotli/zstd errors differ per codec; surfaced, not hidden
                 res.error = f"decode failed: {type(exc).__name__}: {exc}"
                 return res
-            res.location = hdrs.get("location")
             res.challenged = is_challenge(status, hdrs, res.body)
             return res
         return res

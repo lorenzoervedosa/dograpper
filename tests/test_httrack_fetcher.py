@@ -385,3 +385,106 @@ def test_userinfo_never_logged(server, caplog):
         f.get(base.replace("http://", "http://alice:s3cret@") + "/a", kind="navigate")
     assert "s3cret" not in caplog.text and "alice" not in caplog.text
     assert "capped" in caplog.text
+
+
+def test_empty_compressed_body_is_ok_and_redirect_keeps_location(server):
+    base, script, _ = server
+    script["/r"] = [(301, {"Location": "/z", "Content-Encoding": "gzip"}, b"")]
+    script["/e"] = [(200, {"Content-Encoding": "gzip"}, b"")]
+    f, _ = make()
+    r = f.get(base + "/r", kind="navigate")
+    assert (r.status, r.location, r.error) == (301, "/z", None)
+    r = f.get(base + "/e", kind="navigate")
+    assert (r.status, r.body, r.error) == (200, b"", None)
+
+
+def test_location_survives_decode_failure(server):
+    base, script, _ = server
+    script["/r"] = [(302, {"Location": "/z", "Content-Encoding": "gzip"}, b"not gzip")]
+    f, _ = make()
+    r = f.get(base + "/r", kind="navigate")
+    assert r.error and r.location == "/z"
+
+
+# -- optional decoders: run only where they are installed (see task report) --
+
+class _SpyDecompressor:
+    def __init__(self, real):
+        self.real, self.max_out = real, 0
+
+    def process(self, *a, **k):
+        out = self.real.process(*a, **k)
+        self.max_out = max(self.max_out, len(out))
+        return out
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+def _br_or_skip():
+    pytest.importorskip("brotli")
+    mod = policy_mod.decoder_module("br")
+    if mod is None:
+        pytest.skip("installed brotli lacks output_buffer_limit")
+    return mod
+
+
+def test_brotli_decode_bomb_and_truncation(server, monkeypatch):
+    mod = _br_or_skip()
+    base, script, _ = server
+    assert fetcher_mod._decode(mod.compress(b"hello"), "br") == b"hello"
+    monkeypatch.setattr(fetcher_mod, "MAX_BODY_BYTES", 1000)
+    bomb = mod.compress(b"\0" * 20_000_000, quality=1)
+    spies = []
+
+    class Proxy:
+        @staticmethod
+        def Decompressor():
+            spies.append(_SpyDecompressor(mod.Decompressor()))
+            return spies[-1]
+
+    with pytest.raises(ValueError, match="body too large"):
+        fetcher_mod._brotli(Proxy, bomb)
+    assert spies[0].max_out < 1_000_000  # bounded per call, not 20 MB at once
+    script["/b"] = [(200, {"Content-Encoding": "br"}, bomb)]
+    f, _ = make()
+    assert "body too large" in f.get(base + "/b", kind="navigate").error
+    monkeypatch.setattr(fetcher_mod, "MAX_BODY_BYTES", 64 * 1024 * 1024)
+    cut = mod.compress(b"hello world" * 1000)[:-4]
+    with pytest.raises(ValueError, match="truncated"):
+        fetcher_mod._decode(cut, "br")
+
+
+def _zstd_or_skip():
+    mod = policy_mod.decoder_module("zstd")
+    if mod is None:
+        pytest.skip("no zstd decoder installed")
+    return mod
+
+
+def _zstd_frames(data: bytes) -> list[bytes]:
+    """Known-size and (where the package can) unknown-size frames."""
+    try:
+        import zstandard
+    except ImportError:
+        from compression import zstd
+        return [zstd.compress(data)]
+    c = zstandard.ZstdCompressor().compressobj()
+    return [zstandard.ZstdCompressor().compress(data), c.compress(data) + c.flush()]
+
+
+def test_zstd_decode_bomb_and_truncation(monkeypatch):
+    _zstd_or_skip()
+    payload = b"\0" * 5_000_000
+    for frame in _zstd_frames(payload):
+        assert fetcher_mod._decode(frame, "zstd") == payload
+        with pytest.raises(ValueError, match="truncated|too large"):
+            fetcher_mod._decode(frame[:-5], "zstd")
+    monkeypatch.setattr(fetcher_mod, "MAX_BODY_BYTES", 1000)
+    for frame in _zstd_frames(payload):
+        with pytest.raises(ValueError, match="body too large"):
+            fetcher_mod._decode(frame, "zstd")
+    monkeypatch.setattr(fetcher_mod, "MAX_BODY_BYTES", 64 * 1024 * 1024)
+    cut = _zstd_frames(b"hello world" * 1000)[-1][:-3]
+    with pytest.raises(ValueError, match="truncated"):
+        fetcher_mod._decode(cut, "zstd")
