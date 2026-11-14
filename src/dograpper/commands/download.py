@@ -7,7 +7,7 @@ from typing import List, Tuple
 
 from urllib.parse import urlsplit
 
-from ..lib.config_loader import is_explicit_source, load_config
+from ..lib.config_loader import is_explicit, load_config
 from ..lib.httrack.crawl import fetch_url_list
 from ..lib.httrack.fetcher import Fetcher, request_target
 from ..lib.httrack.policy import build_policy, warn_if_old_openssl
@@ -454,7 +454,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw,
             frozenset(k for k in (*defaults, 'delay')
-                      if not is_explicit_source(ctx.get_parameter_source(k))),
+                      if not is_explicit(ctx, k)),
         )
     else:
         files_downloaded, files_skipped = _run_download_cascade(

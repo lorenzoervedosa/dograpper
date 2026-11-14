@@ -295,3 +295,35 @@ def test_discovery_warns_on_robots_blocked_challenged_and_redirected(caplog):
             _discover_urls("http://example.com", 0, f)
         assert any(r.levelno == logging.WARNING and name[:7] in r.getMessage()
                    for r in caplog.records), (name, caplog.records)
+
+
+def test_forwarded_explicit_value_not_labeled_as_config():
+    """A policy error on a value a wrapper forwarded as explicit must not say
+    "(from .dograpper.json)"; an unforwarded value (config-sourced) must."""
+    import click
+
+    @click.command()
+    @click.pass_context
+    def wrapper(ctx):
+        ctx.obj = {'CLI_EXPLICIT_PARAMS': {'delay'}}
+        ctx.invoke(download, url="http://example.com", output="out", delay=-5,
+                   downloader="httrack")
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        r = runner.invoke(wrapper)
+        assert "--delay must not be negative" in r.output
+        assert "(from .dograpper.json)" not in r.output
+        with open(".dograpper.json", "w", encoding="utf-8") as f:
+            json.dump({"download": {"delay": -5}}, f)
+
+        @click.command()
+        @click.pass_context
+        def wrapper2(ctx):
+            ctx.obj = {}
+            ctx.invoke(download, url="http://example.com", output="out",
+                       delay=0, downloader="httrack")
+
+        r = runner.invoke(wrapper2)
+        assert "--delay must not be negative" in r.output
+        assert "(from .dograpper.json)" in r.output
