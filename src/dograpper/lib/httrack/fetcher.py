@@ -14,7 +14,7 @@ from urllib.parse import urljoin, urlsplit
 
 from ...utils.redact import redact_url
 from .challenge import is_challenge
-from .policy import HttrackPolicy, decoder_module, make_ssl_context, request_headers
+from .policy import ZSTD_MAX_WINDOW, HttrackPolicy, decoder_module, make_ssl_context, request_headers
 from .robots import NO_RULES, RobotsRules, parse_robots
 
 logger = logging.getLogger(__name__)
@@ -45,13 +45,20 @@ def _check(out) -> None:
         raise ValueError("body too large")
 
 
-def _zlib(data: bytes, wbits: int) -> bytes:
-    d = zlib.decompressobj(wbits)
-    out = d.decompress(data, MAX_BODY_BYTES + 1)
-    _check(out)
-    if not d.eof:
-        raise ValueError("truncated compressed stream")
-    return out
+def _zlib(data: bytes, wbits: int, members: bool = False) -> bytes:
+    out, rest = bytearray(), data
+    while True:  # gzip allows concatenated members (RFC 1952); anything else is an error
+        d = zlib.decompressobj(wbits)
+        out += d.decompress(rest, MAX_BODY_BYTES - len(out) + 1)
+        _check(out)
+        if not d.eof:
+            raise ValueError("truncated compressed stream")
+        rest = d.unused_data
+        if not (members and rest):
+            break
+    if rest:
+        raise ValueError("trailing data after compressed stream")
+    return bytes(out)
 
 
 def _deflate(data: bytes) -> bytes:
@@ -76,28 +83,30 @@ def _brotli(mod, data: bytes) -> bytes:
 
 
 def _zstd(mod, data: bytes) -> bytes:
-    if mod.__name__ == "compression.zstd":
-        d = mod.ZstdDecompressor()
-        out = d.decompress(data, MAX_BODY_BYTES + 1)
-        _check(out)
-        if not d.eof:
-            raise ValueError("truncated compressed stream")
-        return out
-    # zstandard: a declared frame size is allocated up front, so reject it before decoding
-    if mod.frame_content_size(data) > MAX_BODY_BYTES:
-        raise ValueError("body too large")
-    try:
-        out = mod.ZstdDecompressor().decompress(data, max_output_size=MAX_BODY_BYTES + 1)
-    except mod.ZstdError:
-        # same error for truncated and over-limit frames: a bounded stream read tells them apart
-        total, reader = 0, mod.ZstdDecompressor().stream_reader(io.BytesIO(data))
-        while chunk := reader.read(CHUNK):
-            total += len(chunk)
-            if total > MAX_BODY_BYTES:
-                raise ValueError("body too large") from None
-        raise ValueError("truncated compressed stream") from None
-    _check(out)
-    return out
+    """All frames, bounded in total; junk, truncation or an oversized window is an error."""
+    out, pos, stdlib = bytearray(), 0, mod.__name__ == "compression.zstd"
+    while pos < len(data):
+        if stdlib:
+            d = mod.ZstdDecompressor(options={mod.DecompressionParameter.window_log_max:
+                                              ZSTD_MAX_WINDOW.bit_length() - 1})
+            out += d.decompress(data[pos:], MAX_BODY_BYTES - len(out) + 1)
+            _check(out)
+            if not d.eof:
+                raise ValueError("truncated compressed stream")
+            pos = len(data) - len(d.unused_data)
+            continue
+        d = mod.ZstdDecompressor(max_window_size=ZSTD_MAX_WINDOW).decompressobj()
+        while not d.eof:
+            if pos >= len(data):
+                raise ValueError("truncated compressed stream")
+            # tiny input slices bound the output of any single call (a zstd block expands <= 128 KiB per few bytes)
+            piece, pos = data[pos:pos + 64], pos + 64
+            chunk = d.decompress(piece)
+            if len(out) + len(chunk) > MAX_BODY_BYTES:
+                raise ValueError("body too large")
+            out += chunk
+        pos = min(pos, len(data)) - len(d.unused_data)
+    return bytes(out)
 
 
 def _decode(body: bytes, encoding: str) -> bytes:
@@ -108,7 +117,7 @@ def _decode(body: bytes, encoding: str) -> bytes:
         raise ValueError("too many stacked content-encodings")
     for enc in reversed(encs):
         if enc in ("gzip", "x-gzip"):
-            body = _zlib(body, 16 + zlib.MAX_WBITS)
+            body = _zlib(body, 16 + zlib.MAX_WBITS, members=True)
         elif enc == "deflate":
             body = _deflate(body)
         elif enc in ("br", "zstd") and (mod := decoder_module(enc)) is not None:

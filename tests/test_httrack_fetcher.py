@@ -488,3 +488,51 @@ def test_zstd_decode_bomb_and_truncation(monkeypatch):
     cut = _zstd_frames(b"hello world" * 1000)[-1][:-3]
     with pytest.raises(ValueError, match="truncated"):
         fetcher_mod._decode(cut, "zstd")
+
+
+def test_gzip_multi_member_and_trailing_junk():
+    one, two = gzip.compress(b"hello "), gzip.compress(b"world")
+    assert fetcher_mod._decode(one + two, "gzip") == b"hello world"
+    for bad in (one + b"junk", one + two[:-4]):
+        with pytest.raises(Exception):
+            fetcher_mod._decode(bad, "gzip")
+    with pytest.raises(ValueError, match="trailing"):
+        fetcher_mod._decode(zlib.compress(b"x") + b"junk", "deflate")
+
+
+def test_gzip_members_bounded_in_total(monkeypatch):
+    monkeypatch.setattr(fetcher_mod, "MAX_BODY_BYTES", 1500)
+    member = gzip.compress(b"a" * 1000)
+    with pytest.raises(ValueError, match="body too large"):
+        fetcher_mod._decode(member * 2, "gzip")
+
+
+def test_brotli_multi_call_continuation():
+    mod = _br_or_skip()
+    payload = bytes(range(256)) * 4096 + b"tail" * 200_000  # several x CHUNK of output
+    assert len(payload) > 5 * fetcher_mod.CHUNK
+    assert fetcher_mod._decode(mod.compress(payload, quality=3), "br") == payload
+
+
+def test_zstd_multi_frame_junk_and_window(monkeypatch):
+    mod = _zstd_or_skip()
+    a, b = _zstd_frames(b"A" * 1000)[-1], _zstd_frames(b"B" * 1000)[-1]
+    assert fetcher_mod._decode(a + b, "zstd") == b"A" * 1000 + b"B" * 1000
+    with pytest.raises(Exception):
+        fetcher_mod._decode(a + b"junkjunkjunk", "zstd")
+    with pytest.raises(ValueError, match="truncated"):
+        fetcher_mod._decode(a + b[:-3], "zstd")
+    monkeypatch.setattr(fetcher_mod, "MAX_BODY_BYTES", 1500)
+    with pytest.raises(ValueError, match="body too large"):
+        fetcher_mod._decode(a + b, "zstd")
+    monkeypatch.undo()
+    data = b"x" * 10_000_000
+    try:
+        import zstandard
+        big = zstandard.ZstdCompressor(compression_params=zstandard.ZstdCompressionParameters.from_level(
+            3, window_log=27)).compress(data)
+    except ImportError:
+        from compression import zstd
+        big = zstd.compress(data, options={zstd.CompressionParameter.window_log: 27})
+    with pytest.raises(Exception):  # window above the 8 MiB cap is refused
+        fetcher_mod._decode(big, "zstd")

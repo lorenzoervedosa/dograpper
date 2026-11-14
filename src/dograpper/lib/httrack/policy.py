@@ -22,6 +22,7 @@ ACCEPT_LANGUAGE = "en, *"
 MAX_CONNECTIONS = 8
 MAX_CONN_RATE = 5.0
 MAX_BANDWIDTH = 10_000_000
+ZSTD_MAX_WINDOW = 8 * 1024 * 1024  # RFC 9659 lets a client refuse larger windows
 MAX_RETRY_AFTER_CAP = 3600  # never lifted, even by disable_security_limits
 
 
@@ -78,8 +79,13 @@ def _importable(name: str) -> bool:
             mod.Decompressor().process(b"", output_buffer_limit=1)
         except TypeError:
             return False
-    if name == "zstandard":
-        return hasattr(mod, "frame_content_size")
+    if name == "zstandard":  # needs a window cap and the incremental decompressobj
+        try:
+            mod.ZstdDecompressor(max_window_size=ZSTD_MAX_WINDOW).decompressobj()
+        except (TypeError, AttributeError):
+            return False
+    if name == "compression.zstd":
+        return hasattr(mod, "DecompressionParameter")
     return True
 
 

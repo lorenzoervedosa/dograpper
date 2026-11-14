@@ -1,3 +1,5 @@
+import sys
+import types
 import importlib.util
 import json
 import logging
@@ -137,3 +139,51 @@ def test_client_hello_matches_httrack_fixture(tmp_path):
     rec = json.loads(out.read_text().splitlines()[0])
     assert "client_hello_error" not in rec and "tls_error" not in rec
     assert _normalize(rec["client_hello"]) == _normalize(FIXTURE["start"]["client_hello"])
+
+
+def _fake(monkeypatch, name, **attrs):
+    mod = types.ModuleType(name)
+    for k, v in attrs.items():
+        setattr(mod, k, v)
+    monkeypatch.setitem(sys.modules, name, mod)
+
+
+class _OldBrotli:
+    def process(self, data):
+        return b""
+
+
+class _NewBrotli:
+    def process(self, data, output_buffer_limit=None):
+        return b""
+
+
+def test_brotli_without_bounded_api_is_refused(monkeypatch):
+    _fake(monkeypatch, "brotli", Decompressor=_OldBrotli)
+    assert "br" not in policy.accept_encoding()
+    assert policy.decoder_module("br") is None
+    _fake(monkeypatch, "brotli", Decompressor=_NewBrotli)
+    assert "br" in policy.accept_encoding()
+    assert policy.decoder_module("br") is not None
+
+
+class _NoWindowZstd:
+    def __init__(self):
+        pass
+
+
+class _WindowZstd:
+    def __init__(self, max_window_size=0):
+        pass
+
+    def decompressobj(self):
+        return object()
+
+
+def test_zstandard_without_window_cap_is_refused(monkeypatch):
+    monkeypatch.setitem(sys.modules, "compression.zstd", None)  # force ImportError
+    _fake(monkeypatch, "zstandard", ZstdDecompressor=_NoWindowZstd)
+    assert "zstd" not in policy.accept_encoding()
+    assert policy.decoder_module("zstd") is None
+    _fake(monkeypatch, "zstandard", ZstdDecompressor=_WindowZstd)
+    assert "zstd" in policy.accept_encoding()
