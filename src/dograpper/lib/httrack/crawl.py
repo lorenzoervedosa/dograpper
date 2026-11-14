@@ -73,13 +73,15 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 logger.info("robots.txt disallows %s", safe)
                 return "refused"
             res = fetcher.get(url, kind="navigate")
+            # the fetcher keeps a 3xx's Location even when its body fails to decode
+            redirect = bool(res.status in REDIRECTS and res.location)
             with lock:
                 report.retried += max(res.attempts - 1, 0)
-                count(res.status, res.error is not None)
-                if res.error is not None:
+                count(res.status, res.error is not None and not redirect)
+                if res.error is not None and not redirect:
                     report.errors.append((safe, res.error, None))
                     return "refused"
-                if res.status in REDIRECTS and res.location:
+                if redirect:
                     try:
                         nxt = urljoin(url, res.location)
                     except ValueError:

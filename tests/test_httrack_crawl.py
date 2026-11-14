@@ -107,6 +107,16 @@ def test_same_host_redirect_is_followed_and_final_url_named(server, tmp_path):
     assert [os.path.basename(f) for f in res.files_downloaded] == ["new.html"]
 
 
+def test_redirect_with_undecodable_body_is_followed(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/new", "content-encoding": "gzip"}, b"not gzip")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    res = run([f"{base}/old"], tmp_path)
+    assert [os.path.basename(f) for f in res.files_downloaded] == ["new.html"]
+    assert res.report.errors == [] and res.report.status_counts["3xx"] == 1
+
+
 def test_redirect_loop_is_an_error(server, tmp_path):
     base, script, _ = server
     script["/robots.txt"] = (404, {}, b"")
