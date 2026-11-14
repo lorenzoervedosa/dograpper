@@ -44,6 +44,7 @@ src/dograpper/
 │   ├── httrack/
 │   │   ├── challenge.py    # is_challenge() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/)
 │   │   ├── crawl.py        # fetch_url_list() — lista semeada: cada URL é start URL (navigate), robots, /cdn-cgi/ fora de escopo, redirects same-host (até 5), só 2xx não-desafio é escrito (atômico), front_failed; ThreadPool com Fetcher e NameRegistry compartilhados
+│   │   ├── escape.py       # escape_unsafe()/request_target() — percent-escape do HTTrack (htslib.c escape_check_url); fonte única para o alvo no fio (fetcher) e as regras do robots.txt
 │   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, corpo curto = IncompleteRead retentado, alvo percent-encoded e Host IDNA como o HTTrack, robots com redirects same-host; same_host() — escopo de redirect (fonte única para robots, crawl e descoberta)
 │   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path>, index.html, .html por content-type (substitui extensão dinâmica .php/.cgi…, anexa às demais), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão, thread-safe; None se o caminho escapa de output_dir
 │   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA e referer) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
@@ -175,7 +176,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_dry_run.py` | Antes de alterar `utils/dry_run_report.py` ou a lógica de dry-run em `commands/pack.py` |
 | `tests/test_heading_extractor.py` | Antes de alterar `utils/heading_extractor.py` ou a lógica de context-header em `commands/pack.py` |
 | `tests/test_httrack_crawl.py` | Antes de alterar `lib/httrack/crawl.py` ou `lib/httrack/report.py` |
-| `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py` ou `lib/httrack/challenge.py` |
+| `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py`, `lib/httrack/challenge.py` ou `lib/httrack/escape.py` |
 | `tests/test_httrack_naming.py` | Antes de alterar `lib/httrack/naming.py` |
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |

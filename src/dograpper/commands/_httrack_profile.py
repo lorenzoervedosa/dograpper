@@ -11,7 +11,8 @@ import click
 
 from ..lib.config_loader import is_explicit
 from ..lib.httrack.crawl import MAX_REDIRECTS, fetch_url_list
-from ..lib.httrack.fetcher import REDIRECTS, Fetcher, request_target, same_host
+from ..lib.httrack.escape import request_target
+from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
 from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import format_report
 from ..lib.spa_detector import is_spa

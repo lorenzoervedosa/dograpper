@@ -10,7 +10,8 @@ from urllib.parse import urljoin, urlsplit
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.redact import redact_url
 
-from .fetcher import REDIRECTS, Fetcher, request_target, same_host
+from .escape import request_target
+from .fetcher import REDIRECTS, Fetcher, same_host
 from .naming import NameRegistry
 from .policy import HttrackPolicy
 from .report import RunReport
