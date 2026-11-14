@@ -23,10 +23,15 @@ _PLAYWRIGHT_MSG = ("httrack profile: Playwright fallback is not implemented yet 
                    "(planned); use --downloader wget")
 
 
+# The [httrack] options of `download` (single list; sync forwards these plus --downloader).
+PROFILE_OPTIONS = ('user_agent', 'no_robots', 'connections', 'max_conn_rate', 'max_bandwidth',
+                   'timeout', 'retries', 'max_links', 'max_retry_after',
+                   'disable_security_limits')
+
+
 def _httrack_defaults(ctx: click.Context) -> dict:
-    """httrack-only params (help prefixed "[httrack]") -> click default; single source of truth."""
-    return {p.name: p.default for p in ctx.command.params
-            if (getattr(p, 'help', None) or '').startswith('[httrack]')}
+    """Profile option -> its click default."""
+    return {p.name: p.default for p in ctx.command.params if p.name in PROFILE_OPTIONS}
 
 
 _NUMERIC = ('connections', 'max_conn_rate', 'max_bandwidth', 'timeout', 'retries',

@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from dograpper.cli import cli
-from dograpper.commands._httrack_profile import discovery_fetch
+from dograpper.commands._httrack_profile import PROFILE_OPTIONS, discovery_fetch
 from dograpper.commands.download import _discover_urls, download
 from dograpper.lib.httrack.crawl import HttrackResult
 from dograpper.lib.httrack.fetcher import FetchResult
@@ -101,6 +101,14 @@ def test_default_downloader_is_wget_unchanged(tmp_path):
     wu.assert_called_once_with(URLS, out, 0, "html,md,txt")
     fu.assert_not_called()
     assert FakeFetcher.instances == []
+
+
+def test_profile_options_tuple_matches_download_and_sync():
+    from dograpper.commands.sync import sync
+    tagged = {p.name for p in download.params
+              if (getattr(p, "help", None) or "").startswith("[httrack]")}
+    assert tagged == set(PROFILE_OPTIONS)
+    assert set(PROFILE_OPTIONS) <= {p.name for p in sync.params}
 
 
 @pytest.mark.parametrize("flag", ["--no-robots", "--connections=2", "--user-agent=x"])

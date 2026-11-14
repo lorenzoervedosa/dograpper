@@ -4,6 +4,7 @@ import click
 import logging
 
 from ..lib.config_loader import is_explicit_source
+from ._httrack_profile import PROFILE_OPTIONS
 from .download import download as _download_cmd
 
 logger = logging.getLogger(__name__)
@@ -13,9 +14,7 @@ logger = logging.getLogger(__name__)
 # lib/config_loader.py and issue #32).
 # Downloader-profile options are NOT redefined here: the click Option objects
 # of `download` are attached to sync below (single source of truth).
-_DOWNLOADER_OPTIONS = ('downloader', 'user_agent', 'no_robots', 'connections',
-                       'max_conn_rate', 'max_bandwidth', 'timeout', 'retries',
-                       'max_links', 'max_retry_after', 'disable_security_limits')
+_DOWNLOADER_OPTIONS = ('downloader',) + PROFILE_OPTIONS
 _DOWNLOAD_PASSTHROUGH = ('depth', 'headless', 'delay',
                          'include_extensions') + _DOWNLOADER_OPTIONS
 _PACK_PASSTHROUGH = ('max_words_per_chunk', 'max_chunks', 'strategy', 'format',
