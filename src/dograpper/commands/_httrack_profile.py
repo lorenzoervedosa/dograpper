@@ -5,13 +5,13 @@ download.py keeps the click options and the dispatch; this module owns the mode.
 
 import logging
 from typing import Callable, List, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import click
 
 from ..lib.config_loader import is_explicit
-from ..lib.httrack.crawl import fetch_url_list
-from ..lib.httrack.fetcher import Fetcher, request_target
+from ..lib.httrack.crawl import MAX_REDIRECTS, fetch_url_list
+from ..lib.httrack.fetcher import REDIRECTS, Fetcher, request_target, same_host
 from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import format_report
 from ..lib.spa_detector import is_spa
@@ -78,31 +78,45 @@ def _build_policy(delay, policy_kw, from_config):
 
 
 def discovery_fetch(fetcher) -> Callable[[str], bytes | None]:
-    """The parsers' `fetch` for layers 1 and 2: the shared fetcher, robots enforced."""
+    """The parsers' `fetch` for layers 1 and 2: the shared fetcher, robots checked before
+    every GET, same-host redirects followed as fetch_url_list follows them (spec 5.4)."""
     def fetch(u: str):
-        # Robots are checked BEFORE the GET so forbidden discovery URLs are never requested.
-        try:
-            parts = urlsplit(u)
-            rules = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}")
-            # request_target raises ValueError (UnicodeEncodeError) on lone
-            # surrogates; urlsplit raises it on malformed ports.
-            allowed = rules.allowed(request_target(parts))
-        except ValueError:
-            logger.warning("[cascade] discovery: unusable URL skipped")
-            return None
-        if not allowed:
-            logger.warning(f"[cascade] discovery: {redact_url(u)} blocked by robots.txt")
-            return None
-        r = fetcher.get(u, kind="robots")
-        if r.challenged:
-            logger.warning(f"[cascade] discovery: {redact_url(u)} challenged (bot protection)")
-            return None
-        if r.status is not None and 300 <= r.status < 400:
-            logger.warning(f"[cascade] discovery: {redact_url(u)} redirected (not followed)")
-            return None
-        if r.error is not None or r.status is None or not 200 <= r.status < 300:
-            return None
-        return r.body
+        for _ in range(MAX_REDIRECTS + 1):
+            # Robots are checked BEFORE each GET so forbidden discovery URLs are never requested.
+            try:
+                parts = urlsplit(u)
+                rules = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}")
+                # request_target raises ValueError (UnicodeEncodeError) on lone
+                # surrogates; urlsplit raises it on malformed ports.
+                allowed = rules.allowed(request_target(parts))
+            except ValueError:
+                logger.warning("[cascade] discovery: unusable URL skipped")
+                return None
+            if not allowed:
+                logger.warning(f"[cascade] discovery: {redact_url(u)} blocked by robots.txt")
+                return None
+            r = fetcher.get(u, kind="robots")
+            if r.challenged:
+                logger.warning(f"[cascade] discovery: {redact_url(u)} challenged (bot protection)")
+                return None
+            if r.status in REDIRECTS and r.location:
+                try:
+                    nxt = urljoin(u, r.location)
+                except ValueError:  # e.g. "http://[bad"
+                    logger.warning(f"[cascade] discovery: {redact_url(u)} redirected to a "
+                                   "malformed URL (not followed)")
+                    return None
+                if not same_host(u, nxt):
+                    logger.warning(f"[cascade] discovery: {redact_url(u)} redirected off-host "
+                                   f"to {redact_url(nxt)} (not followed)")
+                    return None
+                u = nxt
+                continue
+            if r.error is not None or r.status is None or not 200 <= r.status < 300:
+                return None
+            return r.body
+        logger.warning(f"[cascade] discovery: {redact_url(u)} too many redirects")
+        return None
     return fetch
 
 

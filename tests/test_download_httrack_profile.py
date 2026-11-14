@@ -338,7 +338,7 @@ def test_discovery_warns_on_robots_blocked_challenged_and_redirected(caplog):
     probes = {
         "blocked": (blocked, 200, {}),
         "challenged": (NO_RULES, 403, {"challenged": True}),
-        "redirected": (NO_RULES, 301, {}),
+        "redirected": (NO_RULES, 301, {"location": "http://other.example/x"}),  # off-host
     }
     for name, (rules, status, kw) in probes.items():
         f, _ = _fetcher_with(rules, status=status, **kw)
@@ -354,6 +354,41 @@ def test_discovery_warns_on_robots_blocked_challenged_and_redirected(caplog):
             _discover_urls("http://example.com", 0, discovery_fetch(f))
         assert any(r.levelno == logging.WARNING and name[:7] in r.getMessage()
                    for r in caplog.records), (name, caplog.records)
+
+
+def test_discovery_follows_same_host_redirects_with_robots_per_hop():
+    rules = RobotsRules((("disallow", "/private"),), None, ())
+    script = {
+        # scheme, port and hostname case may change on the same host
+        "http://example.com/sitemap.xml": dict(status=301,
+                                               location="https://EXAMPLE.com:8443/sm.xml"),
+        "https://EXAMPLE.com:8443/sm.xml": dict(status=200, body=b"<urlset/>"),
+        "http://example.com/a": dict(status=302, location="/private/b"),
+        "http://example.com/off": dict(status=307, location="http://other.example/x"),
+        "http://example.com/bad": dict(status=308, location="http://[bad/x"),
+        "http://example.com/loop": dict(status=301, location="/loop"),
+    }
+    gets, origins = [], []
+
+    class F:
+        def get(self, url, *, kind, referer=None):
+            gets.append(url)
+            return FetchResult(url, **script[url])
+
+        def robots_for(self, origin):
+            origins.append(origin)
+            return rules
+
+    fetch = discovery_fetch(F())
+    assert fetch("http://example.com/sitemap.xml") == b"<urlset/>"
+    assert "https://EXAMPLE.com:8443" in origins           # robots checked on the new origin
+    assert fetch("http://example.com/a") is None           # hop disallowed by robots.txt
+    assert fetch("http://example.com/off") is None         # cross-host: not followed
+    assert fetch("http://example.com/bad") is None         # malformed Location: no crash
+    assert fetch("http://example.com/loop") is None        # bounded
+    assert "http://example.com/private/b" not in gets
+    assert "http://other.example/x" not in gets
+    assert gets.count("http://example.com/loop") == 6      # 5 redirects at most
 
 
 def test_forwarded_explicit_value_not_labeled_as_config():
