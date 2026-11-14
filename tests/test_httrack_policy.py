@@ -24,6 +24,14 @@ FIXDIR = Path(__file__).parent / "fixtures" / "httrack_wire"
 FIXTURE = json.loads((FIXDIR / "httrack_3.51_requests.json").read_text())
 
 
+@pytest.fixture(autouse=True)
+def _fresh_decoder_cache():
+    """Decoder resolution is cached per process; tests fake module availability."""
+    policy._decoder_modname.cache_clear()
+    yield
+    policy._decoder_modname.cache_clear()
+
+
 def test_clamps_apply_and_warn(caplog):
     with caplog.at_level(logging.WARNING, logger=policy.logger.name):
         p = build_policy(connections=20, max_conn_rate=50, max_bandwidth=10**9)
@@ -85,6 +93,15 @@ def test_headers_match_httrack_fixture(fix_key, kind, referer):
         expected.append(line)
     got = request_headers(p, "localhost:8443", kind=kind, referer=referer)
     assert [f"{k}: {v}" for k, v in got] == expected
+
+
+def test_decoder_resolution_is_probed_once(monkeypatch):
+    probes = []
+    monkeypatch.setattr(policy, "_importable", lambda name: probes.append(name) or False)
+    for _ in range(3):
+        policy.accept_encoding()
+        policy.decoder_module("br")
+    assert sorted(probes) == ["brotli", "compression.zstd", "zstandard"]
 
 
 def _names(headers):
@@ -253,6 +270,7 @@ def test_brotli_without_bounded_api_is_refused(monkeypatch):
     assert "br" not in policy.accept_encoding()
     assert policy.decoder_module("br") is None
     _fake(monkeypatch, "brotli", Decompressor=_NewBrotli)
+    policy._decoder_modname.cache_clear()
     assert "br" in policy.accept_encoding()
     assert policy.decoder_module("br") is not None
 
@@ -276,6 +294,7 @@ def test_zstandard_without_window_cap_is_refused(monkeypatch):
     assert "zstd" not in policy.accept_encoding()
     assert policy.decoder_module("zstd") is None
     _fake(monkeypatch, "zstandard", ZstdDecompressor=_WindowZstd)
+    policy._decoder_modname.cache_clear()
     assert "zstd" in policy.accept_encoding()
 
 

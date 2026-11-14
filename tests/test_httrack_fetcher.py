@@ -113,6 +113,14 @@ def raw_server():
         t.join(5)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_decoder_cache():
+    """Second copy of test_httrack_policy.py's fixture: decoder resolution is cached."""
+    policy_mod._decoder_modname.cache_clear()
+    yield
+    policy_mod._decoder_modname.cache_clear()
+
+
 def make(**kw):
     ft = FakeTime()
     return Fetcher(build_policy(**kw), clock=ft.clock, sleep=ft.sleep), ft

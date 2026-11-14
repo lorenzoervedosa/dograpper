@@ -1,5 +1,6 @@
 """HTTrack 3.51 request policy: clamps, wire-identical headers, TLS context."""
 
+import functools
 import importlib
 import ipaddress
 import logging
@@ -109,6 +110,7 @@ def _importable(name: str) -> bool:
 _DECODER_MODULES = {"br": ("brotli",), "zstd": ("compression.zstd", "zstandard")}
 
 
+@functools.cache  # probed once per process; tests that fake availability call cache_clear()
 def _decoder_modname(encoding: str) -> str | None:
     return next((m for m in _DECODER_MODULES[encoding] if _importable(m)), None)
 
