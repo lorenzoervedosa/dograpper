@@ -72,6 +72,7 @@ src/dograpper/
     ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs()
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
     ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
+    ├── redact.py           # redact_url() — remove userinfo (user:senha@) de URLs antes de logar
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
     └── word_counter.py     # count_words() e count_words_file()
@@ -116,6 +117,7 @@ tests/
 ├── test_pack_scoring.py    # score_chunks: ids, report pages, overrides de texto, tolerância a falha
 ├── test_query_packer.py    # load_queries (comments/blanks, erros) e order_files_by_queries (determinismo, co-locação, tie-break)
 ├── test_readiness_report.py # Readiness report: find_removed_blocks, builders HTML/terminal, CLI --report
+├── test_redact.py          # redact_url: userinfo removido, URL sem credenciais intacta, URL inválida falha seguro
 ├── test_retrieval.py       # BM25: tokenize, ranking, top-k, determinismo e tie-break por doc_id
 ├── test_scorer.py          # LLM Readiness Score: noise_ratio, boundary, context_depth, grades, CLI
 ├── test_sitemap_parser.py  # fetch_sitemap: namespace, urlset, gzip, sitemapindex recursivo, cross-host reject, 404, UA
@@ -175,6 +177,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_jsonl_format.py` | Antes de alterar a escrita JSONL em `lib/chunker.py` |
 | `tests/test_delta_manifest.py` | Antes de alterar `lib/manifest.py` ou lógica de `--delta` |
 | `tests/test_delta_artifacts.py` | Antes de alterar o portão de `--delta` em `commands/pack.py` ou `PACK_STATE_FILENAME` (semântica fixada na ADR-0008) |
+| `tests/test_redact.py` | Antes de alterar `utils/redact.py` (usado por todo log que imprime URL) |
 | `tests/test_retrieval.py` | Antes de alterar `lib/retrieval.py` (BM25, tokenização ou tie-break determinístico) |
 | `tests/test_pack_reader.py` | Antes de alterar `lib/pack_reader.py` ou o formato JSONL que ele consome |
 | `tests/test_golden_qa.py` | Antes de alterar `lib/golden_qa.py` ou o template de perguntas |
