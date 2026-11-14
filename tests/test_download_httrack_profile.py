@@ -227,11 +227,57 @@ def test_httrack_invalid_config_value_names_option_and_source(ht, tmp_path):
 
 def test_httrack_non_numeric_config_value_is_usage_error(ht, tmp_path):
     out, _, _ = ht
-    res = run(out, config=_config(tmp_path, downloader="httrack", connections="4"))
+    res = run(out, config=_config(tmp_path, downloader="httrack", connections="four"))
     assert res.exit_code == 2
     assert "--connections" in res.output
     assert ".dograpper.json" in res.output
     assert "Traceback" not in res.output
+
+
+@pytest.mark.parametrize("key, value, attr, expected", [
+    ("no-robots", "false", "obey_robots", True),
+    ("no-robots", "true", "obey_robots", False),
+    ("connections", "3", "connections", 3),          # what `--connections 3` receives
+    ("max-conn-rate", 2, "max_conn_rate", 2.0),
+])
+def test_httrack_config_value_converted_like_cli(ht, tmp_path, key, value, attr, expected):
+    out, fu, _ = ht
+    res = run(out, config=_config(tmp_path, downloader="httrack", **{key: value}))
+    assert res.exit_code == 0, res.output
+    assert getattr(fu.call_args.args[2], attr) == expected
+
+
+def test_httrack_config_string_false_keeps_security_limits(ht, tmp_path):
+    out, fu, _ = ht
+    cfg = _config(tmp_path, downloader="httrack", connections=20,
+                  **{"disable-security-limits": "false"})
+    res = run(out, config=cfg)
+    assert res.exit_code == 0, res.output
+    assert fu.call_args.args[2].connections == 8  # still clamped
+
+
+@pytest.mark.parametrize("key, value", [
+    ("max-links", 2.0), ("retries", 1.5), ("retries", True), ("retries", -1),
+    ("max-retry-after", -5), ("timeout", 0), ("no-robots", "maybe"), ("connections", None),
+])
+def test_httrack_bad_config_value_fails_like_cli(ht, tmp_path, key, value):
+    out, fu, _ = ht
+    res = run(out, config=_config(tmp_path, downloader="httrack", **{key: value}))
+    assert res.exit_code == 2, res.output
+    assert f"'--{key}' (from .dograpper.json)" in res.output
+    assert "Traceback" not in res.output
+    fu.assert_not_called()
+
+
+def test_wget_accepts_config_profile_values_equal_to_default(tmp_path):
+    out = str(tmp_path / "o")
+    cfg = _config(tmp_path, **{"no-robots": "false", "retries": "2"})
+    with patch("dograpper.commands.download.fetch_llms_txt", return_value=URLS), \
+         patch("dograpper.commands.download.run_wget_urls") as wu, \
+         patch("dograpper.commands.download.is_spa", return_value=False):
+        wu.return_value = WgetResult(True, out, [], [], 0)
+        res = run(out, config=cfg)
+    assert res.exit_code == 0, res.output
 
 
 def test_httrack_negative_delay_names_cli_option(ht):
