@@ -8,6 +8,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -650,3 +651,32 @@ def test_short_body_is_an_error_retried_and_never_written(raw_server, tmp_path, 
     assert res.files_downloaded == [] and res.front_failed
     assert [e[0] for e in res.report.errors] == [base + "/p"]
     assert list(tmp_path.rglob("*")) == []
+
+
+@pytest.mark.parametrize("url,target", [
+    ("http://h/docs/café", "/docs/caf%c3%a9"),
+    ("http://h/a b?q=x y", "/a%20b?q=x%20y"),
+    ("http://h/a%20b/%C3%A9", "/a%20b/%C3%A9"),  # existing escapes are not doubled
+    ("http://h/;a=b,c+d:e@f&g$!*'()[]{}|^`<>~?x=/&y=%2F", "/;a=b,c+d:e@f&g$!*'()[]{}|^`<>~?x=/&y=%2F"),
+    ('http://h/"q"\x01\x7f', "/%22q%22%01%7f"),
+    ("http://h", "/"),
+])
+def test_request_target_escaped_like_httrack(url, target):
+    assert fetcher_mod._target(urlsplit(url)) == target
+
+
+def test_host_header_is_idna_encoded():
+    assert fetcher_mod._wire_host(urlsplit("http://u:p@Café.example:8080/")) == "xn--caf-dma.example:8080"
+    assert fetcher_mod._wire_host(urlsplit("https://Example.com:8443/")) == "Example.com:8443"
+    f, _ = make()
+    assert f.get("http://é" + "a" * 70 + ".com/", kind="navigate").error == "invalid URL"
+
+
+def test_non_ascii_and_space_seeds_are_fetched(server):
+    base, script, seen = server
+    script["/docs/caf%c3%a9"] = [(200, {}, b"cafe")]
+    script["/a%20b?q=%c3%a9"] = [(200, {}, b"ab")]
+    f, _ = make()
+    assert f.get(base + "/docs/café", kind="navigate").body == b"cafe"
+    assert f.get(base + "/a b?q=é", kind="navigate").body == b"ab"
+    assert [p for p, _ in seen] == ["/docs/caf%c3%a9", "/a%20b?q=%c3%a9"]

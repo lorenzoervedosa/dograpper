@@ -4,6 +4,7 @@ import http.client
 import io
 import logging
 import math
+import re
 import threading
 import time
 import zlib
@@ -145,6 +146,27 @@ def _origin(url: str) -> tuple[str, str]:
     return p.scheme, host + (f":{port}" if port is not None else "")
 
 
+# htslib.c escape_check_url: space, '"', controls, DEL and non-ASCII; '%' and reserved stay
+_UNSAFE = re.compile(r'[^\x21\x23-\x7e]')
+
+
+def _target(parts) -> str:
+    """Request target escaped as HTTrack sends it: non-ASCII as UTF-8 bytes, lowercase hex,
+    existing %xx escapes untouched. UnicodeEncodeError (a ValueError) on lone surrogates."""
+    raw = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    return _UNSAFE.sub(lambda m: "".join("%%%02x" % b for b in m.group().encode()), raw)
+
+
+def _wire_host(parts) -> str:
+    """Host header value: netloc without userinfo, a non-ASCII name IDNA-encoded
+    (UnicodeError, a ValueError, when IDNA cannot encode it)."""
+    host = parts.netloc.rpartition("@")[2]
+    if host.isascii():
+        return host
+    name, sep, port = host.partition(":")  # a non-ASCII host is never an IPv6 literal
+    return name.encode("idna").decode("ascii") + sep + port
+
+
 class Fetcher:
     def __init__(self, policy: HttrackPolicy, *, clock=time.monotonic, sleep=time.sleep):
         self.policy = policy
@@ -210,16 +232,15 @@ class Fetcher:
                                                timeout=self.policy.timeout, context=self._ssl)
         return http.client.HTTPConnection(parts.hostname, parts.port, timeout=self.policy.timeout)
 
-    def _request(self, key, parts, headers):
+    def _request(self, key, parts, target, headers):
         conns = self._local.__dict__.setdefault("conns", {})
-        path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
         for _ in range(2):
             conn = conns.get(key)
             fresh = conn is None
             if fresh:
                 conn = conns[key] = self._connect(parts)
             try:
-                conn.putrequest("GET", path, skip_host=True, skip_accept_encoding=True)
+                conn.putrequest("GET", target, skip_host=True, skip_accept_encoding=True)
                 for k, v in headers:
                     conn.putheader(k, v)
                 conn.endheaders()
@@ -253,16 +274,16 @@ class Fetcher:
         res = FetchResult(url)
         try:
             parts, key = urlsplit(url), _origin(url)
+            host, target = _wire_host(parts), _target(parts)
         except ValueError:
             res.error = "invalid URL"
             return res
-        headers = request_headers(self.policy, parts.netloc.rpartition("@")[2], kind=kind,
-                                  referer=referer, scheme=key[0])
+        headers = request_headers(self.policy, host, kind=kind, referer=referer, scheme=key[0])
         for attempt in range(1, self.policy.retries + 2):
             res.attempts = attempt
             self._acquire(key)
             try:
-                status, hdrs, raw = self._request(key, parts, headers)
+                status, hdrs, raw = self._request(key, parts, target, headers)
             # timeouts, ssl.SSLError, RemoteDisconnected; short bodies (htsback.c: recatch)
             except (OSError, http.client.IncompleteRead) as exc:
                 res.error = f"{type(exc).__name__}: {exc}"
@@ -272,7 +293,7 @@ class Fetcher:
             except http.client.HTTPException as exc:
                 res.error = f"{type(exc).__name__}: {exc}"
                 return res
-            except ValueError as exc:  # body too large
+            except ValueError as exc:  # body too large, or a header value http.client refuses
                 res.error = str(exc)
                 return res
             res.error = None
