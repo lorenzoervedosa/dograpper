@@ -145,7 +145,6 @@ def test_httrack_seeded_fetch_happy_path(ht):
 
 def test_httrack_one_fetcher_shared_by_discovery_and_fetch(ht):
     out, fu, _ = ht
-    seen = {}
 
     def llms(base, fetch=None):
         fetch("http://example.com/llms.txt")
