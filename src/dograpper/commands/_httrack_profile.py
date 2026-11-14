@@ -142,9 +142,11 @@ def run_httrack(url, output, depth, delay, include_extensions, headless, verbose
         for line in format_report(res.report, verbose):
             click.echo(f"  {line}", err=True)
     if res.front_failed:
+        cause = ("the site refused or challenged every seed URL (likely bot protection)"
+                 if res.report.challenged else
+                 "every seed URL was blocked by robots.txt or failed (see the report above)")
         raise click.ClickException(
-            "httrack profile: the site refused or challenged every seed URL (likely bot "
-            "protection). See the README section \"Downloader profiles\".")
+            f"httrack profile: {cause}. See the README section \"Downloader profiles\".")
     if not res.success:
         raise click.ClickException("httrack fetch failed.")
     if is_spa(output):

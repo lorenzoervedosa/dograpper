@@ -49,12 +49,13 @@ def fake_fetcher():
         yield
 
 
-def _res(out, success=True, front_failed=False):
+def _res(out, success=True, front_failed=False, challenged=(), robots_blocked=()):
     f = os.path.join(out, "p0.html")
     with open(f, "w") as fh:
         fh.write("<html><body><p>" + "A" * 300 + "</p></body></html>")
     report = RunReport()
     report.status_counts["4xx"] = 5
+    report.challenged, report.robots_blocked = list(challenged), list(robots_blocked)
     return HttrackResult(success, [f], 0, report, front_failed)
 
 
@@ -162,13 +163,26 @@ def test_httrack_one_fetcher_shared_by_discovery_and_fetch(ht):
 
 def test_httrack_all_seeds_challenged_exits_1(ht):
     out, fu, _ = ht
-    fu.side_effect = lambda urls, o, *a, **k: _res(o, success=False, front_failed=True)
+    fu.side_effect = lambda urls, o, *a, **k: _res(
+        o, success=False, front_failed=True, challenged=URLS[:1], robots_blocked=URLS[1:])
     res = run(out, "--downloader", "httrack")
     assert res.exit_code == 1
     assert "bot protection" in res.output
     assert "Downloader profiles" in res.output
     assert "browser-login" not in res.output
     assert "Responses:" in res.output  # report printed before the error
+
+
+def test_httrack_all_seeds_refused_without_challenge_names_robots(ht):
+    out, fu, _ = ht
+    fu.side_effect = lambda urls, o, *a, **k: _res(
+        o, success=False, front_failed=True, robots_blocked=URLS)
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 1
+    error = [ln for ln in res.output.splitlines() if ln.startswith("Error:")]
+    assert len(error) == 1 and "bot protection" not in error[0]
+    assert "blocked by robots.txt" in error[0]
+    assert "Downloader profiles" in error[0]
 
 
 def test_httrack_fetch_failure_prints_report(ht):
