@@ -29,3 +29,11 @@ def test_atomic_write_failure_leaves_no_final_file(tmp_path, monkeypatch):
 
     assert not target.exists()
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+def test_atomic_write_uses_umask_default_mode(tmp_path):
+    target, ref = tmp_path / "page.html", tmp_path / "ref.html"
+    atomic_write_bytes(str(target), b"x")
+    ref.write_bytes(b"x")  # what a plain open() creates under the same umask
+    assert target.stat().st_mode & 0o777 == ref.stat().st_mode & 0o777
