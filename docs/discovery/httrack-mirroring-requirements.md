@@ -14,6 +14,15 @@ dograpper's `download` should adopt, and what it should not.
 - **No deep anti-bot evasion.** HTTrack does no TLS or HTTP/2 impersonation, runs no JavaScript and solves no challenges. It does have opt-in browser-header mimicry (`-%Q`, effective when `-F` names a browser) and a browser-login cookie+UA transplant. Both are flagged in §2.10 and excluded from the requirements.
 - **Biggest dograpper gaps:** a spoofed Chrome/120 UA on every layer, no robots.txt handling, no challenge detection or status-aware retry, Playwright saves any response body, and there is no real per-URL fetch ledger.
 
+**Update, 2026-11-13 (PR 0 spike).** The UA hypothesis below is **refuted** for
+site B. curl was challenged with every UA, HTTrack's included. A stdlib request
+that reproduces HTTrack's headers got 200 on OpenSSL 3.5.3 and a 403 challenge
+on OpenSSL 3.0.13. The TLS handshake decides. Details are in
+`docs/superpowers/specs/2026-11-13-httrack-downloader-profile-design.md` §5.1
+and §8.0. DL-09's body marker `/cdn-cgi/challenge-platform/` is wrong: real
+pages carry Cloudflare's injected `jsd` beacon. Use only `cf-mitigated` and the
+`Just a moment...` title.
+
 ## 2. HTTrack behavior by area
 
 ### 2.0 Sources and citation conventions

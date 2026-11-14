@@ -129,10 +129,17 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     navigations, over HTTPS, exactly when HTTrack's `fetch_meta_sent` would
     send them (`src/htslib.c:873-884`, `1240-1297`). This includes the
     default UA.
-- **`Accept-Encoding: gzip, deflate, identity;q=0.9`.** This is what an
-  HTTrack build without brotli/zstd sends. The stdlib cannot decode `br`, and
-  `zstd` only arrives in Python 3.14, so advertising them would be a lie. The
-  Windows WinHTTrack build probably advertises both (unverified on the wire).
+- **`Accept-Encoding`: advertise only what this build can decode** (user
+  decision; HTTrack does the same per build, `src/htscodec.c:114-122`).
+  - Base: `gzip, deflate, identity;q=0.9`.
+  - `br` is inserted when `brotli` is importable.
+  - `zstd` is inserted when `zstandard`, or Python 3.14's `compression.zstd`,
+    is importable.
+  - With both: `gzip, deflate, br, zstd, identity;q=0.9`, which is exactly
+    what WinHTTrack 3.51 sent (PR 0 capture).
+  - The decoders come from a new optional extra:
+    `httrack = ["brotli", "zstandard"]`. It is optional because both packages
+    ship C extensions.
 - **TLS:** the same configuration as HTTrack (`src/htslib.c:5120-5144`,
   `src/htsback.c:3445-3453`):
   - OpenSSL's `DEFAULT` cipher list, set with `SSLContext.set_ciphers`. Not
@@ -144,11 +151,27 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   unsupported on Windows (`src/htscoremain.c:2376-2395`, `src/htslib.c:5451`).
   Verification happens after the ClientHello, so it does not change what the
   server sees.
-- **Residual difference that code cannot close: the OpenSSL version.** Python
-  uses the OpenSSL it was built with: 3.0.13 for this machine's Python 3.12.3.
-  WinHTTrack 3.51 ships OpenSSL 3.6.5 (`history.txt`). OpenSSL 3.5 and later
-  changed the default key-share groups, so the two ClientHellos can differ even
-  with identical settings. The PR 0 spike (§8.0) measures this.
+- **OpenSSL ≥ 3.5 is required for an identical handshake.** Python uses the
+  OpenSSL it was built with. PR 0 measured it (§8.0).
+  - **OpenSSL 3.5.3** (uv-managed CPython 3.13.7): the ClientHello matches
+    WinHTTrack 3.51 (OpenSSL 3.6.5) in cipher suites, extension order, groups,
+    key shares and signature algorithms. It differs only in:
+    - `ec_point_formats` (`[0,1,2]` vs `[0]`, probably an OpenSSL 3.6
+      change);
+    - HTTrack putting an explicit port in SNI, which is not reproduced and
+      only matters for non-default ports.
+  - **OpenSSL 3.0.13** (system CPython 3.12.3): very different. There is no
+    `X25519MLKEM768`, and the sigalgs and extension order differ.
+  - It is also **decisive in practice:** site B answered 200 to the 3.5.3
+    prototype and 403 `cf-mitigated: challenge` to the identical request from
+    3.0.13.
+  - Decision (user):
+    - the profile logs a prominent warning when
+      `ssl.OPENSSL_VERSION_INFO < (3, 5)`;
+    - the README documents the requirement;
+    - the release binary is built on a uv-managed Python (python-build-standalone
+      links OpenSSL 3.5+), with a CI assertion on the version.
+    - The project's dev Python is not changed.
 
 ### 5.2 robots.txt (DL-02, DL-04, DL-20)
 
@@ -197,8 +220,12 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   failed refetch keeps the previous good copy.
 - **Challenge detection (deviation):**
   - a response is classed as a challenge when it carries a `cf-mitigated`
-    header, or when it is a 200 whose body has `<title>Just a moment...</title>`
-    or `/cdn-cgi/challenge-platform/`;
+    header, or when it is a 200 whose `<title>` is `Just a moment...`;
+  - **never** match on `/cdn-cgi/challenge-platform/` in the body. Cloudflare
+    injects its `jsd/main.js` beacon into real pages: PR 0's 200 response
+    from site B (title "Overview") contained it, and the HTTrack run's 1900
+    `main.js?ray=…` requests came from real pages. That rule would flag every
+    page;
   - challenge responses are never stored, are counted, and are listed in the
     report.
 - `/cdn-cgi/` paths are excluded from discovery.
@@ -383,9 +410,21 @@ accumulate under `[Unreleased]`.
    Done = (a) differs only where §5.1 documents it, and (b) gets 200 where
    HTTrack did. If (b) fails, the README promises nothing about Cloudflare.
 
-   **Status: decided.** The spike runs first. (Earlier the user asked why
-   matching HTTrack's TLS was "out of scope". That was a wording error, now
-   fixed in §5.1 and §2.)
+   **Status: done (2026-11-13).**
+   - (a) Headers match except UA (by design) and `Accept-Encoding` (fixed by
+     the extra). The TLS result is in §5.1.
+   - (b) Site B, one request per variant, 3 s apart:
+     - curl gets `403 cf-mitigated: challenge` with the HTTrack UA, the
+       Chrome/120 UA, the default UA, and Chrome/120 + `--http1.1` alike;
+     - the stdlib prototype on OpenSSL 3.5.3 gets `200` with both the
+       dograpper and HTTrack UAs;
+     - the same prototype on OpenSSL 3.0.13 gets `403 challenge`.
+   - **Verdict:** the UA is irrelevant here, and the TLS handshake decides.
+     This refutes the discovery note's UA hypothesis.
+   - Site A was not tested by the agent (it blocks Claude by name); the user
+     may run `run_online.sh` against it.
+   - (Earlier the user asked why matching HTTrack's TLS was "out of scope".
+     That was a wording error, fixed in §5.1 and §2.)
 1. **Default UA content:** decided. No project URL (§5.1).
 2. **Purge:** decided. Report only (§5.6).
 
