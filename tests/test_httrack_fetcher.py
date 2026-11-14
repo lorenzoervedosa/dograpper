@@ -262,7 +262,8 @@ def test_request_headers_sent_in_order(server):
     f, _ = make()
     f.get(base + "/p?q=1", kind="linked", referer=base + "/")
     host = base.split("//")[1]
-    assert seen[0][1] == request_headers(f.policy, host, kind="linked", referer=base + "/")
+    assert seen[0][1] == request_headers(f.policy, host, kind="linked", referer=base + "/",
+                                         scheme="http")
     f.get(base + "/p?q=1", kind="navigate")
     assert len(seen) == 2  # persistent connection reused
 

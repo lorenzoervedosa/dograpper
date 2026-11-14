@@ -257,7 +257,7 @@ class Fetcher:
             res.error = "invalid URL"
             return res
         headers = request_headers(self.policy, parts.netloc.rpartition("@")[2], kind=kind,
-                                  referer=referer)
+                                  referer=referer, scheme=key[0])
         for attempt in range(1, self.policy.retries + 2):
             res.attempts = attempt
             self._acquire(key)

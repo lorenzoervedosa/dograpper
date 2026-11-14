@@ -62,6 +62,71 @@ def test_headers_match_httrack_fixture(fix_key, kind, referer):
     assert [f"{k}: {v}" for k, v in got] == expected
 
 
+def _names(headers):
+    return [k for k, _ in headers]
+
+
+SEC_FETCH = ["Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest"]
+
+
+def test_plain_http_sends_no_fetch_metadata_nor_br_zstd(monkeypatch):
+    monkeypatch.setattr(policy, "_importable", lambda name: True)
+    got = request_headers(build_policy(), "example.com", kind="linked",
+                          referer="http://example.com/", scheme="http")
+    assert _names(got) == ["Referer", "Connection", "Host", "User-Agent", "Accept",
+                           "Accept-Language", "Accept-Encoding"]
+    assert dict(got)["Accept-Encoding"] == "gzip, deflate, identity;q=0.9"
+    assert "br" in policy.accept_encoding()  # the TLS variant still advertises them
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:8080", "127.5.6.7", "localhost:8080",
+                                  "a.localhost", "[::1]:8080"])
+def test_plain_http_to_trustworthy_origin_sends_fetch_metadata_without_uir(host):
+    got = request_headers(build_policy(), host, kind="navigate", referer=None, scheme="http")
+    assert _names(got) == ["Connection", "Host", "User-Agent", "Accept", *SEC_FETCH,
+                           "Accept-Language", "Accept-Encoding"]
+    assert dict(got)["Sec-Fetch-Site"] == "none"
+    assert dict(got)["Accept-Encoding"] == "gzip, deflate, identity;q=0.9"
+
+
+@pytest.mark.parametrize("ua", ["X/1", "Mozilla/5.0", "mozilla/5.0 (x)", "Mozilla/4.0 (x)"])
+def test_non_browser_user_agent_sends_no_fetch_metadata(ua):
+    got = request_headers(build_policy(user_agent=ua), "example.com", kind="navigate",
+                          referer=None)
+    assert _names(got) == ["Connection", "Host", "User-Agent", "Accept",
+                           "Accept-Language", "Accept-Encoding"]
+
+
+def test_linked_without_referer_is_not_same_origin():
+    got = dict(request_headers(build_policy(), "example.com", kind="linked", referer=None))
+    assert got["Sec-Fetch-Site"] == "none" and "Referer" not in got
+
+
+@pytest.mark.parametrize("referer,scheme,host,site", [
+    ("https://example.com/a", "https", "example.com", "same-origin"),
+    ("https://example.com:443/a", "https", "example.com", "same-origin"),
+    ("https://example.com:8443/a", "https", "example.com", "same-site"),
+    ("https://docs.example.com/a", "https", "example.com", "same-site"),
+    ("https://example.org/a", "https", "example.com", "cross-site"),
+    ("http://example.com/a", "https", "example.com", "cross-site"),
+    ("https://example.com/a", "http", "localhost", "cross-site"),
+    ("http://127.0.0.1:1/a", "http", "127.0.0.2:1", "cross-site"),  # IP literals key on themselves
+])
+def test_sec_fetch_site_follows_the_referer(referer, scheme, host, site):
+    got = dict(request_headers(build_policy(), host, kind="linked", referer=referer,
+                               scheme=scheme))
+    assert got["Sec-Fetch-Site"] == site
+
+
+def test_https_referer_never_sent_to_http():
+    got = dict(request_headers(build_policy(), "localhost", kind="linked",
+                               referer="https://localhost/a", scheme="http"))
+    assert "Referer" not in got and got["Sec-Fetch-Site"] == "cross-site"
+    got = dict(request_headers(build_policy(), "localhost", kind="linked",
+                               referer="http://localhost/a", scheme="https"))
+    assert got["Referer"] == "http://localhost/a"
+
+
 @pytest.mark.parametrize("br,zstd,want", [
     (False, False, "gzip, deflate, identity;q=0.9"),
     (True, False, "gzip, deflate, br, identity;q=0.9"),

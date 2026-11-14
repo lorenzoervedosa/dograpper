@@ -1,10 +1,12 @@
 """HTTrack 3.51 request policy: clamps, wire-identical headers, TLS context."""
 
 import importlib
+import ipaddress
 import logging
 import ssl
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -104,30 +106,72 @@ def decoder_module(encoding: str):
     return importlib.import_module(name) if name else None
 
 
-def accept_encoding() -> str:
-    parts = ["gzip", "deflate"] + [e for e in _DECODER_MODULES if _decoder_modname(e)]
-    return ", ".join(parts + ["identity;q=0.9"])
+def accept_encoding(secure: bool = True) -> str:
+    """htscodec.c: br and zstd only over TLS, and only when this build can decode them."""
+    extra = [e for e in _DECODER_MODULES if _decoder_modname(e)] if secure else []
+    return ", ".join(["gzip", "deflate"] + extra + ["identity;q=0.9"])
 
 
-def request_headers(policy: HttrackPolicy, host: str, *, kind: str,
-                    referer: str | None) -> list[tuple[str, str]]:
-    """Headers in HTTrack's exact order. kind: robots | navigate | linked."""
+def _trustworthy(scheme: str, host: str) -> bool:
+    """htsfetch.c hts_fetch_trustworthy: TLS, a localhost name or a loopback address."""
+    if scheme == "https":
+        return True
+    name = urlsplit("//" + host).hostname or ""
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return name == "localhost" or name.endswith(".localhost")
+
+
+def _site_key(host: str) -> str:
+    """htsfetch.c site_key: IP literals and names with an empty label or a numeric last label
+    key on themselves, others on their last two labels (keeping a trailing dot).
+    shortcut: no public-suffix list (a.co.uk and b.co.uk read as same-site); upgrade when
+    cross-host crawling lands."""
+    name = host[:-1] if len(host) > 1 and host.endswith(".") else host
+    labels = name.split(".")
+    if ":" in host or "" in labels or labels[-1][:1].isdigit():
+        return host
+    return ".".join(labels[-2:]) + host[len(name):]
+
+
+def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
+    """Sec-Fetch-Site of a request from page `referer` (R16, htsfetch.c hts_fetch_site_of)."""
+    if not referer:
+        return "none"
+    a, b = urlsplit(referer), urlsplit(f"{scheme}://{host}")
+    if (a.scheme == "https") != (b.scheme == "https"):
+        return "cross-site"
+    if a.hostname == b.hostname:
+        default = 443 if b.scheme == "https" else 80
+        return "same-origin" if (a.port or default) == (b.port or default) else "same-site"
+    return "same-site" if _site_key(a.hostname or "") == _site_key(b.hostname or "") \
+        else "cross-site"
+
+
+def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str | None,
+                    scheme: str = "https") -> list[tuple[str, str]]:
+    """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked.
+    scheme defaults to https, the scheme of the wire fixtures."""
     if kind not in ("robots", "navigate", "linked"):
         raise ValueError(f"unknown request kind: {kind!r}")
-    nav = kind != "robots"
+    secure = scheme == "https"
+    # htslib.c fetch_meta_sent: navigations only, to a trustworthy origin, with a browser UA
+    meta = (kind != "robots" and _trustworthy(scheme, host)
+            and policy.user_agent.startswith("Mozilla/5.0 "))
     h: list[tuple[str, str]] = []
-    if kind == "linked" and referer:
-        h.append(("Referer", referer))
+    if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
+        h.append(("Referer", referer))  # never an https referer to an http URL
     h += [("Connection", "keep-alive"), ("Host", host)]
-    if nav:
+    if meta and secure:
         h.append(("Upgrade-Insecure-Requests", "1"))
     h += [("User-Agent", policy.user_agent), ("Accept", ACCEPT)]
-    if nav:
-        h += [("Sec-Fetch-Site", "same-origin" if kind == "linked" else "none"),
+    if meta:
+        h += [("Sec-Fetch-Site", _fetch_site(referer, scheme, host)),
               ("Sec-Fetch-Mode", "navigate"),
               ("Sec-Fetch-User", "?1"),
               ("Sec-Fetch-Dest", "document")]
-    h += [("Accept-Language", ACCEPT_LANGUAGE), ("Accept-Encoding", accept_encoding())]
+    h += [("Accept-Language", ACCEPT_LANGUAGE), ("Accept-Encoding", accept_encoding(secure))]
     return h
 
 
