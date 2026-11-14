@@ -136,7 +136,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | Arquivo | Quando ler |
 |---|---|
 | `README.md` | **Sempre.** Comportamento de cada subcomando, flags, formato de config e exemplos de uso. É a fonte de verdade do contrato observável. |
-| `docs/adr/` | Antes de reverter ou contornar uma decisão arquitetural (repomix, contagem por palavras, deps opcionais, query-oriented packing, delta na Action) |
+| `docs/adr/` | Antes de reverter ou contornar uma decisão arquitetural (repomix, contagem por palavras, deps opcionais, query-oriented packing, delta na Action, registros de referência de API) |
 | `GLOSSARY.md` | Ao nomear conceitos de entrada/saída (página, registro, chunk, símbolo, contêiner, membro) em código, docs, issues ou PRs |
 | `.dograpper.json.example` | Ao mexer em `config_loader.py` ou no merge de configuração |
 | `.docsignore.example` | Ao mexer em `ignore_parser.py` |
