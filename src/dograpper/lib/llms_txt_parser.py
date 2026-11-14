@@ -12,7 +12,7 @@ import gzip
 import io
 import logging
 import re
-from typing import List
+from typing import Callable, List
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -70,10 +70,13 @@ def _parse_llms_txt(body: str, base_url: str) -> List[str]:
     return urls
 
 
-def fetch_llms_txt(base_url: str) -> List[str]:
+def fetch_llms_txt(
+    base_url: str, fetch: Callable[[str], bytes | None] | None = None
+) -> List[str]:
     """Try <base>/llms.txt, then <base>/llms-full.txt. Return extracted URL list.
 
     Returns [] if no candidate responds 200 or if body yields no URLs.
+    `fetch` replaces the built-in HTTP GET (returns the body, or None).
     """
     parsed = urlparse(base_url)
     if not parsed.scheme:
@@ -85,7 +88,7 @@ def fetch_llms_txt(base_url: str) -> List[str]:
     for candidate in LLMS_TXT_CANDIDATES:
         candidate_url = urljoin(root, candidate)
         logger.debug(f"llms.txt: probing {candidate_url}")
-        body = _fetch_url(candidate_url)
+        body = (fetch or _fetch_url)(candidate_url)
         if body is None:
             continue
         text = body.decode("utf-8", errors="replace")

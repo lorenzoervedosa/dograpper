@@ -189,3 +189,48 @@ def test_fetch_sitemap_sends_browser_ua():
 
 def test_fetch_sitemap_missing_scheme_returns_empty():
     assert fetch_sitemap("site.io") == []
+
+
+def test_fetch_param_used_when_given_including_recursion():
+    pages = {
+        "https://site.io/sitemap.xml": _sitemapindex(["https://site.io/sub.xml"]),
+        "https://site.io/sub.xml": _urlset(["https://site.io/a"]),
+    }
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return pages.get(url)
+
+    with patch("dograpper.lib.sitemap_parser.urlopen", side_effect=AssertionError("no urlopen")):
+        assert fetch_sitemap("https://site.io/", fetch=fetch) == ["https://site.io/a"]
+    assert calls == ["https://site.io/sitemap.xml", "https://site.io/sub.xml"]
+
+
+def test_fetch_param_gzip_body_decompressed():
+    body = gzip.compress(_urlset(["https://site.io/a"]))
+    assert fetch_sitemap("https://site.io/", fetch=lambda u: body) == ["https://site.io/a"]
+
+
+def test_robots_sitemap_hint_tried_first():
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return _urlset(["https://site.io/a"]) if url == "https://site.io/hint.xml" else None
+
+    urls = fetch_sitemap("https://site.io/", fetch=fetch, extra_candidates=["https://site.io/hint.xml"])
+    assert urls == ["https://site.io/a"] and calls == ["https://site.io/hint.xml"]
+
+
+def test_extra_candidate_cross_host_rejected():
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return None
+
+    assert fetch_sitemap("https://site.io/", fetch=fetch,
+                         extra_candidates=["https://evil.example/s.xml"]) == []
+    assert "https://evil.example/s.xml" not in calls
+    assert calls[0] == "https://site.io/sitemap.xml"

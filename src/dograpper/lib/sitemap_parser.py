@@ -15,7 +15,7 @@ from __future__ import annotations
 import gzip
 import logging
 import xml.etree.ElementTree as ET
-from typing import List, Set
+from typing import Callable, List, Sequence, Set
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -51,6 +51,10 @@ def _fetch_url(url: str, timeout: int = TIMEOUT_SECONDS) -> bytes | None:
         logger.info(f"sitemap: {url} fetch failed: {exc}")
         return None
 
+    return _gunzip(url, data)
+
+
+def _gunzip(url: str, data: bytes) -> bytes | None:
     if data[:2] == b"\x1f\x8b" or url.endswith(".gz"):
         try:
             data = gzip.decompress(data)
@@ -109,6 +113,7 @@ def _fetch_and_parse(
     base_prefix: str,
     depth: int,
     visited: Set[str],
+    fetch: Callable[[str], bytes | None] | None = None,
 ) -> List[str]:
     """Fetch `url`, parse it, recurse into sub-sitemaps. Returns aggregated URLs."""
     if url in visited:
@@ -119,7 +124,12 @@ def _fetch_and_parse(
         logger.warning(f"sitemap: max recursion depth exceeded at {url}")
         return []
 
-    data = _fetch_url(url)
+    if fetch is None:
+        data = _fetch_url(url)
+    else:
+        data = fetch(url)
+        if data is not None:
+            data = _gunzip(url, data)
     if data is None:
         return []
 
@@ -150,7 +160,7 @@ def _fetch_and_parse(
                 )
                 continue
             aggregated.extend(
-                _fetch_and_parse(sub_url, base_netloc, base_prefix, depth + 1, visited)
+                _fetch_and_parse(sub_url, base_netloc, base_prefix, depth + 1, visited, fetch)
             )
         return aggregated
 
@@ -158,12 +168,19 @@ def _fetch_and_parse(
     return []
 
 
-def fetch_sitemap(base_url: str) -> List[str]:
+def fetch_sitemap(
+    base_url: str,
+    fetch: Callable[[str], bytes | None] | None = None,
+    extra_candidates: Sequence[str] = (),
+) -> List[str]:
     """Discover and parse the site's sitemap(s). Returns deduplicated URL list.
 
     Tries sitemap.xml, then sitemap_index.xml, then sitemap-index.xml.
     Recurses into <sitemapindex> children with same-netloc guard.
     Returns [] if no candidate responds 200 or parses successfully.
+    `fetch` replaces the built-in HTTP GET for every request (body or None);
+    `extra_candidates` (e.g. robots.txt Sitemap: hints) are tried first and
+    must be on the base host.
     """
     parsed = urlparse(base_url)
     if not parsed.scheme or not parsed.netloc:
@@ -176,11 +193,14 @@ def fetch_sitemap(base_url: str) -> List[str]:
 
     visited: Set[str] = set()
 
-    for candidate in CANDIDATE_PATHS:
+    for candidate in (*extra_candidates, *CANDIDATE_PATHS):
         candidate_url = urljoin(root, candidate)
+        if urlparse(candidate_url).netloc != base_netloc:
+            logger.info(f"sitemap: rejecting cross-host candidate {candidate_url}")
+            continue
         logger.debug(f"sitemap: probing {candidate_url}")
         urls = _fetch_and_parse(
-            candidate_url, base_netloc, base_prefix, depth=0, visited=visited
+            candidate_url, base_netloc, base_prefix, depth=0, visited=visited, fetch=fetch
         )
         if urls:
             deduped: List[str] = []
