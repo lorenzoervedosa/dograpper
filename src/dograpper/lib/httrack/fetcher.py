@@ -1,23 +1,29 @@
 """Polite HTTP fetcher: paced, retrying, redirect-blind. One instance is shared by all workers."""
 
 import http.client
-import importlib
+import io
 import logging
+import math
 import threading
 import time
 import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
+from ...utils.redact import redact_url
 from .challenge import is_challenge
-from .policy import HttrackPolicy, make_ssl_context, request_headers
+from .policy import HttrackPolicy, decoder_module, make_ssl_context, request_headers
 from .robots import NO_RULES, RobotsRules, parse_robots
 
 logger = logging.getLogger(__name__)
 
+MAX_BODY_BYTES = 64 * 1024 * 1024  # raw stream and every decoded stage
+MAX_ENCODINGS = 2
+MAX_ROBOTS_REDIRECTS = 5
 RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 504})  # 503 only with Retry-After
+REDIRECTS = frozenset({301, 302, 303, 307, 308})
 CHUNK = 64 * 1024
 _STALE = (ConnectionError, http.client.CannotSendRequest)
 
@@ -34,35 +40,64 @@ class FetchResult:
     attempts: int = 0
 
 
-def _zstd_decompress(data: bytes) -> bytes:
-    try:
-        zstandard = importlib.import_module("zstandard")
-        return zstandard.ZstdDecompressor().decompressobj().decompress(data)
-    except ImportError:
-        return importlib.import_module("compression.zstd").decompress(data)
+def _check(out) -> None:
+    if len(out) > MAX_BODY_BYTES:
+        raise ValueError("body too large")
 
 
-def _inflate(data: bytes, wbits: int) -> bytes:
-    return zlib.decompressobj(wbits).decompress(data)
+def _zlib(data: bytes, wbits: int) -> bytes:
+    d = zlib.decompressobj(wbits)
+    out = d.decompress(data, MAX_BODY_BYTES + 1)
+    _check(out)
+    if not d.eof:
+        raise ValueError("truncated compressed stream")
+    return out
 
 
 def _deflate(data: bytes) -> bytes:
     try:
-        return _inflate(data, zlib.MAX_WBITS)
+        return _zlib(data, zlib.MAX_WBITS)
     except zlib.error:
-        return _inflate(data, -zlib.MAX_WBITS)  # raw deflate, as many servers send
+        return _zlib(data, -zlib.MAX_WBITS)  # raw deflate, as many servers send
+
+
+def _brotli(mod, data: bytes) -> bytes:
+    d, out = mod.Decompressor(), bytearray()
+    for i in range(0, len(data), 1024):  # small input slices bound each output burst
+        out += d.process(data[i:i + 1024])
+        _check(out)
+    if not d.is_finished():
+        raise ValueError("truncated compressed stream")
+    return bytes(out)
+
+
+def _zstd(mod, data: bytes) -> bytes:
+    if mod.__name__ == "compression.zstd":
+        d = mod.ZstdDecompressor()
+        out = d.decompress(data, MAX_BODY_BYTES + 1)
+        _check(out)
+        if not d.eof:
+            raise ValueError("truncated compressed stream")
+        return out
+    # shortcut: the zstandard package's stream_reader has no eof flag, so truncation goes undetected there
+    out, reader = bytearray(), mod.ZstdDecompressor().stream_reader(io.BytesIO(data))
+    while chunk := reader.read(CHUNK):
+        out += chunk
+        _check(out)
+    return bytes(out)
 
 
 def _decode(body: bytes, encoding: str) -> bytes:
-    for enc in reversed([e.strip().lower() for e in encoding.split(",") if e.strip()]):
+    encs = [e.strip().lower() for e in encoding.split(",") if e.strip()]
+    if len(encs) > MAX_ENCODINGS:
+        raise ValueError("too many stacked content-encodings")
+    for enc in reversed(encs):
         if enc in ("gzip", "x-gzip"):
-            body = _inflate(body, 16 + zlib.MAX_WBITS)
+            body = _zlib(body, 16 + zlib.MAX_WBITS)
         elif enc == "deflate":
             body = _deflate(body)
-        elif enc == "br":
-            body = importlib.import_module("brotli").decompress(body)
-        elif enc == "zstd":
-            body = _zstd_decompress(body)
+        elif enc in ("br", "zstd") and (mod := decoder_module(enc)) is not None:
+            body = (_brotli if enc == "br" else _zstd)(mod, body)
         elif enc != "identity":
             raise ValueError(f"unsupported content-encoding: {enc}")
     return body
@@ -73,16 +108,27 @@ def _parse_retry_after(value: str | None) -> float | None:
         return None
     value = value.strip()
     try:
-        return max(0.0, float(value))
+        secs = float(value)
     except ValueError:
-        pass
-    try:
-        when = parsedate_to_datetime(value)
-    except (TypeError, ValueError):
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        secs = (when - datetime.now(timezone.utc)).total_seconds()
+    return max(0.0, secs) if math.isfinite(secs) else None
+
+
+def _origin(url: str) -> tuple[str, str]:
+    """Normalised (scheme, host[:port]); ValueError for unusable URLs (bad port, no host)."""
+    p = urlsplit(url)
+    host, port = p.hostname, p.port
+    if p.scheme not in ("http", "https") or not host:
+        raise ValueError("unsupported or invalid URL")
+    if ":" in host:
+        host = f"[{host}]"
+    return p.scheme, host + (f":{port}" if port is not None else "")
 
 
 class Fetcher:
@@ -97,45 +143,44 @@ class Fetcher:
         self._gate_until = 0.0
         self._host_next: dict[tuple[str, str], float] = {}
         self._robots: dict[str, RobotsRules] = {}
+        self._delays: dict[str, float] = {}  # sanitised crawl-delay per origin
         # shortcut: one lock serialises robots fetches across hosts; fine for single-host crawls
         self._robots_lock = threading.Lock()
 
-    # -- pacing (all schedules are reservations: take the slot under the lock, sleep outside) --
+    # -- pacing: a slot is committed only once the Retry-After gate and every schedule allow
+    # "now"; a worker that slept re-checks, so a gate set meanwhile is honoured (HTTrack
+    # checks at launch time) --
 
-    def _reserve(self, attr_next: float, now: float, step: float) -> tuple[float, float]:
-        start = max(now, attr_next)
-        return start, start + step
-
-    def _wait_for(self, start: float, now: float) -> None:
-        if start > now:
+    def _acquire(self, key: tuple[str, str] | None = None, conn: bool = False) -> None:
+        while True:
+            with self._lock:
+                now = self._clock()
+                start = max(now, self._gate_until)
+                if key:
+                    start = max(start, self._host_next.get(key, 0.0))
+                if conn:
+                    start = max(start, self._conn_next)
+                if start <= now:
+                    if key:
+                        gap = max(self.policy.delay_ms / 1000,
+                                  self._delays.get(f"{key[0]}://{key[1]}", 0.0))
+                        self._host_next[key] = now + gap
+                    if conn:
+                        self._conn_next = now + 1 / self.policy.max_conn_rate
+                    return
             self._sleep(start - now)
-
-    def _pace(self, key: tuple[str, str]) -> None:
-        with self._lock:
-            now = self._clock()
-            start = max(now, self._gate_until)  # global Retry-After gate
-            rules = self._robots.get(f"{key[0]}://{key[1]}", NO_RULES)
-            gap = max(self.policy.delay_ms / 1000, rules.crawl_delay or 0)
-            start = max(start, self._host_next.get(key, 0.0))
-            self._host_next[key] = start + gap
-        self._wait_for(start, now)
-
-    def _take_conn_token(self) -> None:
-        with self._lock:
-            now = self._clock()
-            start, self._conn_next = self._reserve(self._conn_next, now, 1 / self.policy.max_conn_rate)
-        self._wait_for(start, now)
 
     def _charge_bandwidth(self, nbytes: int) -> None:
         with self._lock:
             now = self._clock()
-            start, self._bw_next = self._reserve(self._bw_next, now, nbytes / self.policy.max_bandwidth)
-            until = self._bw_next
-        self._wait_for(until, now)
+            self._bw_next = max(now, self._bw_next) + nbytes / self.policy.max_bandwidth
+            wait = self._bw_next - now
+        if wait > 0:
+            self._sleep(wait)
 
     def _set_gate(self, url: str, seconds: float) -> None:
         if seconds > self.policy.max_retry_after:
-            logger.warning("Retry-After %ss for %s capped to %ss", seconds, url,
+            logger.warning("Retry-After %ss for %s capped to %ss", seconds, redact_url(url),
                            self.policy.max_retry_after)
             seconds = self.policy.max_retry_after
         if seconds > 0:
@@ -144,13 +189,12 @@ class Fetcher:
 
     # -- transport --
 
-    def _connect(self, scheme: str, parts) -> http.client.HTTPConnection:
-        self._take_conn_token()
-        port = parts.port
-        if scheme == "https":
-            return http.client.HTTPSConnection(parts.hostname, port, timeout=self.policy.timeout,
-                                               context=self._ssl)
-        return http.client.HTTPConnection(parts.hostname, port, timeout=self.policy.timeout)
+    def _connect(self, parts) -> http.client.HTTPConnection:
+        self._acquire(conn=True)
+        if parts.scheme == "https":
+            return http.client.HTTPSConnection(parts.hostname, parts.port,
+                                               timeout=self.policy.timeout, context=self._ssl)
+        return http.client.HTTPConnection(parts.hostname, parts.port, timeout=self.policy.timeout)
 
     def _request(self, key, parts, headers):
         conns = self._local.__dict__.setdefault("conns", {})
@@ -159,16 +203,21 @@ class Fetcher:
             conn = conns.get(key)
             fresh = conn is None
             if fresh:
-                conn = conns[key] = self._connect(parts.scheme, parts)
+                conn = conns[key] = self._connect(parts)
             try:
                 conn.putrequest("GET", path, skip_host=True, skip_accept_encoding=True)
                 for k, v in headers:
                     conn.putheader(k, v)
                 conn.endheaders()
                 resp = conn.getresponse()
-                chunks = []
+                chunks, total = [], 0
                 while chunk := resp.read(CHUNK):
                     chunks.append(chunk)
+                    total += len(chunk)
+                    if total > MAX_BODY_BYTES:
+                        conn.close()
+                        conns.pop(key, None)
+                        raise ValueError("body too large")
                     self._charge_bandwidth(len(chunk))
                 hdrs = {k.lower(): v for k, v in resp.getheaders()}
                 if resp.will_close:
@@ -185,22 +234,29 @@ class Fetcher:
     # -- public --
 
     def get(self, url: str, *, kind: str, referer: str | None = None) -> FetchResult:
-        parts = urlsplit(url)
-        key = (parts.scheme, parts.netloc.rpartition("@")[2])
-        headers = request_headers(self.policy, key[1], kind=kind, referer=referer)
         res = FetchResult(url)
+        try:
+            parts, key = urlsplit(url), _origin(url)
+        except ValueError:
+            res.error = "invalid URL"
+            return res
+        headers = request_headers(self.policy, parts.netloc.rpartition("@")[2], kind=kind,
+                                  referer=referer)
         for attempt in range(1, self.policy.retries + 2):
             res.attempts = attempt
-            self._pace(key)
+            self._acquire(key)
             try:
                 status, hdrs, raw = self._request(key, parts, headers)
-            except http.client.HTTPException as exc:
-                res.error = f"{type(exc).__name__}: {exc}"
-                return res
-            except OSError as exc:  # timeouts and ssl.SSLError are OSErrors
+            except OSError as exc:  # timeouts, ssl.SSLError, RemoteDisconnected
                 res.error = f"{type(exc).__name__}: {exc}"
                 if attempt <= self.policy.retries:
                     continue
+                return res
+            except http.client.HTTPException as exc:
+                res.error = f"{type(exc).__name__}: {exc}"
+                return res
+            except ValueError as exc:  # body too large
+                res.error = str(exc)
                 return res
             res.error = None
             res.status, res.headers = status, hdrs
@@ -220,15 +276,45 @@ class Fetcher:
             return res
         return res
 
+    def _fetch_robots(self, origin: str) -> RobotsRules:
+        url = origin + "/robots.txt"
+        for _ in range(MAX_ROBOTS_REDIRECTS + 1):
+            r = self.get(url, kind="robots")
+            if r.error is not None:
+                return NO_RULES
+            if r.status == 200:
+                return parse_robots(r.body.decode("utf-8", errors="replace"))
+            if r.status not in REDIRECTS or not r.location:
+                return NO_RULES
+            nxt = urljoin(url, r.location)
+            try:  # same host only; scheme or port may change (http -> https)
+                _origin(nxt)
+                same_host = urlsplit(nxt).hostname == urlsplit(origin).hostname
+            except ValueError:
+                return NO_RULES
+            if not same_host:
+                return NO_RULES
+            url = nxt
+        return NO_RULES
+
     def robots_for(self, scheme_host: str) -> RobotsRules:
         if not self.policy.obey_robots:
             return NO_RULES
+        try:
+            origin = "%s://%s" % _origin(scheme_host)
+        except ValueError:
+            logger.warning("robots: unusable host %s", redact_url(scheme_host))
+            return NO_RULES
         with self._robots_lock:
-            if scheme_host not in self._robots:
-                r = self.get(scheme_host + "/robots.txt", kind="robots")
-                rules = NO_RULES
-                if r.error is None and r.status == 200:
-                    rules = parse_robots(r.body.decode("utf-8", errors="replace"))
+            if origin not in self._robots:
+                rules = self._fetch_robots(origin)
+                delay = rules.crawl_delay
+                if delay is None or not math.isfinite(delay) or delay < 0:
+                    delay = 0.0
+                elif delay > self.policy.max_retry_after:
+                    logger.warning("Crawl-delay %ss for %s capped to %ss", delay, origin,
+                                   self.policy.max_retry_after)
+                    delay = float(self.policy.max_retry_after)
                 with self._lock:
-                    self._robots[scheme_host] = rules
-            return self._robots[scheme_host]
+                    self._robots[origin], self._delays[origin] = rules, delay
+            return self._robots[origin]

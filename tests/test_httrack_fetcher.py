@@ -1,4 +1,5 @@
 import gzip
+import time
 import logging
 import threading
 import zlib
@@ -9,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from dograpper.lib.httrack.challenge import is_challenge
+from dograpper.lib.httrack import fetcher as fetcher_mod, policy as policy_mod
 from dograpper.lib.httrack.fetcher import Fetcher
 from dograpper.lib.httrack.policy import build_policy, request_headers
 from dograpper.lib.httrack.robots import NO_RULES
@@ -19,11 +21,14 @@ class FakeTime:
         self.now = 1000.0
         self.sleeps = []
         self.lock = threading.Lock()
+        self.on_sleep = None
 
     def clock(self):
         return self.now
 
     def sleep(self, s):
+        if self.on_sleep:
+            self.on_sleep(s)
         with self.lock:
             self.sleeps.append(s)
             self.now += s
@@ -46,6 +51,9 @@ def server():
                 status, hdrs, body = 404, {}, b"nope"
             else:
                 status, hdrs, body = q.pop(0) if len(q) > 1 else q[0]
+            if status is None:  # drop the connection without answering
+                self.close_connection = True
+                return
             self.send_response(status)
             for k, v in hdrs.items():
                 self.send_header(k, v)
@@ -216,3 +224,164 @@ def test_request_headers_sent_in_order(server):
     assert seen[0][1] == request_headers(f.policy, host, kind="linked", referer=base + "/")
     f.get(base + "/p?q=1", kind="navigate")
     assert len(seen) == 2  # persistent connection reused
+
+
+def test_is_challenge_is_linear_on_hostile_bodies():
+    t0 = time.perf_counter()
+    assert not is_challenge(200, {}, b"<title" * 25000)
+    assert not is_challenge(200, {}, b"<title>" * 25000)
+    assert time.perf_counter() - t0 < 1.0
+
+
+def test_decompression_bomb_and_oversize_body_rejected(server, monkeypatch):
+    base, script, _ = server
+    monkeypatch.setattr(fetcher_mod, "MAX_BODY_BYTES", 1000)
+    script["/bomb"] = [(200, {"Content-Encoding": "gzip"}, gzip.compress(b"a" * 100000))]
+    script["/raw"] = [(200, {}, b"x" * 2000)]
+    f, _ = make()
+    for p in ("/bomb", "/raw"):
+        r = f.get(base + p, kind="navigate")
+        assert r.error == "body too large" or "body too large" in r.error
+        assert r.body == b""
+
+
+def test_truncated_and_stacked_encodings(server):
+    base, script, _ = server
+    script["/t"] = [(200, {"Content-Encoding": "gzip"}, gzip.compress(b"hello" * 100)[:-10])]
+    script["/3"] = [(200, {"Content-Encoding": "gzip, gzip, gzip"}, gzip.compress(b"x"))]
+    script["/2"] = [(200, {"Content-Encoding": "gzip, gzip"}, gzip.compress(gzip.compress(b"hi")))]
+    f, _ = make()
+    assert "truncated" in f.get(base + "/t", kind="navigate").error
+    assert "too many" in f.get(base + "/3", kind="navigate").error
+    assert f.get(base + "/2", kind="navigate").body == b"hi"
+
+
+def test_undecodable_encoding_when_decoder_missing(server, monkeypatch):
+    base, script, _ = server
+    monkeypatch.setattr(policy_mod, "_importable", lambda name: False)
+    script["/br"] = [(200, {"Content-Encoding": "br"}, b"zz")]
+    f, _ = make()
+    r = f.get(base + "/br", kind="navigate")
+    assert r.error and r.body == b""
+
+
+def test_gate_set_while_worker_waits_is_honoured(server):
+    base, script, _ = server
+    script["/a"] = [(200, {}, b"")]
+    script["/b"] = [(200, {}, b"")]
+    f, ft = make(delay_ms=10000)
+    f.get(base + "/a", kind="navigate")
+    entered, release = threading.Event(), threading.Event()
+
+    def hook(_s):
+        if threading.current_thread() is not threading.main_thread() and not entered.is_set():
+            entered.set()
+            release.wait(5)
+
+    ft.on_sleep = hook
+    out = []
+    t = threading.Thread(target=lambda: out.append(f.get(base + "/b", kind="navigate")))
+    t.start()
+    assert entered.wait(5)
+    f._set_gate(base + "/x", 50)
+    release.set()
+    t.join(10)
+    assert out[0].status == 200
+    assert ft.now >= 1050  # the waiter re-checked the gate after its own sleep
+
+
+def test_dropped_connection_is_retried_as_oserror(server):
+    base, script, seen = server
+    script["/d"] = [(None, {}, b""), (200, {}, b"ok")]
+    f, _ = make(retries=1)
+    r = f.get(base + "/d", kind="navigate")
+    assert (r.status, r.attempts) == (200, 2)
+    script["/e"] = [(None, {}, b"")]
+    f0, _ = make(retries=0)
+    r = f0.get(base + "/e", kind="navigate")
+    assert r.status is None and r.error
+
+
+def test_stale_keepalive_reconnects_within_attempt(server):
+    base, script, seen = server
+    script["/ok"] = [(200, {}, b"")]
+    script["/s"] = [(None, {}, b""), (200, {}, b"y")]
+    f, _ = make(retries=0)
+    f.get(base + "/ok", kind="navigate")
+    r = f.get(base + "/s", kind="navigate")
+    assert (r.status, r.body, r.attempts) == (200, b"y", 1)
+    assert [p for p, _ in seen].count("/s") == 2
+
+
+def test_robots_same_host_redirect_followed(server):
+    base, script, _ = server
+    script["/robots.txt"] = [(301, {"Location": "/r2"}, b"")]
+    script["/r2"] = [(200, {}, b"User-agent: *\nDisallow: /x\n")]
+    f, _ = make()
+    assert f.robots_for(base).allowed("/x") is False
+
+
+def test_robots_cross_host_or_endless_redirect_is_no_rules(server):
+    base, script, seen = server
+    port = base.rsplit(":", 1)[1]
+    script["/robots.txt"] = [(302, {"Location": f"http://localhost:{port}/evil"}, b"")]
+    script["/evil"] = [(200, {}, b"User-agent: *\nDisallow: /\n")]
+    f, _ = make()
+    assert f.robots_for(base) is NO_RULES
+    assert "/evil" not in [p for p, _ in seen]
+    script["/loop"] = [(302, {"Location": "/loop"}, b"")]
+    script["/robots.txt"] = [(302, {"Location": "/loop"}, b"")]
+    f2, _ = make()
+    assert f2.robots_for(base) is NO_RULES
+    assert len(seen) <= 1 + 1 + 6  # bounded: 5 redirects at most
+
+
+def test_crawl_delay_infinite_and_huge_are_sanitised(server, caplog):
+    base, script, _ = server
+    script["/a"] = [(200, {}, b"")]
+    script["/robots.txt"] = [(200, {}, b"User-agent: *\nCrawl-delay: inf\n")]
+    f, ft = make()
+    f.robots_for(base)
+    f.get(base + "/a", kind="navigate")
+    f.get(base + "/a", kind="navigate")
+    assert max(ft.sleeps, default=0) < 0.01  # only tiny bandwidth sleeps
+    script["/robots.txt"] = [(200, {}, b"User-agent: *\nCrawl-delay: 100000\n")]
+    f2, ft2 = make(max_retry_after=30)
+    with caplog.at_level(logging.WARNING):
+        f2.robots_for(base)
+    assert "Crawl-delay" in caplog.text
+    f2.get(base + "/a", kind="navigate")
+    f2.get(base + "/a", kind="navigate")
+    assert max(ft2.sleeps) == pytest.approx(30.0)
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:99999/", "http://127.0.0.1:abc/",
+                                 "ftp://example.com/", "http:///x"])
+def test_invalid_url_returns_error_not_exception(url):
+    f, _ = make()
+    r = f.get(url, kind="navigate")
+    assert r.error and r.status is None
+
+
+def test_origin_normalisation_for_robots_and_pacing(server):
+    base, script, seen = server
+    script["/robots.txt"] = [(200, {}, b"User-agent: *\nCrawl-delay: 2\n")]
+    script["/a"] = [(200, {}, b"")]
+    f, ft = make()
+    spelled = base.replace("http://", "HTTP://") + "/"
+    assert f.robots_for(spelled).crawl_delay == 2
+    assert f.robots_for(base).crawl_delay == 2
+    assert [p for p, _ in seen] == ["/robots.txt"]
+    f.get(base + "/a", kind="navigate")
+    f.get(base + "/a", kind="navigate")
+    assert max(ft.sleeps) >= 2 - 1e-6
+
+
+def test_userinfo_never_logged(server, caplog):
+    base, script, _ = server
+    script["/a"] = [(429, {"Retry-After": "9999"}, b"")]
+    f, _ = make(retries=0, max_retry_after=30)
+    with caplog.at_level(logging.DEBUG):
+        f.get(base.replace("http://", "http://alice:s3cret@") + "/a", kind="navigate")
+    assert "s3cret" not in caplog.text and "alice" not in caplog.text
+    assert "capped" in caplog.text

@@ -42,8 +42,8 @@ src/dograpper/
 │   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
 │   ├── httrack/
 │   │   ├── challenge.py    # is_challenge() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/)
-│   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After, decode de Content-Encoding
-│   │   ├── policy.py       # build_policy() clamps + request_headers() idênticos ao HTTrack 3.51 + make_ssl_context() (perfil TLS) + accept_encoding()
+│   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, robots com redirects same-host
+│   │   ├── policy.py       # build_policy() clamps + request_headers() idênticos ao HTTrack 3.51 + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
 │   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap)
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only

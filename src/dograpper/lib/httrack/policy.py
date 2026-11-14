@@ -75,12 +75,22 @@ def _importable(name: str) -> bool:
     return True
 
 
+_DECODER_MODULES = {"br": ("brotli",), "zstd": ("zstandard", "compression.zstd")}
+
+
+def _decoder_modname(encoding: str) -> str | None:
+    return next((m for m in _DECODER_MODULES[encoding] if _importable(m)), None)
+
+
+def decoder_module(encoding: str):
+    """Module able to decode `encoding` ("br" | "zstd"), or None. Single source for
+    both what we advertise and what the fetcher decodes."""
+    name = _decoder_modname(encoding)
+    return importlib.import_module(name) if name else None
+
+
 def accept_encoding() -> str:
-    parts = ["gzip", "deflate"]
-    if _importable("brotli"):
-        parts.append("br")
-    if _importable("zstandard") or _importable("compression.zstd"):
-        parts.append("zstd")
+    parts = ["gzip", "deflate"] + [e for e in _DECODER_MODULES if _decoder_modname(e)]
     return ", ".join(parts + ["identity;q=0.9"])
 
 
