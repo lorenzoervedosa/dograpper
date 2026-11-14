@@ -141,7 +141,7 @@ action.yml                  # Composite GitHub Action: download + full pack --sc
 ```bash
 git clone <repo-url>
 cd dograpper
-uv sync --extra dev --extra headless   # deps + pytest + playwright (sem baixar browser)
+uv sync --extra dev --extra headless --extra httrack   # deps + pytest + playwright (sem baixar browser) + brotli/zstd do perfil httrack
 uv run dograpper --help    # verifica que está funcionando
 ```
 
@@ -157,6 +157,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 |---|---|
 | `README.md` | **Sempre.** Comportamento de cada subcomando, flags, formato de config e exemplos de uso. É a fonte de verdade do contrato observável. |
 | `docs/adr/` | Antes de reverter ou contornar uma decisão arquitetural (repomix, contagem por palavras, deps opcionais, query-oriented packing, delta na Action, registros de referência de API) |
+| `docs/superpowers/specs/2026-11-13-httrack-downloader-profile-design.md` | Antes de alterar `lib/httrack/` ou `commands/_httrack_profile.py`: desvios aprovados em relação ao HTTrack e roteiro dos próximos PRs do perfil. Evidência por comportamento (com citações do código do HTTrack) em `docs/discovery/httrack-mirroring-requirements.md` |
 | `GLOSSARY.md` | Ao nomear conceitos de entrada/saída (página, registro, chunk, símbolo, contêiner, membro) em código, docs, issues ou PRs |
 | `.dograpper.json.example` | Ao mexer em `config_loader.py` ou no merge de configuração |
 | `.docsignore.example` | Ao mexer em `ignore_parser.py` |
@@ -229,13 +230,14 @@ uv run dograpper pack ./test-docs -o ./chunks
 ## CI/CD
 
 `.github/workflows/ci.yml` roda a suíte em push para `main` e em pull request,
-numa matriz Python 3.10 / 3.12, com `uv sync --extra dev --extra headless`
+numa matriz Python 3.10 / 3.12, com `uv sync --extra dev --extra headless --extra httrack`
 (o extra `headless` é necessário porque `tests/test_doctor.py` faz patch de
-`playwright.__main__` — nenhum browser é baixado). `.github/workflows/release.yml`
+`playwright.__main__` — nenhum browser é baixado; sem o extra `httrack`, os
+testes de decode br/zstd são pulados em silêncio). `.github/workflows/release.yml`
 cuida do release. Para replicar o CI localmente:
 
 ```bash
-uv sync --extra dev --extra headless
+uv sync --extra dev --extra headless --extra httrack
 uv run pytest tests/ -v
 ```
 

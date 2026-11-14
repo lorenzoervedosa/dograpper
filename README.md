@@ -1233,8 +1233,9 @@ src/dograpper/
 ## Development
 
 ```bash
-# Install in editable mode with dev deps
-uv sync --extra dev
+# Install in editable mode with dev deps (headless: tests/test_doctor.py;
+# httrack: br/zstd decoding tests, skipped without it). Same as CI.
+uv sync --extra dev --extra headless --extra httrack
 
 # Run tests
 uv run pytest tests/ -v
