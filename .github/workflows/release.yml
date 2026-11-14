@@ -21,7 +21,8 @@ jobs:
 
       - name: Install uv-managed Python
         # python-build-standalone ships a shared libpython (PyInstaller needs it)
-        # and links OpenSSL >= 3.5, which the httrack profile's TLS handshake needs.
+        # and bundles its own OpenSSL; the httrack profile's TLS handshake needs
+        # >= 3.5, which the "Assert OpenSSL >= 3.5" step below enforces.
         shell: bash
         run: |
           uv python install 3.10
