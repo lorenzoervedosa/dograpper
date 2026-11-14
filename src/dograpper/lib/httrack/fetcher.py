@@ -349,8 +349,8 @@ class Fetcher:
                 if delay is None or not math.isfinite(delay) or delay < 0:
                     delay = 0.0
                 elif delay > self.policy.max_retry_after:
-                    logger.warning("Crawl-delay %ss for %s capped to %ss", delay, origin,
-                                   self.policy.max_retry_after)
+                    logger.warning("Crawl-delay %ss for %s capped to %ss", delay,
+                                   redact_url(origin), self.policy.max_retry_after)
                     delay = float(self.policy.max_retry_after)
                 with self._lock:
                     self._robots[origin], self._delays[origin] = rules, delay
