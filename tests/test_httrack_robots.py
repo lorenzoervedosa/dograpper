@@ -1,4 +1,5 @@
 import logging
+import time
 
 from dograpper.lib.httrack.robots import NO_RULES, RobotsRules, parse_robots
 
@@ -94,3 +95,24 @@ def test_text_capped_at_500kib(caplog):
         r = parse_robots(text)
     assert r.allowed("/late") is True
     assert caplog.records
+
+
+def test_many_wildcards_is_linear():
+    r = parse_robots("User-agent: *\nDisallow: /" + "*a" * 200 + "b\n")
+    start = time.perf_counter()
+    assert r.allowed("/" + "a" * 5000) is True
+    assert time.perf_counter() - start < 1.0
+
+
+def test_multi_star_anchored_suffix():
+    r = parse_robots("User-agent: *\nDisallow: /a*b*c$\n")
+    assert r.allowed("/axbyc") is False
+    assert r.allowed("/axbycz") is True
+    assert r.allowed("/abc") is False
+    assert r.allowed("/ac") is True
+
+
+def test_star_in_middle_unanchored():
+    r = parse_robots("User-agent: *\nDisallow: /*x*y\n")
+    assert r.allowed("/zzxzzy") is False
+    assert r.allowed("/zzyzzx") is True

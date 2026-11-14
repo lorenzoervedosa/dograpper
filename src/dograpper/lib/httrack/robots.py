@@ -1,8 +1,8 @@
 """robots.txt parser: RFC 9309 matching with HTTrack's caps and tie rules."""
 
 import logging
-import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,30 @@ class RobotsRules:
 NO_RULES = RobotsRules((), None, ())
 
 
-def _matches(pattern: str, path: str) -> bool:
+@lru_cache(maxsize=4096)
+def _split(pattern: str) -> tuple[tuple[str, ...], bool]:
     anchored = pattern.endswith("$")
-    body = pattern[:-1] if anchored else pattern
-    regex = ".*".join(re.escape(part) for part in body.split("*"))
-    return re.match(regex + ("\\Z" if anchored else ""), path, re.DOTALL) is not None
+    return tuple((pattern[:-1] if anchored else pattern).split("*")), anchored
+
+
+def _matches(pattern: str, path: str) -> bool:
+    """Linear greedy segment search; no regex, so hostile patterns cannot backtrack."""
+    pieces, anchored = _split(pattern)
+    first = pieces[0]
+    if not path.startswith(first):
+        return False
+    if len(pieces) == 1:
+        return path == first if anchored else True
+    pos = len(first)
+    last = pieces[-1]
+    for piece in pieces[1:-1]:
+        i = path.find(piece, pos)
+        if i < 0:
+            return False
+        pos = i + len(piece)
+    if anchored:
+        return len(path) - len(last) >= pos and path.endswith(last)
+    return path.find(last, pos) >= 0
 
 
 def _cap(text: str, limit: int) -> tuple[str, bool]:
