@@ -133,7 +133,8 @@ def _fetch_and_parse(
         data = _fetch_url(url)
     else:
         data = fetch(url)
-        if data is not None:
+        # fetch already undid Content-Encoding, so a .gz suffix alone proves nothing
+        if data is not None and data[:2] == b"\x1f\x8b":
             data = _gunzip(url, data)
     if data is None:
         return []

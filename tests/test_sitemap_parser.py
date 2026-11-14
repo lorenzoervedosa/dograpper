@@ -214,6 +214,13 @@ def test_fetch_param_gzip_body_decompressed():
     assert fetch_sitemap("https://site.io/", fetch=lambda u: body) == ["https://site.io/a"]
 
 
+def test_fetch_param_gz_url_already_decoded_by_content_encoding():
+    """The injected fetch undoes Content-Encoding: gzip, so a .gz URL can arrive as XML."""
+    pages = {"https://site.io/s.xml.gz": _urlset(["https://site.io/a"])}
+    assert fetch_sitemap("https://site.io/", fetch=pages.get,
+                         extra_candidates=["/s.xml.gz"]) == ["https://site.io/a"]
+
+
 def test_robots_sitemap_hint_tried_first():
     calls = []
 
