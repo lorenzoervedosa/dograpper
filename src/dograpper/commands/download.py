@@ -5,14 +5,8 @@ import click
 import logging
 from typing import List, Tuple
 
-from urllib.parse import urlsplit
-
-from ..lib.config_loader import is_explicit, load_config
-from ..lib.httrack.crawl import fetch_url_list
-from ..lib.httrack.fetcher import Fetcher, request_target
-from ..lib.httrack.policy import build_policy, warn_if_old_openssl
-from ..lib.httrack.report import format_report
-from ..utils.redact import redact_url
+from ._httrack_profile import resolve_profile, run_httrack
+from ..lib.config_loader import load_config
 from ..lib.llms_txt_parser import fetch_llms_txt
 from ..lib.manifest import load_manifest, save_manifest, build_manifest, merge_manifests
 from ..lib.playwright_crawl import run_playwright_crawl
@@ -77,7 +71,8 @@ def _normalize_extensions(value) -> str:
     return str(value)
 
 
-def _discover_urls(url: str, depth: int, fetcher=None) -> Tuple[List[str], str]:
+def _discover_urls(url: str, depth: int, fetch=None,
+                   sitemap_hints=()) -> Tuple[List[str], str]:
     """Run Layer 1 (llms.txt) then Layer 2 (sitemap). Return (urls, layer).
 
     Layers 1+2 run unconditionally (regardless of --headless) because
@@ -85,41 +80,15 @@ def _discover_urls(url: str, depth: int, fetcher=None) -> Tuple[List[str], str]:
     Mintlify; skipping them under --headless would throw away the strongest
     signal on the exact code path designed for SPAs.
 
-    With an httrack ``fetcher`` the parsers fetch through it (shared pacing and
-    robots cache); without one they use their own HTTP, exactly as before.
+    The httrack profile passes its ``fetch`` (shared pacing and robots cache) and
+    the robots.txt ``sitemap_hints``; without them the parsers use their own HTTP,
+    exactly as before.
     """
     parser_kw: dict = {}
     sitemap_kw: dict = {}
-    if fetcher is not None:
-        def fetch(u: str):
-            # Robots are checked BEFORE the GET so forbidden discovery URLs are never requested.
-            try:
-                parts = urlsplit(u)
-                rules = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}")
-                # request_target raises ValueError (UnicodeEncodeError) on lone
-                # surrogates; urlsplit raises it on malformed ports.
-                allowed = rules.allowed(request_target(parts))
-            except ValueError:
-                logger.warning("[cascade] discovery: unusable URL skipped")
-                return None
-            if not allowed:
-                logger.warning(f"[cascade] discovery: {redact_url(u)} blocked by robots.txt")
-                return None
-            r = fetcher.get(u, kind="robots")
-            if r.challenged:
-                logger.warning(f"[cascade] discovery: {redact_url(u)} challenged (bot protection)")
-                return None
-            if r.status is not None and 300 <= r.status < 400:
-                logger.warning(f"[cascade] discovery: {redact_url(u)} redirected (not followed)")
-                return None
-            if r.error is not None or r.status is None or not 200 <= r.status < 300:
-                return None
-            return r.body
-
-        parts = urlsplit(url)
-        sitemaps = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
+    if fetch is not None:
         parser_kw = {"fetch": fetch}
-        sitemap_kw = {"fetch": fetch, "extra_candidates": sitemaps}
+        sitemap_kw = {"fetch": fetch, "extra_candidates": sitemap_hints}
 
     logger.info("[cascade] layer-1 llms.txt: probing")
     llms_urls = fetch_llms_txt(url, **parser_kw)
@@ -146,69 +115,6 @@ def _discover_urls(url: str, depth: int, fetcher=None) -> Tuple[List[str], str]:
         return filtered_sitemap, "sitemap.xml"
 
     return [], "none"
-
-
-_PLAYWRIGHT_MSG = ("httrack profile: Playwright fallback is not implemented yet "
-                   "(planned); use --downloader wget")
-
-def _httrack_defaults(ctx: click.Context) -> dict:
-    """httrack-only params (help prefixed "[httrack]") -> click default; single source of truth."""
-    return {p.name: p.default for p in ctx.command.params
-            if (getattr(p, 'help', None) or '').startswith('[httrack]')}
-
-
-_NUMERIC = ('connections', 'max_conn_rate', 'max_bandwidth', 'timeout', 'retries',
-            'max_links', 'max_retry_after')
-
-
-def _flag(name: str) -> str:
-    return "--" + name.replace('_', '-')
-
-
-def _build_policy(delay, policy_kw, from_config):
-    """build_policy with failures reported in CLI terms; config-sourced values say so."""
-    src = lambda k: " (from .dograpper.json)" if k in from_config else ""
-    for k in _NUMERIC + ('delay',):
-        v = delay if k == 'delay' else policy_kw[k]
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            raise click.UsageError(f"{_flag(k)} must be a number, got {v!r}{src(k)}")
-    try:
-        return build_policy(delay_ms=delay, **policy_kw)
-    except (ValueError, TypeError) as e:
-        msg = str(e).replace('delay_ms', 'delay')
-        for k in _NUMERIC + ('delay',):
-            if msg.startswith(k + ' '):
-                raise click.UsageError(f"{_flag(k)}{msg[len(k):]}{src(k)}")
-        raise click.UsageError(msg)
-
-
-def _run_httrack(url, output, depth, delay, include_extensions, headless,
-                 verbose, policy_kw, from_config=frozenset()) -> Tuple[int, int, List[str]]:
-    """httrack profile: seeded fetch only. Returns (downloaded, skipped, report lines)."""
-    warn_if_old_openssl()
-    if headless:
-        raise click.ClickException(_PLAYWRIGHT_MSG)
-    policy = _build_policy(delay, policy_kw, from_config)
-    fetcher = Fetcher(policy)
-    discovered, winning_layer = _discover_urls(url, depth, fetcher)
-    if not discovered:
-        raise click.ClickException(
-            "httrack profile: recursive crawl is not implemented yet (planned); "
-            "use --downloader wget")
-    logger.info(f"[cascade] httrack: fetching {len(discovered)} URLs from {winning_layer}")
-    res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher)
-    if res.front_failed or not res.success:
-        for line in format_report(res.report, verbose):
-            click.echo(f"  {line}", err=True)
-    if res.front_failed:
-        raise click.ClickException(
-            "httrack profile: the site refused or challenged every seed URL (likely bot "
-            "protection). See the README section \"Downloader profiles\".")
-    if not res.success:
-        raise click.ClickException("httrack fetch failed.")
-    if is_spa(output):
-        raise click.ClickException(_PLAYWRIGHT_MSG)
-    return len(res.files_downloaded), 0, format_report(res.report, verbose)
 
 
 def _run_download_cascade(
@@ -433,28 +339,16 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     if downloader not in ('wget', 'httrack'):
         raise click.UsageError(
             f"invalid downloader {downloader!r}; allowed: wget, httrack")
-    defaults = _httrack_defaults(ctx)
-    httrack_params = {k: merged_params.get(k, d) for k, d in defaults.items()}
+    policy_kw, from_config = resolve_profile(ctx, merged_params, downloader)
     report_lines: List[str] = []
-
-    if downloader == 'wget':
-        for k, d in defaults.items():
-            if httrack_params[k] != d:
-                raise click.UsageError(
-                    f"--{k.replace('_', '-')} requires --downloader httrack")
 
     os.makedirs(output, exist_ok=True)
     manifest_data = load_manifest(manifest_path)
 
     if downloader == 'httrack':
-        policy_kw = {k: v for k, v in httrack_params.items()
-                     if k not in ('no_robots',)}
-        policy_kw['obey_robots'] = not httrack_params['no_robots']
-        files_downloaded, files_skipped, report_lines = _run_httrack(
+        files_downloaded, files_skipped, report_lines = run_httrack(
             url, output, depth, delay, include_extensions, headless,
-            bool(ctx.obj.get('VERBOSE')), policy_kw,
-            frozenset(k for k in (*defaults, 'delay')
-                      if not is_explicit(ctx, k)),
+            bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls,
         )
     else:
         files_downloaded, files_skipped = _run_download_cascade(

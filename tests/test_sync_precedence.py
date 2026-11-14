@@ -240,12 +240,12 @@ def _sync_httrack(runner, args):
     seen = {}
 
     def fake_run(url, output, depth, delay, ext, headless, verbose, policy_kw,
-                 from_config=frozenset()):
+                 from_config, discover):
         seen["policy_kw"] = policy_kw
         seen["from_config"] = from_config
         return 0, 0, []
 
-    with patch("dograpper.commands.download._run_httrack", fake_run):
+    with patch("dograpper.commands.download.run_httrack", fake_run):
         result = runner.invoke(
             cli, ["sync", "https://docs.example.com", "-o", "docs"] + args)
     return result, seen

@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from dograpper.cli import cli
+from dograpper.commands._httrack_profile import discovery_fetch
 from dograpper.commands.download import _discover_urls, download
 from dograpper.lib.httrack.crawl import HttrackResult
 from dograpper.lib.httrack.fetcher import FetchResult
@@ -19,6 +20,7 @@ from dograpper.lib.httrack.report import RunReport
 from dograpper.lib.httrack.robots import NO_RULES, RobotsRules
 from dograpper.lib.wget_mirror import WgetResult
 
+P = "dograpper.commands._httrack_profile"  # the httrack mode's module (patch target)
 URLS = [f"http://example.com/p{i}" for i in range(5)]
 
 
@@ -43,7 +45,7 @@ class FakeFetcher:
 @pytest.fixture(autouse=True)
 def fake_fetcher():
     FakeFetcher.instances = []
-    with patch("dograpper.commands.download.Fetcher", FakeFetcher):
+    with patch(f"{P}.Fetcher", FakeFetcher):
         yield
 
 
@@ -62,9 +64,9 @@ def ht(tmp_path):
     out = str(tmp_path / "out")
     os.makedirs(out)
     with patch("dograpper.commands.download.fetch_llms_txt", return_value=URLS), \
-         patch("dograpper.commands.download.fetch_url_list") as fu, \
-         patch("dograpper.commands.download.is_spa", return_value=False), \
-         patch("dograpper.commands.download.warn_if_old_openssl") as warn:
+         patch(f"{P}.fetch_url_list") as fu, \
+         patch(f"{P}.is_spa", return_value=False), \
+         patch(f"{P}.warn_if_old_openssl") as warn:
         fu.side_effect = lambda urls, o, *a, **k: _res(o)
         yield out, fu, warn
 
@@ -88,7 +90,7 @@ def test_default_downloader_is_wget_unchanged(tmp_path):
     with patch("dograpper.commands.download.fetch_llms_txt", return_value=URLS) as llms, \
          patch("dograpper.commands.download.fetch_sitemap") as sm, \
          patch("dograpper.commands.download.run_wget_urls") as wu, \
-         patch("dograpper.commands.download.fetch_url_list") as fu, \
+         patch(f"{P}.fetch_url_list") as fu, \
          patch("dograpper.commands.download.is_spa", return_value=False):
         wu.return_value = WgetResult(True, out, [], [], 0)
         res = CliRunner().invoke(download, ["http://example.com", "-o", out,
@@ -173,7 +175,7 @@ def test_httrack_no_discovery_fails_loud_recursive_crawl(tmp_path):
     out = str(tmp_path / "o")
     with patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
          patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
-         patch("dograpper.commands.download.warn_if_old_openssl"):
+         patch(f"{P}.warn_if_old_openssl"):
         res = run(out, "--downloader", "httrack")
     assert res.exit_code == 1
     assert "recursive crawl is not implemented yet" in res.output
@@ -189,7 +191,7 @@ def test_httrack_headless_fails_loud_playwright(ht):
 
 def test_httrack_spa_fails_loud_playwright(ht):
     out, _, _ = ht
-    with patch("dograpper.commands.download.is_spa", return_value=True):
+    with patch(f"{P}.is_spa", return_value=True):
         res = run(out, "--downloader", "httrack")
     assert res.exit_code == 1
     assert "Playwright fallback is not implemented yet" in res.output
@@ -251,7 +253,7 @@ def _fetcher_with(rules, status=200, **result_kw):
     return F(), calls
 
 
-def test_discovery_checks_robots_before_fetching_and_uses_robots_kind():
+def test_discovery_checks_robots_before_fetching_and_uses_robots_kind(tmp_path):
     rules = RobotsRules((("disallow", "/blocked"),), None, ("http://example.com/sm.xml",))
     f, calls = _fetcher_with(rules)
     seen = {}
@@ -265,9 +267,11 @@ def test_discovery_checks_robots_before_fetching_and_uses_robots_kind():
         seen["extra"] = tuple(extra_candidates)
         return []
 
-    with patch("dograpper.commands.download.fetch_llms_txt", side_effect=llms), \
+    with patch(f"{P}.Fetcher", lambda policy: f), patch(f"{P}.warn_if_old_openssl"), \
+         patch("dograpper.commands.download.fetch_llms_txt", side_effect=llms), \
          patch("dograpper.commands.download.fetch_sitemap", side_effect=sm):
-        assert _discover_urls("http://example.com", 0, f) == ([], "none")
+        res = run(str(tmp_path / "o"), "--downloader", "httrack")
+    assert res.exit_code == 1  # nothing discovered
     assert seen["ok"] == b"x" and seen["blocked"] is None
     assert seen["extra"] == ("http://example.com/sm.xml",)
     assert [u for u, _, _ in calls] == ["http://example.com/llms.txt"]  # no GET for /blocked
@@ -292,7 +296,7 @@ def test_discovery_warns_on_robots_blocked_challenged_and_redirected(caplog):
         with caplog.at_level(logging.WARNING), \
              patch("dograpper.commands.download.fetch_llms_txt", side_effect=llms), \
              patch("dograpper.commands.download.fetch_sitemap", return_value=[]):
-            _discover_urls("http://example.com", 0, f)
+            _discover_urls("http://example.com", 0, discovery_fetch(f))
         assert any(r.levelno == logging.WARNING and name[:7] in r.getMessage()
                    for r in caplog.records), (name, caplog.records)
 
