@@ -332,8 +332,8 @@ class Fetcher:
                 return parse_robots(r.body.decode("utf-8", errors="replace"))
             if r.status not in REDIRECTS or not r.location:
                 return NO_RULES
-            nxt = urljoin(url, r.location)
             try:  # same host only; scheme or port may change (http -> https)
+                nxt = urljoin(url, r.location)  # ValueError on e.g. "http://[bad"
                 _origin(nxt)
             except ValueError:
                 return NO_RULES

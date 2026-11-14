@@ -387,6 +387,13 @@ def test_robots_cross_host_or_endless_redirect_is_no_rules(server):
     assert len(seen) <= 1 + 1 + 6  # bounded: 5 redirects at most
 
 
+def test_robots_malformed_redirect_location_is_no_rules(server):
+    base, script, _ = server
+    script["/robots.txt"] = [(301, {"Location": "http://[bad/robots.txt"}, b"")]
+    f, _ = make()
+    assert f.robots_for(base) is NO_RULES  # urljoin's ValueError must not escape
+
+
 def test_crawl_delay_infinite_and_huge_are_sanitised(server, caplog):
     base, script, _ = server
     script["/a"] = [(200, {}, b"")]
