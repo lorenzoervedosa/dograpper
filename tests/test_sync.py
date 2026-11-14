@@ -89,3 +89,39 @@ def test_sync_forwards_pack_flags():
     assert pk["dedup"] == "both"
     assert pk["show_tokens"] is True
     assert pk["max_chunks"] == 30
+
+
+def test_sync_forwards_downloader_and_httrack_flags():
+    result, captured = _run_sync([
+        'https://example.com', '-o', './out',
+        '--downloader', 'httrack', '--user-agent', 'bot/1', '--no-robots',
+        '--connections', '6', '--max-conn-rate', '2.5',
+        '--max-bandwidth', '5000', '--timeout', '30', '--retries', '1',
+        '--max-links', '10', '--max-retry-after', '5',
+        '--disable-security-limits',
+    ])
+    assert result.exit_code == 0, result.output
+    dl = captured["download"]
+    assert dl["downloader"] == "httrack"
+    assert dl["user_agent"] == "bot/1"
+    assert dl["no_robots"] is True
+    assert dl["connections"] == 6
+    assert dl["max_conn_rate"] == 2.5
+    assert dl["max_bandwidth"] == 5000
+    assert dl["timeout"] == 30
+    assert dl["retries"] == 1
+    assert dl["max_links"] == 10
+    assert dl["max_retry_after"] == 5
+    assert dl["disable_security_limits"] is True
+
+
+def test_sync_downloader_defaults_match_download():
+    result, captured = _run_sync(['https://example.com', '-o', './out'])
+    assert result.exit_code == 0, result.output
+    dl = captured["download"]
+    names = {'downloader', 'user_agent', 'no_robots', 'connections',
+             'max_conn_rate', 'max_bandwidth', 'timeout', 'retries',
+             'max_links', 'max_retry_after', 'disable_security_limits'}
+    for p in download_cmd.params:
+        if p.name in names:
+            assert dl[p.name] == p.default, p.name

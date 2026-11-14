@@ -4,13 +4,20 @@ import click
 import logging
 
 from ..lib.config_loader import is_explicit_source
+from .download import download as _download_cmd
 
 logger = logging.getLogger(__name__)
 
 # sync's own option names forwarded to each stage. Used to detect which of
 # them the user set explicitly, so precedence survives ctx.invoke (see
 # lib/config_loader.py and issue #32).
-_DOWNLOAD_PASSTHROUGH = ('depth', 'headless', 'delay', 'include_extensions')
+# Downloader-profile options are NOT redefined here: the click Option objects
+# of `download` are attached to sync below (single source of truth).
+_DOWNLOADER_OPTIONS = ('downloader', 'user_agent', 'no_robots', 'connections',
+                       'max_conn_rate', 'max_bandwidth', 'timeout', 'retries',
+                       'max_links', 'max_retry_after', 'disable_security_limits')
+_DOWNLOAD_PASSTHROUGH = ('depth', 'headless', 'delay',
+                         'include_extensions') + _DOWNLOADER_OPTIONS
 _PACK_PASSTHROUGH = ('max_words_per_chunk', 'max_chunks', 'strategy', 'format',
                      'bundle', 'context_header', 'cross_refs', 'score',
                      'dedup', 'show_tokens', 'for_queries')
@@ -66,7 +73,7 @@ def _explicit_params(ctx: click.Context, names) -> set:
 def sync(ctx, url, output, depth, headless, delay, include_extensions,
          chunks_dir, max_words_per_chunk, max_chunks, strategy, format,
          bundle, context_header, cross_refs, score, dedup, show_tokens,
-         for_queries):
+         for_queries, **downloader_kw):
     """Incremental download + pack delta in a single command.
 
     Equivalent to:
@@ -97,6 +104,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
             headless=headless,
             delay=delay,
             include_extensions=include_extensions,
+            **downloader_kw,
         )
 
         click.echo("\n=== Step 2: Pack (delta) ===")
@@ -123,3 +131,8 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
         )
     finally:
         ctx.obj.pop('CLI_EXPLICIT_PARAMS', None)
+
+
+# Reuse download's Option objects so names, types, ranges, defaults and help
+# can never drift from `download`.
+sync.params.extend(p for p in _download_cmd.params if p.name in _DOWNLOADER_OPTIONS)
