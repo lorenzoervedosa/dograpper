@@ -30,7 +30,7 @@ def stub_download(monkeypatch):
             (ctx.obj or {}).get("CLI_EXPLICIT_PARAMS", ()))
 
     captured_download_ctx.clear()
-    monkeypatch.setattr("dograpper.commands.download.download", fake_download)
+    monkeypatch.setattr("dograpper.commands.sync._download_cmd", fake_download)
     return captured_download_ctx
 
 
@@ -158,7 +158,7 @@ def test_explicit_set_cleaned_up_when_download_raises(monkeypatch):
         raise _click.ClickException("download blew up")
 
     monkeypatch.setattr(
-        "dograpper.commands.download.download", failing_download)
+        "dograpper.commands.sync._download_cmd", failing_download)
     runner = CliRunner()
     with runner.isolated_filesystem():
         _make_docs()

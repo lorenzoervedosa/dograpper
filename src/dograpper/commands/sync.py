@@ -84,7 +84,6 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
     show-tokens. Calibration-only flags (e.g. pack's --report and
     --dry-run) are deliberately not exposed here.
     """
-    from .download import download
     from .pack import pack
 
     chunks_output = chunks_dir or f"{output}/chunks"
@@ -96,7 +95,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
         ctx.obj['CLI_EXPLICIT_PARAMS'] = (
             _explicit_params(ctx, _DOWNLOAD_PASSTHROUGH) | {'output'})
         ctx.invoke(
-            download,
+            _download_cmd,
             url=url,
             output=output,
             depth=depth,
