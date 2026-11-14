@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
+from .escape import escape_unsafe
+
 logger = logging.getLogger(__name__)
 
 MAX_TEXT_BYTES = 500 * 1024
@@ -118,7 +120,8 @@ def parse_robots(text: str, agent_token: str = "dograpper") -> RobotsRules:
                 except ValueError:
                     pass
             elif value:  # empty Disallow/Allow is ignored
-                groups[-1][1].append((key, _upper_hex(value)))
+                # escaped exactly like the wire target it is matched against (RFC 9309 2.2.2)
+                groups[-1][1].append((key, _upper_hex(escape_unsafe(value))))
 
     specific = [g for g in groups if any(a.startswith(agent_token) for a in g[0])]
     selected = specific or [g for g in groups if "*" in g[0]]

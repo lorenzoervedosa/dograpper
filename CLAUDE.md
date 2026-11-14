@@ -49,7 +49,7 @@ src/dograpper/
 │   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path>, index.html, .html por content-type (substitui extensão dinâmica .php/.cgi…, anexa às demais), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão, thread-safe; None se o caminho escapa de output_dir
 │   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA e referer) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
 │   │   ├── report.py       # RunReport (contagens por status, challenged, robots_blocked, out_of_scope, filtered, errors, partial) + format_report() — URLs já redigidas, caracteres de controle neutralizados via utils/redact.py
-│   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap)
+│   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap); regras percent-escapadas com escape.py, como o alvo no fio
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
 │   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build, diff e narrow_diff_to_paths
