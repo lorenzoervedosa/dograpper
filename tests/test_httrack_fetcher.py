@@ -1,5 +1,6 @@
 import gzip
 import random
+import socket
 import time
 import logging
 import threading
@@ -12,6 +13,7 @@ import pytest
 
 from dograpper.lib.httrack.challenge import is_challenge
 from dograpper.lib.httrack import fetcher as fetcher_mod, policy as policy_mod
+from dograpper.lib.httrack.crawl import fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher
 from dograpper.lib.httrack.policy import build_policy, request_headers
 from dograpper.lib.httrack.robots import NO_RULES
@@ -70,6 +72,44 @@ def server():
     srv.shutdown()
     srv.server_close()
     t.join(5)
+
+
+@pytest.fixture
+def raw_server():
+    """Answer every connection with fixed bytes, then close: replies http.server cannot fake."""
+    stops, threads = [], []
+
+    def start(reply: bytes):
+        hits, stop = [], threading.Event()
+        lsock = socket.create_server(("127.0.0.1", 0))
+        lsock.settimeout(0.05)
+
+        def serve():
+            with lsock:
+                while not stop.is_set():
+                    try:
+                        conn, _ = lsock.accept()
+                    except socket.timeout:
+                        continue
+                    with conn:
+                        conn.settimeout(5)
+                        data = b""
+                        while b"\r\n\r\n" not in data and (got := conn.recv(65536)):
+                            data += got
+                        hits.append(data.split(b"\r\n", 1)[0])
+                        conn.sendall(reply)
+
+        t = threading.Thread(target=serve, daemon=True)
+        t.start()
+        stops.append(stop)
+        threads.append(t)
+        return f"http://127.0.0.1:{lsock.getsockname()[1]}", hits
+
+    yield start
+    for stop in stops:
+        stop.set()
+    for t in threads:
+        t.join(5)
 
 
 def make(**kw):
@@ -588,3 +628,24 @@ def test_zstd_multi_frame_junk_and_window(monkeypatch):
         big = zstd.compress(data, options={zstd.CompressionParameter.window_log: 27})
     with pytest.raises(Exception):  # window above the 8 MiB cap is refused
         fetcher_mod._decode(big, "zstd")
+
+
+@pytest.mark.parametrize("reply", [
+    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 100000\r\n\r\n"
+    + b"<p>first 20 bytes</p>",
+    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n"
+    + b"5\r\nhello\r\n",  # terminating chunk never sent
+], ids=["content-length", "chunked"])
+def test_short_body_is_an_error_retried_and_never_written(raw_server, tmp_path, reply):
+    base, hits = raw_server(reply)
+    f, _ = make(retries=2)
+    r = f.get(base + "/p", kind="navigate")
+    assert r.error and "IncompleteRead" in r.error
+    assert (r.status, r.body, r.attempts, len(hits)) == (None, b"", 3, 3)
+    policy = build_policy(retries=0)
+    ft = FakeTime()
+    res = fetch_url_list([base + "/p"], str(tmp_path), policy, "html",
+                         fetcher=Fetcher(policy, clock=ft.clock, sleep=ft.sleep))
+    assert res.files_downloaded == [] and res.front_failed
+    assert [e[0] for e in res.report.errors] == [base + "/p"]
+    assert list(tmp_path.rglob("*")) == []

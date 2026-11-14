@@ -233,6 +233,8 @@ class Fetcher:
                         conns.pop(key, None)
                         raise ValueError("body too large")
                     self._charge_bandwidth(len(chunk))
+                if resp.length:  # peer closed before Content-Length: HTTrack's "Incorrect length"
+                    raise http.client.IncompleteRead(b"".join(chunks), resp.length)
                 hdrs = {k.lower(): v for k, v in resp.getheaders()}
                 if resp.will_close:
                     conn.close()
@@ -261,7 +263,8 @@ class Fetcher:
             self._acquire(key)
             try:
                 status, hdrs, raw = self._request(key, parts, headers)
-            except OSError as exc:  # timeouts, ssl.SSLError, RemoteDisconnected
+            # timeouts, ssl.SSLError, RemoteDisconnected; short bodies (htsback.c: recatch)
+            except (OSError, http.client.IncompleteRead) as exc:
                 res.error = f"{type(exc).__name__}: {exc}"
                 if attempt <= self.policy.retries:
                     continue
