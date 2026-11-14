@@ -55,7 +55,13 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         """Return "refused", "scoped" (skipped by scope/filter) or "written"."""
         hops = 0
         while True:
-            safe, parts = redact_url(url), urlsplit(url)
+            safe = redact_url(url)
+            try:
+                parts = urlsplit(url)
+            except ValueError:
+                with lock:
+                    report.errors.append((safe, "malformed URL", None))
+                return "refused"
             if parts.path.startswith("/cdn-cgi/"):
                 with lock:
                     report.out_of_scope.append(safe)
@@ -74,7 +80,11 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                     report.errors.append((safe, res.error, None))
                     return "refused"
                 if res.status in REDIRECTS and res.location:
-                    nxt = urljoin(url, res.location)
+                    try:
+                        nxt = urljoin(url, res.location)
+                    except ValueError:
+                        report.errors.append((safe, "malformed redirect Location", None))
+                        return "refused"
                     if not _same_host(url, nxt):
                         report.out_of_scope.append(redact_url(nxt))
                         return "scoped"
@@ -98,16 +108,20 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 report.errors.append((safe, "unsafe local path", None))
             return "refused"
         if exts and os.path.splitext(path)[1].lower() not in exts:
-            logger.debug("not written (extension filter): %s", safe)
+            with lock:
+                report.filtered.append(safe)
             return "scoped"
+        with lock:
+            if path in written:  # same final URL reached from several seeds
+                return "written"
+            written.append(path)
         try:
             atomic_write_bytes(path, res.body)
         except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
             with lock:
+                written.remove(path)
                 report.errors.append((safe, f"write failed: {exc}", None))
             return "refused"
-        with lock:
-            written.append(path)
         return "written"
 
     def run(seed: str) -> None:
@@ -121,6 +135,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     report.challenged.sort()
     report.robots_blocked.sort()
     report.out_of_scope.sort()
+    report.filtered.sort()
     report.errors.sort(key=lambda e: (e[0], e[1]))
     files = sorted(written)
     front_failed = not files and bool(seeds) and refused[0] == len(seeds)

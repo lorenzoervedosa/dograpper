@@ -175,3 +175,57 @@ def test_format_report_truncates_errors_unless_verbose():
     full = "\n".join(format_report(r, verbose=True))
     assert "http://h/09" in short and "http://h/10" not in short and "5 more" in short
     assert "http://h/14" in full and "more" not in full
+
+
+def test_seeds_redirecting_to_one_target_write_one_file(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (301, {"location": "/t"}, b"")
+    script["/b"] = (301, {"location": "/t"}, b"")
+    script["/t"] = (200, HTML, b"<p>t</p>")
+    res = run([f"{base}/a", f"{base}/b", f"{base}/t"], tmp_path)
+    assert [os.path.basename(f) for f in res.files_downloaded] == ["t.html"]
+
+
+def test_malformed_seed_is_recorded_and_run_continues(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/ok"] = (200, HTML, b"<p>ok</p>")
+    res = run(["http://[x", f"{base}/ok"], tmp_path)
+    assert len(res.files_downloaded) == 1
+    assert res.report.errors == [("<redacted url>", "malformed URL", None)]
+
+
+def test_malformed_redirect_location_is_recorded(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/r"] = (302, {"location": "http://[x"}, b"")
+    res = run([f"{base}/r"], tmp_path)
+    assert res.report.errors == [(f"{base}/r", "malformed redirect Location", None)]
+
+
+def test_filtered_pages_are_reported(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/i.png"] = (200, {"content-type": "image/png"}, b"\x89PNG")
+    res = run([f"{base}/i.png"], tmp_path, exts="html")
+    assert res.report.filtered == [f"{base}/i.png"] and res.files_downloaded == []
+    short = "\n".join(format_report(res.report, verbose=False))
+    full = "\n".join(format_report(res.report, verbose=True))
+    assert "Filtered by --include-extensions: 1" in short and "i.png" not in short
+    assert f"{base}/i.png" in full
+
+
+def test_control_chars_in_location_never_reach_the_report(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/r"] = (302, {"location": "http://example.invalid/\x1b[31mx\x9by"}, b"")
+    res = run([f"{base}/r"], tmp_path)
+    out = "\n".join(format_report(res.report, verbose=True))
+    assert "\x1b" not in out and "\r" not in out and "example.invalid" in out
+
+
+def test_format_report_escapes_control_chars_in_reasons():
+    r = RunReport(errors=[("http://h/x", "bad \x1b[31m thing\x07", "http://h/\x1b")])
+    out = "\n".join(format_report(r, verbose=True))
+    assert "\x1b" not in out and "\x07" not in out and "\\x1b" in out

@@ -22,3 +22,8 @@ def test_redact_url_invalid_fails_closed():
 def test_redact_url_userinfo_with_control_chars(url):
     out = redact_url(url)
     assert out == "https://host/x"
+
+
+def test_redact_url_percent_encodes_control_characters():
+    assert redact_url("http://h/a\x1b[31m\x7f\x9b\r\nb") == "http://h/a%1B[31m%7F%9B%0D%0Ab"
+    assert redact_url("http://u:p@h/\x1b") == "http://h/%1B"
