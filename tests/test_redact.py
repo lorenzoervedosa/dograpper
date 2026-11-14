@@ -1,6 +1,6 @@
 import pytest
 
-from dograpper.utils.redact import redact_url
+from dograpper.utils.redact import neutralize_controls, redact_url
 
 
 @pytest.mark.parametrize("url,want", [
@@ -27,3 +27,7 @@ def test_redact_url_userinfo_with_control_chars(url):
 def test_redact_url_percent_encodes_control_characters():
     assert redact_url("http://h/a\x1b[31m\x7f\x9b\r\nb") == "http://h/a%1B[31m%7F%9B%0D%0Ab"
     assert redact_url("http://u:p@h/\x1b") == "http://h/%1B"
+
+
+def test_neutralize_controls_escapes_c0_del_c1_only():
+    assert neutralize_controls("a\x1b[31m\x07\x7f\x9b\té~") == "a\\x1b[31m\\x07\\x7f\\x9b\\x09é~"

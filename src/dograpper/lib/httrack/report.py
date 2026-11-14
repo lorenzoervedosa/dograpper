@@ -1,7 +1,8 @@
 """Run report of an httrack-profile fetch. URLs stored here are already redacted."""
 
-import re
 from dataclasses import dataclass, field
+
+from dograpper.utils.redact import neutralize_controls
 
 MAX_SHOWN_ERRORS = 10
 
@@ -19,13 +20,6 @@ class RunReport:
     partial: bool = False
 
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-
-
-def _printable(text: str) -> str:
-    return _CONTROL.sub(lambda m: "\\x%02x" % ord(m.group()), text)
-
-
 def format_report(r: RunReport, verbose: bool) -> list[str]:
     counts = ", ".join(f"{k}={v}" for k, v in r.status_counts.items())
     lines = [f"Responses: {counts}; retried: {r.retried}"]
@@ -35,13 +29,13 @@ def format_report(r: RunReport, verbose: bool) -> list[str]:
         if urls:
             lines.append(f"{label}: {len(urls)}")
             if verbose:
-                lines.extend(_printable(f"  {u}") for u in urls)
+                lines.extend(neutralize_controls(f"  {u}") for u in urls)
     if r.errors:
         shown = r.errors if verbose else r.errors[:MAX_SHOWN_ERRORS]
         lines.append(f"Errors: {len(r.errors)}")
         for url, reason, referrer in shown:
             via = f" (from {referrer})" if referrer else ""
-            lines.append(_printable(f"  {url}: {reason}{via}"))
+            lines.append(neutralize_controls(f"  {url}: {reason}{via}"))
         if len(shown) < len(r.errors):
             lines.append(f"  ... {len(r.errors) - len(shown)} more (use --verbose)")
     if r.partial:
