@@ -1,6 +1,7 @@
 """Tests for dograpper.lib.sitemap_parser."""
 
 import gzip
+import http.client
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -266,6 +267,25 @@ def test_malformed_sub_sitemap_loc_skipped():
         "https://site.io/s.xml": _urlset(["https://site.io/a"]),
     }
     assert fetch_sitemap("https://site.io/", fetch=pages.get) == ["https://site.io/a"]
+
+
+@pytest.mark.parametrize("bad_loc", ["/rel.xml", "https://site.io/a b.xml"],
+                         ids=["relative", "space"])
+def test_unfetchable_sub_sitemap_loc_skipped_on_urllib_path(bad_loc):
+    pages = {
+        "https://site.io/sitemap.xml": _sitemapindex([bad_loc, "https://site.io/s.xml"]),
+        "https://site.io/s.xml": _urlset(["https://site.io/a"]),
+    }
+
+    def side_effect(req, timeout=15):
+        # Mirror urllib: a URL with a space is rejected when the request is sent.
+        if " " in req.full_url:
+            raise http.client.InvalidURL(f"URL can't contain control characters. {req.full_url!r}")
+        body = pages.get(req.full_url)
+        return _mock_response(200, body) if body else _mock_response(404, b"")
+
+    with patch("dograpper.lib.sitemap_parser.urlopen", side_effect=side_effect):
+        assert fetch_sitemap("https://site.io/") == ["https://site.io/a"]
 
 
 @pytest.mark.parametrize("body", [

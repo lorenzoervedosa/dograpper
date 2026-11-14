@@ -16,6 +16,7 @@ import gzip
 import logging
 import xml.etree.ElementTree as ET
 import zlib
+from http.client import InvalidURL
 from typing import Callable, List, Sequence, Set
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
@@ -39,8 +40,8 @@ def _fetch_url(url: str, timeout: int = TIMEOUT_SECONDS) -> bytes | None:
         **BROWSER_HEADERS,
         "Accept": "application/xml, text/xml, */*",
     }
-    req = Request(url, headers=headers)
     try:
+        req = Request(url, headers=headers)
         with urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
                 logger.info(f"sitemap: {redact_url(url)} returned HTTP {resp.status}")
@@ -51,6 +52,9 @@ def _fetch_url(url: str, timeout: int = TIMEOUT_SECONDS) -> bytes | None:
         return None
     except (URLError, TimeoutError, OSError) as exc:
         logger.info(f"sitemap: {redact_url(url)} fetch failed: {exc}")
+        return None
+    except (ValueError, InvalidURL) as exc:  # untrusted <loc>: relative URL, spaces, controls
+        logger.warning(f"sitemap: skipping unusable URL {redact_url(url)}: {type(exc).__name__}")
         return None
 
     return _gunzip(url, data)
