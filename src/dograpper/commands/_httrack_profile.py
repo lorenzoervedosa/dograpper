@@ -36,8 +36,8 @@ def _flag(name: str) -> str:
 def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     """Return (policy_kw, from_config) for the profile options. A value not set on the
     command line goes through its option's click type (ranges, booleans), so config
-    gets the CLI's checks and messages; under wget a profile option set away from
-    its default is a usage error."""
+    gets the CLI's checks and messages; under wget a profile option given on the
+    command line, or set away from its default in config, is a usage error."""
     params = [p for p in ctx.command.params if p.name in PROFILE_OPTIONS]
     from_config = frozenset(k for k in (*PROFILE_OPTIONS, 'delay') if not is_explicit(ctx, k))
     values = {}
@@ -54,7 +54,7 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
         values[param.name] = value
     if downloader == 'wget':
         for param in params:
-            if values[param.name] != param.default:
+            if param.name not in from_config or values[param.name] != param.default:
                 raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack")
     policy_kw = {k: v for k, v in values.items() if k not in ('no_robots',)}
     policy_kw['obey_robots'] = not values['no_robots']

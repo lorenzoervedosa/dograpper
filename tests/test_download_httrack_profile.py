@@ -111,7 +111,8 @@ def test_profile_options_tuple_matches_download_and_sync():
     assert set(PROFILE_OPTIONS) <= {p.name for p in sync.params}
 
 
-@pytest.mark.parametrize("flag", ["--no-robots", "--connections=2", "--user-agent=x"])
+@pytest.mark.parametrize("flag", ["--no-robots", "--connections=2", "--user-agent=x",
+                                  "--retries=2"])  # explicit, even at its default
 def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     res = run(str(tmp_path / "o"), flag)
     assert res.exit_code == 2
