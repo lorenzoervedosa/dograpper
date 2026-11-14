@@ -116,3 +116,10 @@ def test_star_in_middle_unanchored():
     r = parse_robots("User-agent: *\nDisallow: /*x*y\n")
     assert r.allowed("/zzxzzy") is False
     assert r.allowed("/zzyzzx") is True
+
+
+def test_percent_escape_hex_case_insensitive():
+    r = parse_robots("User-agent: *\nDisallow: /caf%c3%a9\nDisallow: /x%2Fy\n")
+    assert not r.allowed("/caf%C3%A9") and not r.allowed("/caf%c3%a9")
+    assert not r.allowed("/x%2fy")
+    assert r.allowed("/cafe")

@@ -239,3 +239,26 @@ def test_format_report_escapes_control_chars_in_reasons():
     r = RunReport(errors=[("http://h/x", "bad \x1b[31m thing\x07", "http://h/\x1b")])
     out = "\n".join(format_report(r, verbose=True))
     assert "\x1b" not in out and "\x07" not in out and "\\x1b" in out
+
+
+@pytest.mark.parametrize("rule,seed,wire", [
+    ("/a%20b", "/a b", "/a%20b"),
+    ("/caf%C3%A9", "/caf\u00e9", "/caf%c3%a9"),
+    ("/caf%c3%a9", "/caf\u00e9", "/caf%c3%a9"),
+])
+def test_robots_matches_escaped_wire_target(server, tmp_path, rule, seed, wire):
+    base, script, seen = server
+    script["/robots.txt"] = (200, {"content-type": "text/plain"},
+                             f"User-agent: *\nDisallow: {rule}\n".encode())
+    script[wire] = (200, HTML, b"x")
+    res = run([base + seed], tmp_path)
+    assert wire not in seen and len(res.report.robots_blocked) == 1
+
+
+def test_robots_allows_other_encoded_path(server, tmp_path):
+    base, script, seen = server
+    script["/robots.txt"] = (200, {"content-type": "text/plain"},
+                             b"User-agent: *\nDisallow: /a%20b\n")
+    script["/c%20d"] = (200, HTML, b"x")
+    res = run([f"{base}/c d"], tmp_path)
+    assert "/c%20d" in seen and res.report.robots_blocked == []

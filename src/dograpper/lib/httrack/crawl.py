@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlsplit
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.redact import redact_url
 
-from .fetcher import REDIRECTS, Fetcher
+from .fetcher import REDIRECTS, Fetcher, request_target
 from .naming import NameRegistry
 from .policy import HttrackPolicy
 from .report import RunReport
@@ -66,7 +66,12 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 with lock:
                     report.out_of_scope.append(safe)
                 return "scoped"
-            target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+            try:
+                target = request_target(parts)  # robots sees exactly what goes on the wire
+            except ValueError:
+                with lock:
+                    report.errors.append((safe, "malformed URL", None))
+                return "refused"
             if not fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").allowed(target):
                 with lock:
                     report.robots_blocked.append(safe)

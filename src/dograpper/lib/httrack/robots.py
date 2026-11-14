@@ -1,6 +1,7 @@
 """robots.txt parser: RFC 9309 matching with HTTrack's caps and tie rules."""
 
 import logging
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -8,6 +9,14 @@ logger = logging.getLogger(__name__)
 
 MAX_TEXT_BYTES = 500 * 1024
 MAX_LINE_BYTES = 1024
+
+
+_PCT = re.compile(r"%[0-9a-fA-F]{2}")
+
+
+def _upper_hex(s: str) -> str:
+    """RFC 9309 2.2.2: compare percent-escapes case-insensitively."""
+    return _PCT.sub(lambda m: m.group().upper(), s)
 
 
 @dataclass(frozen=True)
@@ -20,6 +29,7 @@ class RobotsRules:
     def allowed(self, path_and_query: str) -> bool:
         if path_and_query == "/robots.txt":
             return True
+        path_and_query = _upper_hex(path_and_query)
         best_len, verdict = -1, True
         for kind, pattern in self.groups_rules:
             if not _matches(pattern, path_and_query):
@@ -108,7 +118,7 @@ def parse_robots(text: str, agent_token: str = "dograpper") -> RobotsRules:
                 except ValueError:
                     pass
             elif value:  # empty Disallow/Allow is ignored
-                groups[-1][1].append((key, value))
+                groups[-1][1].append((key, _upper_hex(value)))
 
     specific = [g for g in groups if any(a.startswith(agent_token) for a in g[0])]
     selected = specific or [g for g in groups if "*" in g[0]]

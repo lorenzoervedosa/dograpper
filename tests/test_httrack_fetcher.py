@@ -670,7 +670,7 @@ def test_short_body_is_an_error_retried_and_never_written(raw_server, tmp_path, 
     ("http://h", "/"),
 ])
 def test_request_target_escaped_like_httrack(url, target):
-    assert fetcher_mod._target(urlsplit(url)) == target
+    assert fetcher_mod.request_target(urlsplit(url)) == target
 
 
 def test_host_header_is_idna_encoded():

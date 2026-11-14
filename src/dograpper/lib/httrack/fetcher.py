@@ -149,7 +149,7 @@ def _origin(url: str) -> tuple[str, str]:
 _UNSAFE = re.compile(r'[^\x21\x23-\x7e]')
 
 
-def _target(parts) -> str:
+def request_target(parts) -> str:
     """Request target escaped as HTTrack sends it: non-ASCII as UTF-8 bytes, lowercase hex,
     existing %xx escapes untouched. UnicodeEncodeError (a ValueError) on lone surrogates."""
     raw = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
@@ -273,7 +273,7 @@ class Fetcher:
         res = FetchResult(url)
         try:
             parts, key = urlsplit(url), _origin(url)
-            host, target = _wire_host(parts), _target(parts)
+            host, target = _wire_host(parts), request_target(parts)
         except ValueError:
             res.error = "invalid URL"
             return res
