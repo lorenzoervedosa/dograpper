@@ -617,7 +617,7 @@ def test_brotli_multi_call_continuation():
 
 
 def test_zstd_multi_frame_junk_and_window(monkeypatch):
-    mod = _zstd_or_skip()
+    _zstd_or_skip()
     a, b = _zstd_frames(b"A" * 1000)[-1], _zstd_frames(b"B" * 1000)[-1]
     assert fetcher_mod._decode(a + b, "zstd") == b"A" * 1000 + b"B" * 1000
     with pytest.raises(Exception):

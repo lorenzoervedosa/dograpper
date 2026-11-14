@@ -1,7 +1,6 @@
 """Polite HTTP fetcher: paced, retrying, redirect-blind. One instance is shared by all workers."""
 
 import http.client
-import io
 import logging
 import math
 import re
@@ -312,7 +311,7 @@ class Fetcher:
                 return res
             res.challenged = is_challenge(status, hdrs, res.body)
             return res
-        return res
+        raise AssertionError("unreachable: the last attempt always returns")
 
     def _fetch_robots(self, origin: str) -> RobotsRules:
         url = origin + "/robots.txt"
