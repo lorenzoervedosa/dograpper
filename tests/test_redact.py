@@ -14,5 +14,11 @@ def test_redact_url(url, want):
     assert redact_url(url) == want
 
 
-def test_redact_url_invalid_fails_safe():
-    assert "secret" not in redact_url("http://secret:pw@[bad/")
+def test_redact_url_invalid_fails_closed():
+    assert redact_url("http://secret:pw@[bad/") == "<redacted url>"
+
+
+@pytest.mark.parametrize("url", ["https://us\ter:pa\tss@host/x", "https://us\ner:pa\rss@host/x"])
+def test_redact_url_userinfo_with_control_chars(url):
+    out = redact_url(url)
+    assert out == "https://host/x"
