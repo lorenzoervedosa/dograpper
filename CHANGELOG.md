@@ -46,8 +46,22 @@ and fixes alone are a PATCH bump.
 
 ## [Unreleased]
 
+### Added
+
+- `download --downloader httrack` (and the same flags on `sync`): a pure-Python
+  fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
+  (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
+  `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
+  `--max-retry-after`, `--disable-security-limits`). Recursive crawl and the
+  Playwright fallback fail loud under this profile for now.
+- `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
+  response decoding for the httrack profile.
+
 ### Fixed
 
+- `download` sitemap discovery no longer crashes on a truncated or corrupt
+  gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
+  skipped.
 - `pack --cross-refs` no longer corrupts words where a link's text is a
   substring of an unrelated word in the chunk (e.g. link text "Install"
   inside the word "Installation"). `annotate_cross_refs` now matches on
@@ -58,6 +72,12 @@ and fixes alone are a PATCH bump.
   size matches but mtime disagrees, instead of trusting mtime alone; the
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
+
+### Security
+
+- URLs that `download` logs during llms.txt and sitemap discovery drop
+  credentials and escape control characters, so a hostile sitemap or
+  robots.txt cannot inject terminal escape sequences.
 
 ## [0.4.0] - 2026-08-15
 

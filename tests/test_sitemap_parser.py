@@ -1,7 +1,10 @@
 """Tests for dograpper.lib.sitemap_parser."""
 
 import gzip
+import http.client
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from dograpper.lib.sitemap_parser import SITEMAP_NS, fetch_sitemap
 
@@ -189,3 +192,123 @@ def test_fetch_sitemap_sends_browser_ua():
 
 def test_fetch_sitemap_missing_scheme_returns_empty():
     assert fetch_sitemap("site.io") == []
+
+
+def test_fetch_param_used_when_given_including_recursion():
+    pages = {
+        "https://site.io/sitemap.xml": _sitemapindex(["https://site.io/sub.xml"]),
+        "https://site.io/sub.xml": _urlset(["https://site.io/a"]),
+    }
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return pages.get(url)
+
+    with patch("dograpper.lib.sitemap_parser.urlopen", side_effect=AssertionError("no urlopen")):
+        assert fetch_sitemap("https://site.io/", fetch=fetch) == ["https://site.io/a"]
+    assert calls == ["https://site.io/sitemap.xml", "https://site.io/sub.xml"]
+
+
+def test_fetch_param_gzip_body_decompressed():
+    body = gzip.compress(_urlset(["https://site.io/a"]))
+    assert fetch_sitemap("https://site.io/", fetch=lambda u: body) == ["https://site.io/a"]
+
+
+def test_fetch_param_gz_url_already_decoded_by_content_encoding():
+    """The injected fetch undoes Content-Encoding: gzip, so a .gz URL can arrive as XML."""
+    pages = {"https://site.io/s.xml.gz": _urlset(["https://site.io/a"])}
+    assert fetch_sitemap("https://site.io/", fetch=pages.get,
+                         extra_candidates=["/s.xml.gz"]) == ["https://site.io/a"]
+
+
+def test_robots_sitemap_hint_tried_first():
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return _urlset(["https://site.io/a"]) if url == "https://site.io/hint.xml" else None
+
+    urls = fetch_sitemap("https://site.io/", fetch=fetch, extra_candidates=["https://site.io/hint.xml"])
+    assert urls == ["https://site.io/a"] and calls == ["https://site.io/hint.xml"]
+
+
+def test_extra_candidate_cross_host_rejected():
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return None
+
+    assert fetch_sitemap("https://site.io/", fetch=fetch,
+                         extra_candidates=["https://evil.example/s.xml"]) == []
+    assert "https://evil.example/s.xml" not in calls
+    assert calls[0] == "https://site.io/sitemap.xml"
+
+
+def test_malformed_extra_candidate_skipped_with_warning(caplog):
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return _urlset(["https://site.io/a"]) if url == "https://site.io/sitemap.xml" else None
+
+    with caplog.at_level("WARNING"):
+        urls = fetch_sitemap("https://site.io/", fetch=fetch,
+                             extra_candidates=["http://[bad/s.xml"])
+    assert urls == ["https://site.io/a"]
+    assert calls == ["https://site.io/sitemap.xml"]
+    assert any("unusable candidate" in r.getMessage() for r in caplog.records)
+
+
+def test_malformed_sub_sitemap_loc_skipped():
+    pages = {
+        "https://site.io/sitemap.xml": _sitemapindex(["http://[bad/s.xml", "https://site.io/s.xml"]),
+        "https://site.io/s.xml": _urlset(["https://site.io/a"]),
+    }
+    assert fetch_sitemap("https://site.io/", fetch=pages.get) == ["https://site.io/a"]
+
+
+@pytest.mark.parametrize("bad_loc", ["/rel.xml", "https://site.io/a b.xml"],
+                         ids=["relative", "space"])
+def test_unfetchable_sub_sitemap_loc_skipped_on_urllib_path(bad_loc):
+    pages = {
+        "https://site.io/sitemap.xml": _sitemapindex([bad_loc, "https://site.io/s.xml"]),
+        "https://site.io/s.xml": _urlset(["https://site.io/a"]),
+    }
+
+    def side_effect(req, timeout=15):
+        # Mirror urllib: a URL with a space is rejected when the request is sent.
+        if " " in req.full_url:
+            raise http.client.InvalidURL(f"URL can't contain control characters. {req.full_url!r}")
+        body = pages.get(req.full_url)
+        return _mock_response(200, body) if body else _mock_response(404, b"")
+
+    with patch("dograpper.lib.sitemap_parser.urlopen", side_effect=side_effect):
+        assert fetch_sitemap("https://site.io/") == ["https://site.io/a"]
+
+
+@pytest.mark.parametrize("body", [
+    gzip.compress(_urlset(["https://site.io/a"]), mtime=0)[:30],         # EOFError
+    b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03not deflate data at all",  # zlib.error
+], ids=["truncated", "not-deflate"])
+def test_corrupt_gzip_sitemap_is_skipped(body):
+    with patch("dograpper.lib.sitemap_parser.urlopen", return_value=_mock_response(200, body)):
+        assert fetch_sitemap("https://site.io/") == []
+    assert fetch_sitemap("https://site.io/", fetch=lambda u: body) == []
+
+
+def test_logged_urls_never_carry_raw_control_chars(caplog):
+    same = "https://site.io/\x1b[2Js.xml"
+    hints = ["http://evil.invalid/\x1b[7mINJECTED\x1b[0m.xml", same]
+
+    def fetch(url):
+        return _urlset(["https://site.io/a"]) if url == same else None
+
+    with caplog.at_level("DEBUG"):
+        assert fetch_sitemap("https://site.io/", fetch=fetch,
+                             extra_candidates=hints) == ["https://site.io/a"]
+    assert "rejecting cross-host candidate" in caplog.text
+    assert "urlset yielded" in caplog.text
+    assert "\x1b" not in caplog.text
+    assert "%1B[7mINJECTED" in caplog.text  # neutralized, still readable

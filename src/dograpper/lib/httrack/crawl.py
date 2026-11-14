@@ -10,7 +10,8 @@ from urllib.parse import urljoin, urlsplit
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.redact import redact_url
 
-from .fetcher import REDIRECTS, Fetcher, request_target
+from .escape import request_target
+from .fetcher import REDIRECTS, Fetcher, same_host
 from .naming import NameRegistry
 from .policy import HttrackPolicy
 from .report import RunReport
@@ -27,13 +28,6 @@ class HttrackResult:
     files_skipped: int
     report: RunReport
     front_failed: bool
-
-
-def _same_host(a: str, b: str) -> bool:
-    try:
-        return urlsplit(a).hostname == urlsplit(b).hostname
-    except ValueError:
-        return False
 
 
 def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
@@ -92,7 +86,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                     except ValueError:
                         report.errors.append((safe, "malformed redirect Location", None))
                         return "refused"
-                    if not _same_host(url, nxt):
+                    if not same_host(url, nxt):
                         report.out_of_scope.append(redact_url(nxt))
                         return "scoped"
                     if hops >= MAX_REDIRECTS:

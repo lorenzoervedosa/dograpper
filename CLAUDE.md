@@ -6,7 +6,7 @@ CLI em Python que implementa uma pipeline de engenharia de contexto
 determinístico para ingestão em LLMs estáticos. Transforma documentação
 HTML em contexto estruturado, dedupicado, pontuado e versionado — pronto
 para NotebookLM, RAG pipelines, Claude Projects e fine-tuning. Três
-subcomandos: `download` (espelha site via wget/playwright), `pack`
+subcomandos: `download` (espelha site via wget/playwright, ou perfil httrack), `pack`
 (processa e agrupa em chunks otimizados) e `sync` (download + pack delta).
 
 ## Stack técnica
@@ -17,7 +17,7 @@ subcomandos: `download` (espelha site via wget/playwright), `pack`
 - **Filtro de arquivos**: pathspec (sintaxe gitignore)
 - **Crawling SPA**: playwright (dependência opcional, import condicional)
 - **Token counting**: tiktoken (dependência obrigatória)
-- **Download padrão**: wget (dependência do sistema)
+- **Download padrão**: wget (dependência do sistema); perfil opt-in `--downloader httrack` (Python puro, `lib/httrack/`; extra `httrack` = brotli + zstandard; exige OpenSSL >= 3.5 para o handshake idêntico)
 - **Testes**: pytest com click.testing.CliRunner
 
 ## Estrutura do repositório
@@ -26,15 +26,16 @@ subcomandos: `download` (espelha site via wget/playwright), `pack`
 src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
+│   ├── _httrack_profile.py # Modo `--downloader httrack` do download: resolve_profile() (opções do perfil, guarda sob wget, policy_kw), discovery_fetch() (robots antes do GET), run_httrack() (fetch semeado + relatório + fail-loud)
 │   ├── doctor.py           # Detecta e instala deps pesadas (wget, chromium) em DOGRAPPER_HOME; --check-system-libs
-│   ├── download.py         # Cascade 4-layer: llms.txt → sitemap → wget --mirror → Playwright bounded
+│   ├── download.py         # Opções click + despacho do --downloader; cascade 4-layer do wget: llms.txt → sitemap → wget --mirror → Playwright bounded (layers 1+2 compartilhadas com o perfil httrack)
 │   ├── drift.py            # Drift de contexto entre dois llm-readiness.json (+ delta_manifest.json opcional)
 │   ├── eval.py             # Hit-rate empírico do pack JSONL: golden Q&A offline → BM25 → hit-rate@k/MRR por grade
 │   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
 │   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
-│   └── sync.py             # Subcomando sync (download + pack em um passo)
+│   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader e as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py)
 ├── lib/
 │   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile, write_chunks() (md, txt, jsonl)
 │   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source)
@@ -43,11 +44,12 @@ src/dograpper/
 │   ├── httrack/
 │   │   ├── challenge.py    # is_challenge() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/)
 │   │   ├── crawl.py        # fetch_url_list() — lista semeada: cada URL é start URL (navigate), robots, /cdn-cgi/ fora de escopo, redirects same-host (até 5), só 2xx não-desafio é escrito (atômico), front_failed; ThreadPool com Fetcher e NameRegistry compartilhados
-│   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, corpo curto = IncompleteRead retentado, alvo percent-encoded e Host IDNA como o HTTrack, robots com redirects same-host
+│   │   ├── escape.py       # escape_unsafe()/request_target() — percent-escape do HTTrack (htslib.c escape_check_url); fonte única para o alvo no fio (fetcher) e as regras do robots.txt
+│   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, corpo curto = IncompleteRead retentado, alvo percent-encoded e Host IDNA como o HTTrack, robots com redirects same-host; same_host() — escopo de redirect (fonte única para robots, crawl e descoberta)
 │   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path>, index.html, .html por content-type (substitui extensão dinâmica .php/.cgi…, anexa às demais), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão, thread-safe; None se o caminho escapa de output_dir
 │   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA e referer) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
 │   │   ├── report.py       # RunReport (contagens por status, challenged, robots_blocked, out_of_scope, filtered, errors, partial) + format_report() — URLs já redigidas, caracteres de controle neutralizados via utils/redact.py
-│   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap)
+│   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap); regras percent-escapadas com escape.py, como o alvo no fio
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
 │   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build, diff e narrow_diff_to_paths
@@ -98,6 +100,7 @@ tests/
 ├── test_doctor.py          # Doctor: detecção, --install (download verificado, lock, idempotência), --check-system-libs
 ├── test_download.py        # wget mock, SPA detector, manifest roundtrip, UA/headers, run_wget_urls, bounded hydration
 ├── test_download_cascade.py # Cascade 4-layer: layer-1/2/3/4 wins, below-threshold fall-through, headless, post-wget-i SPA, observability
+├── test_download_httrack_profile.py # Perfil `--downloader httrack`: flags só-httrack com wget, caminhos fail-loud, precedência de config, wiring da descoberta
 ├── test_drift.py           # Drift: compare_readiness, renders markdown/text (literais), CLI (first run, fail-on-drift, --output)
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
@@ -163,6 +166,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_sync_precedence.py` | Antes de alterar `commands/sync.py` ou `lib/config_loader.py` (mecanismo CLI_EXPLICIT_PARAMS) |
 | `tests/test_download.py` | Antes de alterar qualquer coisa em `lib/wget_mirror.py`, `lib/spa_detector.py`, `lib/playwright_crawl.py` ou `commands/download.py` |
 | `tests/test_download_cascade.py` | Antes de alterar a orquestração de `commands/download.py` ou o threshold `MIN_URLS_TO_CONSIDER_DISCOVERED` |
+| `tests/test_download_httrack_profile.py` | Antes de alterar `commands/_httrack_profile.py` ou o despacho `--downloader` de `commands/download.py` (flags `[httrack]`, mensagens fail-loud, injeção do `Fetcher` na descoberta) |
 | `tests/test_llms_txt_parser.py` | Antes de alterar `lib/llms_txt_parser.py` ou o parser de `llms.txt` / `llms-full.txt` |
 | `tests/test_sitemap_parser.py` | Antes de alterar `lib/sitemap_parser.py`, recursão `sitemapindex` ou same-netloc guard |
 | `tests/test_url_filter.py` | Antes de alterar `lib/url_filter.py` (canonicalização de path-prefix ou semântica de `depth`) |
@@ -172,7 +176,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_dry_run.py` | Antes de alterar `utils/dry_run_report.py` ou a lógica de dry-run em `commands/pack.py` |
 | `tests/test_heading_extractor.py` | Antes de alterar `utils/heading_extractor.py` ou a lógica de context-header em `commands/pack.py` |
 | `tests/test_httrack_crawl.py` | Antes de alterar `lib/httrack/crawl.py` ou `lib/httrack/report.py` |
-| `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py` ou `lib/httrack/challenge.py` |
+| `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py`, `lib/httrack/challenge.py` ou `lib/httrack/escape.py` |
 | `tests/test_httrack_naming.py` | Antes de alterar `lib/httrack/naming.py` |
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |

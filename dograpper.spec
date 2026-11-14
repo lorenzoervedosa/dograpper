@@ -28,6 +28,9 @@ a = Analysis(
         + tiktoken_hiddenimports
         + [m for m in playwright_hiddenimports if m != "playwright.__main__"]
         + ["tiktoken_ext", "tiktoken_ext.openai_public"]
+        # httrack extra: policy.py imports these lazily, so PyInstaller cannot see them
+        + collect_submodules("brotli")
+        + collect_submodules("zstandard")
     ),
     hookspath=[],
     hooksconfig={},

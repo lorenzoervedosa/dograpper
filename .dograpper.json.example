@@ -1,5 +1,6 @@
 {
   "download": {
+    "downloader": "wget",
     "depth": 3,
     "include-extensions": "html,md",
     "manifest": ".dograpper-manifest.json"

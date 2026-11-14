@@ -30,7 +30,7 @@ def stub_download(monkeypatch):
             (ctx.obj or {}).get("CLI_EXPLICIT_PARAMS", ()))
 
     captured_download_ctx.clear()
-    monkeypatch.setattr("dograpper.commands.download.download", fake_download)
+    monkeypatch.setattr("dograpper.commands.sync._download_cmd", fake_download)
     return captured_download_ctx
 
 
@@ -158,7 +158,7 @@ def test_explicit_set_cleaned_up_when_download_raises(monkeypatch):
         raise _click.ClickException("download blew up")
 
     monkeypatch.setattr(
-        "dograpper.commands.download.download", failing_download)
+        "dograpper.commands.sync._download_cmd", failing_download)
     runner = CliRunner()
     with runner.isolated_filesystem():
         _make_docs()
@@ -232,3 +232,52 @@ def test_sync_for_queries_config_beats_defaults(stub_download):
             cli, ["sync", "https://docs.example.com", "-o", "docs"])
         assert result.exit_code == 0, result.output
         assert "Query packing:" in result.output
+
+
+def _sync_httrack(runner, args):
+    """Run sync against the real download command with the httrack run stubbed."""
+    from unittest.mock import patch
+    seen = {}
+
+    def fake_run(url, output, depth, delay, ext, headless, verbose, policy_kw,
+                 from_config, discover):
+        seen["policy_kw"] = policy_kw
+        seen["from_config"] = from_config
+        return 0, 0, []
+
+    with patch("dograpper.commands.download.run_httrack", fake_run):
+        result = runner.invoke(
+            cli, ["sync", "https://docs.example.com", "-o", "docs"] + args)
+    return result, seen
+
+
+def test_sync_httrack_precedence_cli_over_json():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        with open(".dograpper.json", "w", encoding="utf-8") as f:
+            json.dump({"download": {"downloader": "httrack",
+                                    "connections": 2, "timeout": 30}}, f)
+        result, seen = _sync_httrack(runner, ["--connections", "6"])
+        assert result.exit_code == 0, result.output
+        assert seen["policy_kw"]["connections"] == 6   # CLI beats JSON
+        assert seen["policy_kw"]["timeout"] == 30      # JSON beats default
+        assert "connections" not in seen["from_config"]
+        assert "timeout" in seen["from_config"]
+
+
+@pytest.mark.parametrize("config_delay, expect_label", [(None, False), (-5, True)])
+def test_sync_policy_error_label_follows_value_source(config_delay, expect_label):
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        args = ["--downloader", "httrack"]
+        if config_delay is None:
+            args += ["--delay", "-5"]
+        else:
+            with open(".dograpper.json", "w", encoding="utf-8") as f:
+                json.dump({"download": {"delay": config_delay}}, f)
+        result = runner.invoke(
+            cli, ["sync", "https://docs.example.com", "-o", "docs"] + args)
+        assert result.exit_code != 0
+        assert "--delay must not be negative" in result.output
+        assert ("(from .dograpper.json)" in result.output) is expect_label

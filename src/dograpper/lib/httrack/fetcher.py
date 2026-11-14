@@ -3,7 +3,6 @@
 import http.client
 import logging
 import math
-import re
 import threading
 import time
 import zlib
@@ -14,6 +13,7 @@ from urllib.parse import urljoin, urlsplit
 
 from ...utils.redact import redact_url
 from .challenge import is_challenge
+from .escape import request_target
 from .policy import ZSTD_MAX_WINDOW, HttrackPolicy, decoder_module, make_ssl_context, request_headers
 from .robots import NO_RULES, RobotsRules, parse_robots
 
@@ -145,15 +145,13 @@ def _origin(url: str) -> tuple[str, str]:
     return p.scheme, host + (f":{port}" if port is not None else "")
 
 
-# htslib.c escape_check_url: space, '"', controls, DEL and non-ASCII; '%' and reserved stay
-_UNSAFE = re.compile(r'[^\x21\x23-\x7e]')
-
-
-def request_target(parts) -> str:
-    """Request target escaped as HTTrack sends it: non-ASCII as UTF-8 bytes, lowercase hex,
-    existing %xx escapes untouched. UnicodeEncodeError (a ValueError) on lone surrogates."""
-    raw = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-    return _UNSAFE.sub(lambda m: "".join("%%%02x" % b for b in m.group().encode()), raw)
+def same_host(a: str, b: str) -> bool:
+    """Redirect scope: same hostname (urlsplit lowercases it); scheme and port may differ.
+    False when either URL is unparseable."""
+    try:
+        return urlsplit(a).hostname == urlsplit(b).hostname
+    except ValueError:
+        return False
 
 
 def _wire_host(parts) -> str:
@@ -323,13 +321,12 @@ class Fetcher:
                 return parse_robots(r.body.decode("utf-8", errors="replace"))
             if r.status not in REDIRECTS or not r.location:
                 return NO_RULES
-            nxt = urljoin(url, r.location)
             try:  # same host only; scheme or port may change (http -> https)
+                nxt = urljoin(url, r.location)  # ValueError on e.g. "http://[bad"
                 _origin(nxt)
-                same_host = urlsplit(nxt).hostname == urlsplit(origin).hostname
             except ValueError:
                 return NO_RULES
-            if not same_host:
+            if not same_host(origin, nxt):
                 return NO_RULES
             url = nxt
         return NO_RULES

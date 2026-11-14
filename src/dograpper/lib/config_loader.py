@@ -15,6 +15,15 @@ def is_explicit_source(source) -> bool:
     return bool(source) and source.name in ('COMMANDLINE', 'ENVIRONMENT')
 
 
+def is_explicit(ctx: click.Context, name: str) -> bool:
+    """True if ``name`` was set explicitly: on this command's own line/env, or
+    forwarded as explicit by a wrapper (sync) via ctx.obj['CLI_EXPLICIT_PARAMS']."""
+    if is_explicit_source(ctx.get_parameter_source(name)):
+        return True
+    ctx_obj = getattr(ctx, 'obj', None)
+    return isinstance(ctx_obj, dict) and name in ctx_obj.get('CLI_EXPLICIT_PARAMS', ())
+
+
 def load_config(config_path: str, command_name: str, cli_params: dict, ctx: click.Context) -> dict:
     """
     Load JSON config, merging it with defaults and CLI parameters.
@@ -34,20 +43,15 @@ def load_config(config_path: str, command_name: str, cli_params: dict, ctx: clic
 
     # Params forwarded by a wrapper command (sync) via ctx.invoke lose their
     # click parameter source; the wrapper records which of them were explicit
-    # on ITS command line in ctx.obj so precedence survives the boundary.
-    forwarded_explicit = set()
-    ctx_obj = getattr(ctx, 'obj', None)
-    if isinstance(ctx_obj, dict):
-        forwarded_explicit = set(ctx_obj.get('CLI_EXPLICIT_PARAMS', ()))
-
+    # on ITS command line in ctx.obj so precedence survives the boundary
+    # (see is_explicit).
     for param_name, default_value in cli_params.items():
         # Check source from click context
         # ctx.get_parameter_source returns ParameterSource enum
-        source = ctx.get_parameter_source(param_name)
         value_from_cli = ctx.params.get(param_name)
 
         # If it was explicitly set via command line or env var, it wins
-        if is_explicit_source(source) or param_name in forwarded_explicit:
+        if is_explicit(ctx, param_name):
             final_params[param_name] = value_from_cli
         else:
             # Otherwise, use JSON config if present

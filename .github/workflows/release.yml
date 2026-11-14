@@ -16,19 +16,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Python (shared-lib build for PyInstaller)
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.10"
-
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.10"
+
+      - name: Install uv-managed Python
+        # python-build-standalone ships a shared libpython (PyInstaller needs it)
+        # and bundles its own OpenSSL; the httrack profile's TLS handshake needs
+        # >= 3.5, which the "Assert OpenSSL >= 3.5" step below enforces.
+        shell: bash
+        run: |
+          uv python install 3.10
+          echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
+          echo "UV_PYTHON=3.10" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         shell: bash
-        run: uv sync --extra build --extra headless --extra dev
+        run: uv sync --extra build --extra headless --extra httrack --extra dev
+
+      - name: Assert OpenSSL >= 3.5
+        shell: bash
+        run: uv run python -c "import ssl,sys; v=ssl.OPENSSL_VERSION_INFO; print(ssl.OPENSSL_VERSION); sys.exit(0 if v >= (3,5) else 1)"
 
       - name: Reject unsubstituted release placeholders
         shell: bash
@@ -53,7 +60,7 @@ jobs:
 
       - name: Build binary with PyInstaller
         shell: bash
-        run: uv run --extra build --extra headless pyinstaller dograpper.spec --clean
+        run: uv run --extra build --extra headless --extra httrack pyinstaller dograpper.spec --clean
 
       - name: Rename binary and generate SHA256
         shell: bash

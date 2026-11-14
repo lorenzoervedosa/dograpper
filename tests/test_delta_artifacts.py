@@ -274,7 +274,7 @@ def test_sync_packs_on_the_first_run_and_no_ops_on_the_second(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)  # sync's default --manifest is cwd-relative
 
     def _fake_download(url, output, depth, headless, delay, include_extensions,
-                       manifest):
+                       manifest, **_httrack_flags):
         site = os.path.join(output, "site.com")
         os.makedirs(site, exist_ok=True)
         for name in ("a.html", "b.html"):

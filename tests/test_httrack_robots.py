@@ -1,6 +1,10 @@
 import logging
 import time
+from urllib.parse import urlsplit
 
+import pytest
+
+from dograpper.lib.httrack.escape import request_target
 from dograpper.lib.httrack.robots import NO_RULES, RobotsRules, parse_robots
 
 
@@ -123,3 +127,23 @@ def test_percent_escape_hex_case_insensitive():
     assert not r.allowed("/caf%C3%A9") and not r.allowed("/caf%c3%a9")
     assert not r.allowed("/x%2fy")
     assert r.allowed("/cafe")
+
+
+def test_truncated_sitemap_line_discarded():
+    long = "http://h/" + "a" * 1100 + ".xml"
+    r = parse_robots(f"Sitemap: {long}\nSitemap: http://h/ok.xml\n")
+    assert r.sitemaps == ("http://h/ok.xml",)
+
+
+@pytest.mark.parametrize("rule, url", [
+    ("/café", "http://h/café"),
+    ("/a b", "http://h/a%20b"),
+    ("/é*.pdf$", "http://h/é-guide.pdf"),  # wildcard and anchor survive the escaping
+    ("/x\"y", "http://h/x\"y"),
+])
+def test_raw_rule_matches_the_escaped_wire_target(rule, url):
+    """RFC 9309 2.2.2: a raw non-ASCII or space rule is compared percent-encoded,
+    exactly as the request target goes on the wire."""
+    r = parse_robots(f"User-agent: *\nDisallow: {rule}\n")
+    assert r.allowed(request_target(urlsplit(url))) is False
+    assert r.allowed("/other") is True
