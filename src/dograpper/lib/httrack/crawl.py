@@ -41,7 +41,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
-    report, lock, written = RunReport(), threading.Lock(), []
+    report, lock, written = RunReport(), threading.Lock(), set()
     seeds = list(dict.fromkeys(urls))
     if len(seeds) > policy.max_links:
         seeds, report.partial = seeds[:policy.max_links], True
@@ -116,7 +116,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         with lock:
             if path in written:  # same final URL reached from several seeds
                 return "written"
-            written.append(path)
+            written.add(path)
         try:
             atomic_write_bytes(path, res.body)
         except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
