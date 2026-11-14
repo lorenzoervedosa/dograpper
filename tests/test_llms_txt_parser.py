@@ -120,3 +120,12 @@ def test_fetch_param_used_when_given():
     with patch("dograpper.lib.llms_txt_parser.urlopen", side_effect=AssertionError("no urlopen")):
         assert fetch_llms_txt("https://example.com/docs/", fetch=fetch) == ["https://example.com/a"]
     assert calls == ["https://example.com/llms.txt"]
+
+
+def test_logged_urls_never_carry_raw_control_chars(caplog):
+    with caplog.at_level("DEBUG"):
+        urls = fetch_llms_txt("https://u:pw@si\x1bcte.io/",  # ESC c: terminal reset
+                              fetch=lambda u: b"https://example.com/a\n")
+    assert urls == ["https://example.com/a"]
+    assert "llms.txt" in caplog.text
+    assert "\x1b" not in caplog.text and "pw" not in caplog.text

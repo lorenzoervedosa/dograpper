@@ -269,3 +269,19 @@ def test_corrupt_gzip_sitemap_is_skipped(body):
     with patch("dograpper.lib.sitemap_parser.urlopen", return_value=_mock_response(200, body)):
         assert fetch_sitemap("https://site.io/") == []
     assert fetch_sitemap("https://site.io/", fetch=lambda u: body) == []
+
+
+def test_logged_urls_never_carry_raw_control_chars(caplog):
+    same = "https://site.io/\x1b[2Js.xml"
+    hints = ["http://evil.invalid/\x1b[7mINJECTED\x1b[0m.xml", same]
+
+    def fetch(url):
+        return _urlset(["https://site.io/a"]) if url == same else None
+
+    with caplog.at_level("DEBUG"):
+        assert fetch_sitemap("https://site.io/", fetch=fetch,
+                             extra_candidates=hints) == ["https://site.io/a"]
+    assert "rejecting cross-host candidate" in caplog.text
+    assert "urlset yielded" in caplog.text
+    assert "\x1b" not in caplog.text
+    assert "%1B[7mINJECTED" in caplog.text  # neutralized, still readable

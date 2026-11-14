@@ -43,14 +43,14 @@ def _fetch_url(url: str, timeout: int = TIMEOUT_SECONDS) -> bytes | None:
     try:
         with urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
-                logger.info(f"sitemap: {url} returned HTTP {resp.status}")
+                logger.info(f"sitemap: {redact_url(url)} returned HTTP {resp.status}")
                 return None
             data = resp.read()
     except HTTPError as exc:
-        logger.info(f"sitemap: {url} HTTPError {exc.code}")
+        logger.info(f"sitemap: {redact_url(url)} HTTPError {exc.code}")
         return None
     except (URLError, TimeoutError, OSError) as exc:
-        logger.info(f"sitemap: {url} fetch failed: {exc}")
+        logger.info(f"sitemap: {redact_url(url)} fetch failed: {exc}")
         return None
 
     return _gunzip(url, data)
@@ -61,7 +61,7 @@ def _gunzip(url: str, data: bytes) -> bytes | None:
         try:
             data = gzip.decompress(data)
         except (OSError, EOFError, zlib.error) as exc:  # bad header, truncated, corrupt
-            logger.warning(f"sitemap: gzip decompress failed for {url}: {exc}")
+            logger.warning(f"sitemap: gzip decompress failed for {redact_url(url)}: {exc}")
             return None
     return data
 
@@ -126,7 +126,7 @@ def _fetch_and_parse(
     visited.add(url)
 
     if depth > MAX_RECURSION_DEPTH:
-        logger.warning(f"sitemap: max recursion depth exceeded at {url}")
+        logger.warning(f"sitemap: max recursion depth exceeded at {redact_url(url)}")
         return []
 
     if fetch is None:
@@ -141,26 +141,26 @@ def _fetch_and_parse(
     try:
         root = ET.fromstring(data)
     except ET.ParseError as exc:
-        logger.warning(f"sitemap: XML parse error for {url}: {exc}")
+        logger.warning(f"sitemap: XML parse error for {redact_url(url)}: {exc}")
         return []
 
     tag = root.tag
     if tag == f"{SITEMAP_NS}urlset":
         urls = _parse_urlset(root)
         if not urls:
-            logger.info(f"sitemap: {url} is an empty urlset (0 <url> entries)")
+            logger.info(f"sitemap: {redact_url(url)} is an empty urlset (0 <url> entries)")
         else:
-            logger.info(f"sitemap: {url} urlset yielded {len(urls)} URLs")
+            logger.info(f"sitemap: {redact_url(url)} urlset yielded {len(urls)} URLs")
         return urls
 
     if tag == f"{SITEMAP_NS}sitemapindex":
         sub_sitemaps = _parse_sitemapindex(root)
-        logger.info(f"sitemap: {url} sitemapindex has {len(sub_sitemaps)} sub-sitemaps")
+        logger.info(f"sitemap: {redact_url(url)} sitemapindex has {len(sub_sitemaps)} sub-sitemaps")
         aggregated: List[str] = []
         for sub_url in sub_sitemaps:
             if not _sub_sitemap_in_scope(sub_url, base_netloc, base_prefix):
                 logger.debug(
-                    f"sitemap: skipping out-of-scope sub-sitemap {sub_url} "
+                    f"sitemap: skipping out-of-scope sub-sitemap {redact_url(sub_url)} "
                     f"(base_netloc={base_netloc}, base_prefix={base_prefix})"
                 )
                 continue
@@ -169,7 +169,7 @@ def _fetch_and_parse(
             )
         return aggregated
 
-    logger.warning(f"sitemap: {url} root tag {tag!r} not recognized (expected urlset/sitemapindex)")
+    logger.warning(f"sitemap: {redact_url(url)} root tag {tag!r} not recognized (expected urlset/sitemapindex)")
     return []
 
 
@@ -189,7 +189,7 @@ def fetch_sitemap(
     """
     parsed = urlparse(base_url)
     if not parsed.scheme or not parsed.netloc:
-        logger.warning(f"sitemap: base_url missing scheme/netloc: {base_url}")
+        logger.warning(f"sitemap: base_url missing scheme/netloc: {redact_url(base_url)}")
         return []
 
     root = f"{parsed.scheme}://{parsed.netloc}/"
@@ -206,9 +206,9 @@ def fetch_sitemap(
             logger.warning(f"sitemap: skipping unusable candidate {redact_url(candidate)}")
             continue
         if candidate_netloc != base_netloc:
-            logger.info(f"sitemap: rejecting cross-host candidate {candidate_url}")
+            logger.info(f"sitemap: rejecting cross-host candidate {redact_url(candidate_url)}")
             continue
-        logger.debug(f"sitemap: probing {candidate_url}")
+        logger.debug(f"sitemap: probing {redact_url(candidate_url)}")
         urls = _fetch_and_parse(
             candidate_url, base_netloc, base_prefix, depth=0, visited=visited, fetch=fetch
         )
@@ -219,6 +219,6 @@ def fetch_sitemap(
                 if u not in seen:
                     seen.add(u)
                     deduped.append(u)
-            logger.info(f"sitemap: final unique URL count {len(deduped)} from {candidate_url}")
+            logger.info(f"sitemap: final unique URL count {len(deduped)} from {redact_url(candidate_url)}")
             return deduped
     return []

@@ -17,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
+from ..utils.redact import redact_url
 from .wget_mirror import BROWSER_HEADERS, BROWSER_UA
 
 logger = logging.getLogger(__name__)
@@ -34,17 +35,17 @@ def _fetch_url(url: str, timeout: int = TIMEOUT_SECONDS) -> bytes | None:
     try:
         with urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
-                logger.info(f"llms.txt: {url} returned HTTP {resp.status}")
+                logger.info(f"llms.txt: {redact_url(url)} returned HTTP {resp.status}")
                 return None
             data = resp.read()
             if data[:2] == b"\x1f\x8b":
                 data = gzip.decompress(data)
             return data
     except HTTPError as exc:
-        logger.info(f"llms.txt: {url} HTTPError {exc.code}")
+        logger.info(f"llms.txt: {redact_url(url)} HTTPError {exc.code}")
         return None
     except (URLError, TimeoutError, OSError) as exc:
-        logger.info(f"llms.txt: {url} fetch failed: {exc}")
+        logger.info(f"llms.txt: {redact_url(url)} fetch failed: {exc}")
         return None
 
 
@@ -80,21 +81,21 @@ def fetch_llms_txt(
     """
     parsed = urlparse(base_url)
     if not parsed.scheme:
-        logger.warning(f"llms.txt: base_url missing scheme: {base_url}")
+        logger.warning(f"llms.txt: base_url missing scheme: {redact_url(base_url)}")
         return []
 
     root = f"{parsed.scheme}://{parsed.netloc}/"
 
     for candidate in LLMS_TXT_CANDIDATES:
         candidate_url = urljoin(root, candidate)
-        logger.debug(f"llms.txt: probing {candidate_url}")
+        logger.debug(f"llms.txt: probing {redact_url(candidate_url)}")
         body = (fetch or _fetch_url)(candidate_url)
         if body is None:
             continue
         text = body.decode("utf-8", errors="replace")
         urls = _parse_llms_txt(text, base_url)
         if urls:
-            logger.info(f"llms.txt: {candidate_url} yielded {len(urls)} URLs")
+            logger.info(f"llms.txt: {redact_url(candidate_url)} yielded {len(urls)} URLs")
             return urls
-        logger.info(f"llms.txt: {candidate_url} parsed 0 URLs (empty or malformed)")
+        logger.info(f"llms.txt: {redact_url(candidate_url)} parsed 0 URLs (empty or malformed)")
     return []

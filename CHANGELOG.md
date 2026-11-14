@@ -73,6 +73,12 @@ and fixes alone are a PATCH bump.
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
 
+### Security
+
+- URLs that `download` logs during llms.txt and sitemap discovery drop
+  credentials and escape control characters, so a hostile sitemap or
+  robots.txt cannot inject terminal escape sequences.
+
 ## [0.4.0] - 2026-08-15
 
 ### Added

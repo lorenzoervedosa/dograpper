@@ -17,7 +17,7 @@ from dograpper.commands.download import _discover_urls, download
 from dograpper.lib.httrack.crawl import HttrackResult
 from dograpper.lib.httrack.fetcher import FetchResult
 from dograpper.lib.httrack.report import RunReport
-from dograpper.lib.httrack.robots import NO_RULES, RobotsRules
+from dograpper.lib.httrack.robots import NO_RULES, RobotsRules, parse_robots
 from dograpper.lib.wget_mirror import WgetResult
 
 P = "dograpper.commands._httrack_profile"  # the httrack mode's module (patch target)
@@ -435,3 +435,16 @@ def test_forwarded_explicit_value_not_labeled_as_config():
         r = runner.invoke(wrapper2)
         assert "--delay must not be negative" in r.output
         assert "(from .dograpper.json)" in r.output
+
+
+def test_escape_sequence_in_robots_sitemap_line_never_reaches_output(tmp_path):
+    rules = parse_robots("User-agent: *\n"
+                         "Sitemap: http://evil.invalid/\x1b[7mINJECTED\x1b[0m.xml\n"
+                         "Sitemap: http://example.com/\x1b[2Jsm.xml\n")
+    f, calls = _fetcher_with(rules, status=404)
+    with patch(f"{P}.Fetcher", lambda policy: f), patch(f"{P}.warn_if_old_openssl"):
+        res = run(str(tmp_path / "o"), "--downloader", "httrack")
+    assert res.exit_code == 1  # nothing discovered
+    assert "rejecting cross-host candidate" in res.output  # the hint was logged...
+    assert "\x1b" not in res.output                         # ...neutralized
+    assert "http://example.com/\x1b[2Jsm.xml" in [u for u, _, _ in calls]
