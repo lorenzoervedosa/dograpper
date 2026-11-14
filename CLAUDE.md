@@ -56,6 +56,7 @@ src/dograpper/
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth
 │   └── wget_mirror.py      # run_wget_mirror() --mirror + run_wget_urls() -i; BROWSER_UA Chrome/120, --no-parent, --timestamping sempre
 └── utils/
+    ├── atomic_write.py     # atomic_write_bytes() — temp file in same dir + os.replace
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
     ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy)
@@ -71,6 +72,7 @@ src/dograpper/
     └── word_counter.py     # count_words() e count_words_file()
 tests/
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
+├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
 ├── test_claude_md_inventory.py # Guard estrutural do CLAUDE.md: árvore completa e referências de caminho válidas
@@ -169,6 +171,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_eval_command.py` | Antes de alterar `commands/eval.py` |
 | `tests/test_drift.py` | Antes de alterar `lib/readiness_diff.py` ou `commands/drift.py` (formatos markdown/text são literais testados) |
 | `tests/test_action_yml.py` | Antes de alterar `action.yml` (inputs/outputs/marcador exigidos) |
+| `tests/test_atomic_write.py` | Antes de alterar `utils/atomic_write.py` |
 | `tests/test_bundle_notebooklm.py` | Antes de alterar lógica de `--bundle` |
 | `tests/test_boundary_chunking.py` | Antes de alterar `_split_text_by_words` |
 | `CHANGELOG.md` | **Toda vez que a mudança for observável pelo usuário.** O cabeçalho do arquivo define a regra: o que ganha entrada, em qual seção, e quando (no mesmo PR, em `## [Unreleased]`) |
