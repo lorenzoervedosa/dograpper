@@ -145,6 +145,15 @@ def _origin(url: str) -> tuple[str, str]:
     return p.scheme, host + (f":{port}" if port is not None else "")
 
 
+def same_host(a: str, b: str) -> bool:
+    """Redirect scope: same hostname (urlsplit lowercases it); scheme and port may differ.
+    False when either URL is unparseable."""
+    try:
+        return urlsplit(a).hostname == urlsplit(b).hostname
+    except ValueError:
+        return False
+
+
 # htslib.c escape_check_url: space, '"', controls, DEL and non-ASCII; '%' and reserved stay
 _UNSAFE = re.compile(r'[^\x21\x23-\x7e]')
 
@@ -326,10 +335,9 @@ class Fetcher:
             nxt = urljoin(url, r.location)
             try:  # same host only; scheme or port may change (http -> https)
                 _origin(nxt)
-                same_host = urlsplit(nxt).hostname == urlsplit(origin).hostname
             except ValueError:
                 return NO_RULES
-            if not same_host:
+            if not same_host(origin, nxt):
                 return NO_RULES
             url = nxt
         return NO_RULES
