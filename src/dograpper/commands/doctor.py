@@ -24,7 +24,7 @@ from dograpper.utils.dep_resolver import (
 logger = logging.getLogger(__name__)
 
 BUSYBOX_WGET_URL = (
-    "https://github.com/lorenzobrasil/dograpper/releases/download/"
+    "https://github.com/lorenzoervedosa/dograpper/releases/download/"
     "v0.0.0-tooling/busybox-wget-x86_64"
 )
 # SHA256 of the v0.0.0-tooling busybox-wget-x86_64 asset.
