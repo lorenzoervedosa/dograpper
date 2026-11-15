@@ -1,70 +1,10 @@
 # dograpper
 
-      $$\                                                                                
-      $$ |                                                                               
- $$$$$$$ | $$$$$$\   $$$$$$\   $$$$$$\  $$$$$$\   $$$$$$\   $$$$$$\   $$$$$$\   $$$$$$\  
-$$  __$$ |$$  __$$\ $$  __$$\ $$  __$$\ \____$$\ $$  __$$\ $$  __$$\ $$  __$$\ $$  __$$\ 
-$$ /  $$ |$$ /  $$ |$$ /  $$ |$$ |  \__|$$$$$$$ |$$ /  $$ |$$ /  $$ |$$$$$$$$ |$$ |  \__|
-$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |     $$  __$$ |$$ |  $$ |$$ |  $$ |$$   ____|$$ |      
-\$$$$$$$ |\$$$$$$  |\$$$$$$$ |$$ |     \$$$$$$$ |$$$$$$$  |$$$$$$$  |\$$$$$$$\ $$ |      
- \_______| \______/  \____$$ |\__|      \_______|$$  ____/ $$  ____/  \_______|\__|      
-                    $$\   $$ |                   $$ |      $$ |                          
-                    \$$$$$$  |                   $$ |      $$ |                          
-                     \______/                    \__|      \__|
-
-                     
 **Context Engineering Pipeline for Deterministic LLM Ingestion**
 
 Turns HTML documentation into structured, deduplicated, scored, and versioned
 context — ready for ingestion into NotebookLM, RAG pipelines, Claude Projects,
 and fine-tuning.
-
----
-
-## Install (end users)
-
-> v1 supports Linux x86_64 only
-
-```bash
-# Install (Linux x86_64 only)
-curl -fsSL https://raw.githubusercontent.com/lorenzobrasil/dograpper/main/scripts/install.sh | sh
-dograpper doctor --install             # fetches wget + chromium
-dograpper doctor --check-system-libs   # diagnoses missing system libs
-dograpper --help
-```
-
-### Proxy / MITM
-
-```bash
-HTTPS_PROXY=http://proxy:3128 curl -fsSL https://raw.githubusercontent.com/lorenzobrasil/dograpper/main/scripts/install.sh | sh
-CURL_CA_BUNDLE=/path/to/cacert.pem curl -fsSL https://raw.githubusercontent.com/lorenzobrasil/dograpper/main/scripts/install.sh | sh
-```
-
-### Storage layout
-
-| Path | Contents |
-|------|---------|
-| `~/.dograpper/bin/` | static wget |
-| `~/.dograpper/playwright-browsers/` | chromium |
-
-Override the default root: `DOGRAPPER_HOME=/custom/path dograpper doctor --install`
-
-### Exit codes
-
-| Code | Origin | Meaning | Remediation |
-|------|--------|---------|-------------|
-| 0 | any | success | — |
-| 1 | doctor (default) | one or more deps missing | run `dograpper doctor --install` |
-| 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
-| 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
-| 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
-| 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
-| 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
-| 4 | doctor --install | concurrent install lock held | wait for other install, retry |
-| 10 | install.sh | SHA256 mismatch | retry install, report issue |
-| 20 | install.sh | unsupported architecture | — |
-| 21 | install.sh | unsupported OS | — |
-| 30 | install.sh | binary or checksum download failed | check network/proxy, retry |
 
 ---
 
@@ -95,18 +35,74 @@ URL → Mirror → Extract → Dedup → Score → Chunk → Export (MD/JSONL)
 
 ---
 
-## Installation (development)
+## Quickstart
+
+After [installing](#install):
+
+```bash
+# One-time setup: generate a config for your target (notebooklm / rag / claude-project)
+dograpper init
+
+# Full pipeline: download + pack optimized for NotebookLM
+dograpper download https://flask.palletsprojects.com/en/stable/ -o ./flask-docs
+dograpper pack ./flask-docs -o ./chunks --bundle notebooklm --context-header --score
+
+# Or in a single command:
+dograpper sync https://flask.palletsprojects.com/en/stable/ -o ./flask-docs
+
+# For RAG: JSONL export with cross-references
+dograpper pack ./flask-docs -o ./chunks --format jsonl --cross-refs --score
+
+# Change-gated re-pack: no-op if nothing changed, full repack if anything did
+dograpper pack ./flask-docs -o ./chunks --delta
+```
+
+---
+
+## Install
+
+### Release binary
+
+> Release binaries are Linux x86_64 only.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
+dograpper doctor --install             # fetches wget + chromium
+dograpper doctor --check-system-libs   # diagnoses missing system libs
+dograpper --help
+```
+
+`install.sh` failures exit with a dedicated code — see
+[Exit codes](#exit-codes).
+
+#### Proxy / MITM
+
+```bash
+HTTPS_PROXY=http://proxy:3128 curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
+CURL_CA_BUNDLE=/path/to/cacert.pem curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
+```
+
+#### Storage layout
+
+| Path | Contents |
+|------|---------|
+| `~/.dograpper/bin/` | static wget |
+| `~/.dograpper/playwright-browsers/` | chromium |
+
+Override the default root: `DOGRAPPER_HOME=/custom/path dograpper doctor --install`
+
+### From source
 
 Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/your-user/dograpper.git
+git clone https://github.com/lorenzoervedosa/dograpper.git
 cd dograpper
-uv sync
+uv sync --extra dev --extra headless --extra httrack   # same extras as CI
 uv run dograpper --help
 ```
 
-### System dependencies
+#### System dependencies
 
 The `download` subcommand uses `wget` by default:
 
@@ -126,7 +122,9 @@ uv sync --extra headless
 uv run playwright install chromium
 ```
 
-On Linux, Chromium requires native libraries. On Ubuntu 22.04+ / Debian 12+:
+On Linux, Chromium requires native libraries. `dograpper doctor
+--check-system-libs` lists the missing ones and prints the `apt install`
+command. On Ubuntu 24.04+ / Debian 13+:
 
 ```bash
 sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
@@ -134,29 +132,8 @@ sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
   libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 ```
 
-On Ubuntu ≤22.04 the package is called `libasound2` (without the `t64` suffix).
-
----
-
-## Quickstart
-
-```bash
-# One-time setup: generate a config for your target (notebooklm / rag / claude-project)
-dograpper init
-
-# Full pipeline: download + pack optimized for NotebookLM
-dograpper download https://flask.palletsprojects.com/en/stable/ -o ./flask-docs
-dograpper pack ./flask-docs -o ./chunks --bundle notebooklm --context-header --score
-
-# Or in a single command:
-dograpper sync https://flask.palletsprojects.com/en/stable/ -o ./flask-docs
-
-# For RAG: JSONL export with cross-references
-dograpper pack ./flask-docs -o ./chunks --format jsonl --cross-refs --score
-
-# Change-gated re-pack: no-op if nothing changed, full repack if anything did
-dograpper pack ./flask-docs -o ./chunks --delta
-```
+On Ubuntu 22.04 / Debian 12 and older the package is called `libasound2`
+(without the `t64` suffix).
 
 ---
 
@@ -210,17 +187,7 @@ dograpper doctor [options]
 Without flags, prints a status table (`WGET`/`CHROMIUM`, path, version) and
 exits 0 if both are present, 1 if either is missing.
 
-#### Exit codes
-
-| Code | Mode | Meaning |
-|---|---|---|
-| 0 | any | success |
-| 1 | default | one or more deps missing |
-| 1 | `--install` | download, SHA256 verification, or the chromium install step failed |
-| 1 | `--check-system-libs` | `ldd` not found on this system |
-| 2 | `--check-system-libs` | required system libraries missing |
-| 3 | `--check-system-libs` | chromium not installed |
-| 4 | `--install` | another `--install` holds the lock |
+Exit codes: see [Exit codes](#exit-codes).
 
 #### Examples
 
@@ -464,10 +431,10 @@ always preserved.
 #### Context header (`--context-header`)
 
 Injects structured metadata in the `dograpper-context-v1` format
-(JSON inside an HTML comment) at the top of each file within the chunk.
-Fields:
+(JSON inside an HTML comment) at the top of each file within the chunk:
 
-```json
+```html
+<!-- dograpper-context-v1
 {
   "source": "flask.palletsprojects.com/en/stable/quickstart/index.html",
   "context_breadcrumb": ["Quickstart", "Routing"],
@@ -478,6 +445,7 @@ Fields:
   "llm_readiness": {"score": 0.92, "grade": "A", "noise_ratio": 0.08},
   "schema_version": "v1"
 }
+-->
 ```
 
 Optional fields (`url`, `llm_readiness`) are omitted when not available
@@ -880,6 +848,26 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 
 ---
 
+## Exit codes
+
+| Code | Origin | Meaning | Remediation |
+|------|--------|---------|-------------|
+| 0 | any | success | — |
+| 1 | doctor (default) | one or more deps missing | run `dograpper doctor --install` |
+| 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
+| 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
+| 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
+| 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
+| 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
+| 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
+| 4 | doctor --install | concurrent install lock held | wait for other install, retry |
+| 10 | install.sh | SHA256 mismatch | retry install, report issue |
+| 20 | install.sh | unsupported architecture | — |
+| 21 | install.sh | unsupported OS | — |
+| 30 | install.sh | binary or checksum download failed | check network/proxy, retry |
+
+---
+
 ## GitHub Action
 
 dograpper ships a composite GitHub Action (`action.yml` at the repo
@@ -927,7 +915,7 @@ jobs:
 
       - name: Refresh context and report drift
         id: freshness
-        uses: your-user/dograpper@v1 # pin a tag (or a commit SHA), not a branch
+        uses: lorenzoervedosa/dograpper@v0.4.0 # pin a release tag (or a commit SHA), not a branch
         with:
           url: https://docs.example.com
           input-dir: ./docs
@@ -960,27 +948,6 @@ Inputs:
 Outputs: `drift` (`true`/`false`) and `report-path` (the markdown
 report). The PR comment is upserted by matching the
 `<!-- dograpper-drift -->` marker, so re-runs edit the same comment.
-
----
-
-## Schema: `dograpper-context-v1`
-
-Each chunk includes a structured and versioned JSON header (when
-`--context-header` is active):
-
-```html
-<!-- dograpper-context-v1
-{
-  "source": "flask.palletsprojects.com/en/stable/quickstart/index.html",
-  "context_breadcrumb": ["Quickstart", "Routing"],
-  "word_count": 4820,
-  "llm_readiness": {"score": 0.92, "grade": "A", "noise_ratio": 0.08},
-  "schema_version": "v1"
-}
--->
-```
-
-Full spec: [docs/schema-v1.md](docs/schema-v1.md)
 
 ---
 
@@ -1111,7 +1078,7 @@ Warnings appear when:
 The site is a client-rendered SPA without `llms.txt` or an accessible
 `sitemap.xml`. The anti-shell heuristic detects this and falls back
 to Playwright automatically — if it doesn't, make sure `playwright` is
-installed along with its system libraries (see [Installation](#installation-development)).
+installed along with its system libraries (see [System dependencies](#system-dependencies)).
 
 Expected log with the cascade working:
 
@@ -1123,12 +1090,13 @@ INFO: SPA detected, falling back to playwright
 
 ### `libnspr4.so: cannot open shared object file`
 
-Missing system libs for Chromium. Run the apt install from the
-[System dependencies](#system-dependencies) section.
+Missing system libs for Chromium. Run `dograpper doctor
+--check-system-libs` for the exact `apt install` command, or see
+[System dependencies](#system-dependencies).
 
 ### Cross-host sub-sitemaps being rejected
 
-Since cascade v1.1, sub-sitemaps on different hosts are accepted when
+Sub-sitemaps on different hosts are accepted when
 the `path-prefix` identifies the project (same-netloc **OR**
 path-prefix). Covers Mintlify (sub-sitemap at
 `www.mintlify.com/<proj>/sitemap.xml`). If it still rejects them, run
@@ -1165,78 +1133,11 @@ downloaded. Re-running (incremental) usually closes the gaps.
 
 ---
 
-## Architecture
-
-```
-src/dograpper/
-├── cli.py                    # Entry point, global flags (--verbose/--quiet/--config/--version)
-├── commands/
-│   ├── _httrack_profile.py    # `download --downloader httrack`: options, discovery fetch, seeded run
-│   ├── doctor.py              # Detect/install wget + chromium; --check-system-libs
-│   ├── download.py            # Options + --downloader dispatch; 4-layer cascade (wget)
-│   ├── drift.py                # Diff two llm-readiness.json snapshots
-│   ├── eval.py                  # Golden Q&A hit-rate@k / MRR over a JSONL pack
-│   ├── explain.py                # Read-only preview of what an LLM receives per chunk
-│   ├── init.py                    # .dograpper.json wizard, per-target presets
-│   ├── pack.py
-│   ├── serve.py                    # Local MCP server (stdio) over a packed JSONL
-│   └── sync.py                # download + pack delta
-├── lib/
-│   ├── chunker.py            # size/semantic strategies, boundary-aware
-│   ├── config_loader.py
-│   ├── eval_harness.py        # hit-rate@k / MRR computation
-│   ├── golden_qa.py            # Deterministic Q&A generation from heading breadcrumbs
-│   ├── httrack/                # httrack profile engine (stdlib; br/zstd via the extra)
-│   │   ├── challenge.py        # Cloudflare challenge detection
-│   │   ├── crawl.py            # Seeded-list fetch, writes only clean 2xx bodies
-│   │   ├── escape.py           # HTTrack percent-escaping (wire target + robots rules)
-│   │   ├── fetcher.py          # Paced, retrying HTTP client with HTTrack's identity
-│   │   ├── naming.py           # HTTrack-style local file names
-│   │   ├── policy.py           # Limits/clamps, request headers, TLS context
-│   │   ├── report.py           # End-of-run report
-│   │   └── robots.py           # robots.txt parser (RFC 9309 + HTTrack rules)
-│   ├── ignore_parser.py
-│   ├── llms_txt_parser.py    # Layer 1 (stdlib-only)
-│   ├── manifest.py           # Manifest + diff_manifests()
-│   ├── mcp_server.py           # JSON-RPC 2.0 protocol for `serve`
-│   ├── pack_artifacts.py       # Sidecar writers (cross-refs, delta, readiness, tokens)
-│   ├── pack_reader.py           # Loads JSONL chunks back for eval/explain/serve
-│   ├── pack_scoring.py          # LLM Readiness Score orchestration for `pack --score`
-│   ├── playwright_crawl.py   # Layer 4 (bounded hydration + seed_urls)
-│   ├── query_packer.py          # BM25 file ordering for `pack --for-queries`
-│   ├── readiness_diff.py        # Snapshot comparison for `drift`
-│   ├── retrieval.py             # Deterministic BM25 index (eval, serve)
-│   ├── sitemap_parser.py     # Layer 2 (recursive sitemapindex, gzip)
-│   ├── spa_detector.py       # Small-sample branch (N<5)
-│   ├── url_filter.py         # Same-netloc + path-prefix + depth
-│   └── wget_mirror.py        # Layer 3 (run_wget_mirror + run_wget_urls)
-└── utils/
-    ├── atomic_write.py         # Temp file + os.replace writes
-    ├── chunk_inspector.py      # Read-only chunk parsing for `explain`
-    ├── content_extractor.py  # Smart extraction (strips boilerplate)
-    ├── dedup.py              # Cross-file dedup (exact + fuzzy)
-    ├── dep_resolver.py         # Resolves wget/chromium under DOGRAPPER_HOME
-    ├── dry_run_report.py
-    ├── heading_extractor.py  # Headings + format_context_header (v1)
-    ├── html_stripper.py
-    ├── link_extractor.py     # Cross-refs between chunks
-    ├── logger.py
-    ├── readiness_report.py     # HTML/terminal renderer for `pack --report`
-    ├── redact.py               # Log-safe URLs (no credentials, escaped controls)
-    ├── scorer.py             # LLM Readiness Score
-    ├── token_counter.py
-    └── word_counter.py
-```
-
----
-
 ## Development
 
-```bash
-# Install in editable mode with dev deps (headless: tests/test_doctor.py;
-# httrack: br/zstd decoding tests, skipped without it). Same as CI.
-uv sync --extra dev --extra headless --extra httrack
+After [installing from source](#from-source):
 
+```bash
 # Run tests
 uv run pytest tests/ -v
 
