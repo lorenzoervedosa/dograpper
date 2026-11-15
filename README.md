@@ -14,7 +14,7 @@ and fine-tuning.
 
 ```bash
 # Install (Linux x86_64 only)
-curl -fsSL https://raw.githubusercontent.com/lorenzobrasil/dograpper/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
 dograpper doctor --install             # fetches wget + chromium
 dograpper doctor --check-system-libs   # diagnoses missing system libs
 dograpper --help
@@ -23,8 +23,8 @@ dograpper --help
 ### Proxy / MITM
 
 ```bash
-HTTPS_PROXY=http://proxy:3128 curl -fsSL https://raw.githubusercontent.com/lorenzobrasil/dograpper/main/scripts/install.sh | sh
-CURL_CA_BUNDLE=/path/to/cacert.pem curl -fsSL https://raw.githubusercontent.com/lorenzobrasil/dograpper/main/scripts/install.sh | sh
+HTTPS_PROXY=http://proxy:3128 curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
+CURL_CA_BUNDLE=/path/to/cacert.pem curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
 ```
 
 ### Storage layout
@@ -87,7 +87,7 @@ URL → Mirror → Extract → Dedup → Score → Chunk → Export (MD/JSONL)
 Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/your-user/dograpper.git
+git clone https://github.com/lorenzoervedosa/dograpper.git
 cd dograpper
 uv sync
 uv run dograpper --help
@@ -914,7 +914,7 @@ jobs:
 
       - name: Refresh context and report drift
         id: freshness
-        uses: your-user/dograpper@v1 # pin a tag (or a commit SHA), not a branch
+        uses: lorenzoervedosa/dograpper@v0.4.0 # pin a release tag (or a commit SHA), not a branch
         with:
           url: https://docs.example.com
           input-dir: ./docs
