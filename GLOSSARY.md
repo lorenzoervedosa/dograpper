@@ -64,3 +64,13 @@ _Avoid_: type record, class record
 A record for one member, holding its qualified name, signature and
 documentation.
 _Avoid_: method record, symbol record
+
+## Use
+
+**Target**:
+The consumer a pack is shaped for: NotebookLM, a RAG pipeline, a Claude Project
+or Claude Code. A Claude Project and Claude Code are different targets: a Claude
+Project receives uploaded chunks whole, while Claude Code reads files from disk
+on demand and finds them by file name and exact-text search.
+_Avoid_: bundle (the `--bundle` presets predate this term; each one serves a
+target), destination, platform, consumer
