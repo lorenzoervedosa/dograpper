@@ -10,10 +10,9 @@ and fine-tuning.
 
 ## Install (end users)
 
-> v1 supports Linux x86_64 only
+> Release binaries are Linux x86_64 only.
 
 ```bash
-# Install (Linux x86_64 only)
 curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
 dograpper doctor --install             # fetches wget + chromium
 dograpper doctor --check-system-libs   # diagnoses missing system libs
@@ -1115,7 +1114,7 @@ Missing system libs for Chromium. Run the apt install from the
 
 ### Cross-host sub-sitemaps being rejected
 
-Since cascade v1.1, sub-sitemaps on different hosts are accepted when
+Sub-sitemaps on different hosts are accepted when
 the `path-prefix` identifies the project (same-netloc **OR**
 path-prefix). Covers Mintlify (sub-sitemap at
 `www.mintlify.com/<proj>/sitemap.xml`). If it still rejects them, run
