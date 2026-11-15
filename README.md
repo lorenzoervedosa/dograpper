@@ -88,7 +88,7 @@ Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/lorenzoervedosa/dograpper.git
 cd dograpper
-uv sync
+uv sync --extra dev --extra headless --extra httrack   # same extras as CI
 uv run dograpper --help
 ```
 
@@ -112,7 +112,9 @@ uv sync --extra headless
 uv run playwright install chromium
 ```
 
-On Linux, Chromium requires native libraries. On Ubuntu 22.04+ / Debian 12+:
+On Linux, Chromium requires native libraries. `dograpper doctor
+--check-system-libs` lists the missing ones and prints the `apt install`
+command. On Ubuntu 24.04+ / Debian 13+:
 
 ```bash
 sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
@@ -120,7 +122,8 @@ sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
   libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 ```
 
-On Ubuntu ≤22.04 the package is called `libasound2` (without the `t64` suffix).
+On Ubuntu 22.04 / Debian 12 and older the package is called `libasound2`
+(without the `t64` suffix).
 
 ---
 
@@ -1109,8 +1112,9 @@ INFO: SPA detected, falling back to playwright
 
 ### `libnspr4.so: cannot open shared object file`
 
-Missing system libs for Chromium. Run the apt install from the
-[System dependencies](#system-dependencies) section.
+Missing system libs for Chromium. Run `dograpper doctor
+--check-system-libs` for the exact `apt install` command, or see
+[System dependencies](#system-dependencies).
 
 ### Cross-host sub-sitemaps being rejected
 
