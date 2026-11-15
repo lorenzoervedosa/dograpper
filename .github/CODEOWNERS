@@ -2,9 +2,9 @@
 # Cada linha: <padrão> <revisor(es)>. O último match vence.
 
 # Padrão global
-*                       @lorenzobrasil
+*                       @lorenzoervedosa
 
 # Pipeline de release e empacotamento
-/.github/               @lorenzobrasil
-/dograpper.spec         @lorenzobrasil
-/scripts/               @lorenzobrasil
+/.github/               @lorenzoervedosa
+/dograpper.spec         @lorenzoervedosa
+/scripts/               @lorenzoervedosa

@@ -3,7 +3,7 @@ name: Bug report
 about: Reportar um comportamento incorreto do dograpper
 title: "bug: "
 labels: bug
-assignees: lorenzobrasil
+assignees: lorenzoervedosa
 ---
 
 ## Descrição

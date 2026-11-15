@@ -13,7 +13,7 @@ recebem patches retroativos.
 Reporte de forma privada por uma das vias:
 
 1. **GitHub Security Advisories** — aba *Security → Report a vulnerability*
-   em https://github.com/lorenzobrasil/dograpper/security/advisories/new
+   em https://github.com/lorenzoervedosa/dograpper/security/advisories/new
 2. **E-mail** — tech@okiar.com.br
 
 Inclua, se possível: versão afetada, passos de reprodução, impacto e
