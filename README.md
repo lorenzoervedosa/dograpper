@@ -359,7 +359,8 @@ Precedence is unchanged: defaults < JSON < explicit CLI.
   behavior (robots.txt longest-match, retries, pacing). Layers 1 and 2
   discover URLs through the same identity, following up to 5 same-host
   redirects with a robots.txt check before every hop; the seeded URLs are
-  then fetched by the new engine. When neither layer finds a list, the
+  then fetched by the new engine, which rewrites the links between the saved
+  pages as the crawl below does. When neither layer finds a list, the
   engine crawls the site from the start URL instead of `wget --mirror`
   (below).
 

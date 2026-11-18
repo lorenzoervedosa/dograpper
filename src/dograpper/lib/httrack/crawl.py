@@ -15,7 +15,7 @@ from dograpper.utils.redact import redact_url
 
 from .escape import request_target
 from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
-from .links import rewrite_links
+from .links import rewrite_links, url_key
 from .naming import NameRegistry
 from .policy import NAVIGATION, FetchMeta, HttrackPolicy
 from .report import RunReport
@@ -126,7 +126,9 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                    include_extensions: str, *, fetcher: Fetcher | None = None,
                    filters: UrlFilters | None = None) -> HttrackResult:
     """Fetch `urls` (already scoped and filtered); a redirect target goes through the
-    same-host check and `filters` (refusals land in `filters.excluded`) before its GET."""
+    same-host check and `filters` (refusals land in `filters.excluded`) before its GET.
+    The links of the saved HTML pages are then rewritten (relink), as wget -i
+    --convert-links does."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
@@ -134,6 +136,8 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     # written file -> (redirected?, seed): of several seeds reaching one file, the one
     # that needed no redirect, else the smallest, whichever thread wrote first
     requested: dict[str, tuple[bool, str]] = {}
+    pages: dict[str, str] = {}  # written HTML file -> URL it came from, for relink
+    reached: list[tuple[str, str]] = []  # (seed or final URL, file it reached)
     seeds = list(dict.fromkeys(urls))
     if len(seeds) > policy.max_links:
         seeds, report.partial = seeds[:policy.max_links], True
@@ -166,6 +170,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         with lock:
             if path in written:  # same final URL reached from several seeds
                 requested[path] = min(requested[path], key)
+                reached.append((seed, path))
                 return "written"
             written.add(path)
             requested[path] = key
@@ -179,6 +184,9 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
             return "refused"
         with lock:
             size[0] += len(res.body)
+            reached.extend(((url, path), (seed, path)))
+            if (res.headers.get("content-type") or "").split(";")[0].strip().lower() == "text/html":
+                pages[path] = url
         return "written"
 
     def run(seed: str) -> None:
@@ -193,6 +201,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         list(pool.map(run, seeds))  # list() re-raises any worker exception
     progress.finish()
 
+    relink(pages, {url_key(u): p for u, p in reached if p in written}, report)
     report.challenged.sort()
     report.robots_blocked.sort()
     report.out_of_scope.sort()

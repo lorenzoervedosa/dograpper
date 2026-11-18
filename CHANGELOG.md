@@ -66,9 +66,9 @@ and fixes alone are a PATCH bump.
   the start host and directory, `--filter` and `--depth` link hops as scope;
   meta robots `nofollow` honored and `/cdn-cgi/` never fetched; redirect
   targets queued as links; a deterministic output whatever the request order;
-  `[progress] httrack crawl:` lines. Links between saved pages are rewritten
-  to relative paths (HTTrack `-K0`), so the mirror browses offline and `pack
-  --cross-refs` resolves them. The Playwright fallback fails loud under this
+  `[progress] httrack crawl:` lines. On both paths, links between saved pages
+  are rewritten to relative paths (HTTrack `-K0`), so the mirror browses
+  offline and `pack --cross-refs` resolves them. The Playwright fallback fails loud under this
   profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
