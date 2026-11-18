@@ -76,6 +76,22 @@ def test_collision_suffix_and_stability(tmp_path):
     assert reg.assign("http://e.com/a./b", None) != a
 
 
+def test_names_differing_only_in_case_collide(tmp_path):
+    # htshash.c key_sav_equals compares save names with strcasecmp: on NTFS or default APFS
+    # the later URL would otherwise overwrite the earlier file
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "h.test")
+    assert reg.assign("https://h.test/Page", "text/html") == os.path.join(d, "Page.html")
+    assert reg.assign("https://h.test/page", "text/html") == os.path.join(d, "page-2.html")
+    assert reg.assign("https://h.test/PAGE", "text/html") == os.path.join(d, "PAGE-3.html")
+    assert reg.assign("https://h.test/page", "text/html") == os.path.join(d, "page-2.html")
+    assert reg.assign("https://h.test/Dir/x", None) == os.path.join(d, "Dir", "x")
+    assert reg.assign("https://h.test/dir/X", None) == os.path.join(d, "dir", "X-2")
+    # non-ASCII letters fold too, where HTTrack's ASCII strcasecmp would miss them (deviation)
+    assert reg.assign("https://h.test/%C3%89t%C3%A9", None) == os.path.join(d, "Été")
+    assert reg.assign("https://h.test/%C3%A9t%C3%A9", None) == os.path.join(d, "été-2")
+
+
 def test_traversal_rejected(tmp_path):
     reg, root = _reg(tmp_path)
     for u in ("http://e.com/../x", "http://e.com/%2e%2e/x", "http://e.com/a\\..\\..\\b",

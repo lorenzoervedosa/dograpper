@@ -41,14 +41,16 @@ class NameRegistry:
             path = self._compute(parts, content_type)
             if path is not None:
                 path = self._dedupe(path)
-                self._used.add(path)
+                self._used.add(path.casefold())
             self._by_url[key] = path
             return path
 
     def _dedupe(self, path: str) -> str:
+        # Case-insensitive, as htshash.c key_sav_equals (strcasecmp): on NTFS or APFS a
+        # case-only difference is the same file. casefold also folds non-ASCII (deviation).
         base, ext = os.path.splitext(path)
         n, cand = 1, path
-        while cand in self._used:
+        while cand.casefold() in self._used:
             n += 1
             cand = f"{base}-{n}{ext}"
         return cand
