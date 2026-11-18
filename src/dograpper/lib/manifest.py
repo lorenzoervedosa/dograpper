@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from ..utils.redact import recordable_url
+from .ignore_parser import DOGRAPPER_STATE_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,8 @@ def save_manifest(manifest: Manifest, path: str) -> None:
 
 def build_manifest(base_url: str, output_dir: str,
                    fetched: Optional[Dict[str, str]] = None,
-                   previous: Optional[Manifest] = None) -> Manifest:
+                   previous: Optional[Manifest] = None,
+                   manifest_path: Optional[str] = None) -> Manifest:
     """Build a manifest based on the output directory contents.
 
     Keys are URL-relative paths (the path component the file would have on the
@@ -101,6 +103,8 @@ def build_manifest(base_url: str, output_dir: str,
     ``--adjust-extension``'s ``.html``, ``index.html`` for a directory URL, a
     dropped or decoded query and httrack's renaming all make one saved name
     stand for several URLs.
+
+    The manifest at ``manifest_path`` and dograpper's state files are left out.
     """
     files = {}
     last_run = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -111,10 +115,13 @@ def build_manifest(base_url: str, output_dir: str,
     urls = {os.path.relpath(os.path.realpath(path), real_output).replace(os.sep, '/'):
             recordable_url(url) for path, url in (fetched or {}).items()}
     recorded = {(e.local_path or k): e.url for k, e in previous.files.items()} if previous else {}
+    own = os.path.realpath(manifest_path) if manifest_path else None
 
     for root, _, filenames in os.walk(output_dir):
         for f in filenames:
             full_path = os.path.join(root, f)
+            if f.lower() in DOGRAPPER_STATE_NAMES or os.path.realpath(full_path) == own:
+                continue
             fs_rel = os.path.relpath(full_path, output_dir).replace(os.sep, '/')
             size = os.path.getsize(full_path)
 

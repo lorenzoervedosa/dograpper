@@ -533,6 +533,20 @@ def test_build_manifest_matches_reported_paths_however_spelled(tmp_path, monkeyp
         "h.example/a.html": "https://h.example/a", "h.example/b.html": "https://h.example/b"}
 
 
+def test_build_manifest_never_lists_itself_or_dograpper_state_files(tmp_path):
+    """#95: a manifest kept in the output directory it describes."""
+    _make_test_dir(str(tmp_path), {
+        "h.example/a.html": "a",
+        ".dograpper-manifest.json": "{}",
+        "chunks/pack_state.json": "{}",
+        "chunks/delta_manifest.json": "{}",
+        "state/custom.json": "{}",
+    })
+    manifest = build_manifest("https://h.example/", str(tmp_path),
+                              manifest_path=str(tmp_path / "state" / "custom.json"))
+    assert [e.local_path for e in manifest.files.values()] == ["h.example/a.html"]
+
+
 def test_context_header_uses_recorded_urls_and_skips_missing_ones(tmp_path):
     """pack step 7c: correct URLs reach the chunks; a missing one is left out."""
     input_dir = str(tmp_path / "mirror")

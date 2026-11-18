@@ -28,13 +28,14 @@ def is_binary_path(path: str) -> bool:
     return ext.lower() in BINARY_EXTENSIONS
 
 
+# dograpper's own state files: never mirror content in a manifest either (#95).
+DOGRAPPER_STATE_NAMES = frozenset({
+    ".dograpper-manifest.json", "delta_manifest.json", "pack_state.json",
+})
 # Files that are never documentation, whatever extension filter is active:
 # crawler leftovers and dograpper's own state/sidecars (they can land inside
 # the input directory, see issue #91).
-NON_DOC_NAMES = frozenset({
-    "robots.txt", ".dograpper-manifest.json", "delta_manifest.json",
-    "pack_state.json",
-})
+NON_DOC_NAMES = DOGRAPPER_STATE_NAMES | {"robots.txt"}
 
 
 def normalize_extensions(value) -> str:

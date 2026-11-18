@@ -382,7 +382,8 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
             report_lines, bool(ctx.obj.get('VERBOSE')), filters,
         )
 
-    new_manifest = build_manifest(url, output, fetched, previous=manifest_data)
+    new_manifest = build_manifest(url, output, fetched, previous=manifest_data,
+                                  manifest_path=manifest_path)
     final_manifest = merge_manifests(manifest_data, new_manifest)
     save_manifest(final_manifest, manifest_path)
 

@@ -133,6 +133,9 @@ and fixes alone are a PATCH bump.
   as `index.php?title=...` get their real URL. A file no run recorded gets
   `"url": null`, and `pack --context-header` leaves `url` out for such
   sources. ([#94])
+- `download` no longer lists its own manifest, `delta_manifest.json` or
+  `pack_state.json` among the mirror's files when they sit inside `-o`, and
+  `pack --delta` leaves them out of `pack_state.json`. ([#95])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
@@ -283,3 +286,4 @@ and fixes alone are a PATCH bump.
 [#85]: https://github.com/lorenzoervedosa/dograpper/issues/85
 [#93]: https://github.com/lorenzoervedosa/dograpper/issues/93
 [#86]: https://github.com/lorenzoervedosa/dograpper/issues/86
+[#95]: https://github.com/lorenzoervedosa/dograpper/issues/95

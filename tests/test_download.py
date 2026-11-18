@@ -827,6 +827,26 @@ def test_download_incremental_second_run():
                 args2 = mock_wget.call_args[1]
                 assert args2.get('incremental', False) is True
 
+def test_download_manifest_inside_output_does_not_list_itself():
+    from dograpper.lib.wget_mirror import WgetResult
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        paths = [os.path.join(d, "h.example", f"p{i}.html") for i in range(2)]
+        os.makedirs(os.path.dirname(paths[0]))
+        for p in paths:
+            with open(p, "w") as f:
+                f.write("1")
+        manifest_path = os.path.join(d, "state.json")
+        with patch('dograpper.commands.download.run_wget_mirror',
+                   return_value=WgetResult(True, d, paths, [], 0)), \
+                patch('dograpper.commands.download.is_spa', return_value=False):
+            for _ in range(2):
+                res = runner.invoke(download, ['http://h.example', '-o', d,
+                                               '--manifest', manifest_path])
+                assert res.exit_code == 0, res.output
+        assert sorted(e.local_path for e in load_manifest(manifest_path).files.values()) == [
+            "h.example/p0.html", "h.example/p1.html"]
+
 def test_download_wget_not_installed():
     runner = CliRunner()
     from dograpper.lib.wget_mirror import run_wget_mirror
