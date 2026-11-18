@@ -34,6 +34,7 @@ class DryRunData:
     dedup_stats: object = None  # Optional DedupStats
     readiness_scores: list = field(default_factory=list)
     show_score: bool = False
+    layout: str = "chunk"  # "page": one file per page, no word or chunk cap (ADR-0010)
 
 
 def _effective_words(f: FileStats) -> int:
@@ -93,11 +94,16 @@ def generate_report(data: DryRunData) -> str:
 
     # --- Section 2: Chunk projection ---
     lines.append("")
-    lines.append("  Strategy:              " + data.strategy)
-    lines.append("  Limit per chunk:       " + f"{data.max_words_per_chunk:,} words")
-    lines.append("  Projected chunks:      " + f"{data.projected_chunks} / {data.max_chunks} (max)")
-    if data.oversize_files > 0:
-        lines.append(f"  \u26a0 Oversize files:      {data.oversize_files} (exceed the limit on their own)")
+    unit = data.layout
+    if data.layout == "page":
+        lines.append("  Layout:                page")
+        lines.append("  Projected pages:       " + str(data.projected_chunks))
+    else:
+        lines.append("  Strategy:              " + data.strategy)
+        lines.append("  Limit per chunk:       " + f"{data.max_words_per_chunk:,} words")
+        lines.append("  Projected chunks:      " + f"{data.projected_chunks} / {data.max_chunks} (max)")
+        if data.oversize_files > 0:
+            lines.append(f"  \u26a0 Oversize files:      {data.oversize_files} (exceed the limit on their own)")
 
     # --- Section 3: Top 10 files ---
     lines.append("")
@@ -129,7 +135,7 @@ def generate_report(data: DryRunData) -> str:
         total_effective = sum(_effective_words(f) for f in data.file_stats)
         avg_words = total_effective // data.projected_chunks
         lines.append("")
-        lines.append(f"  Projected average:     ~{avg_words:,} words/chunk")
+        lines.append(f"  Projected average:     ~{avg_words:,} words/{unit}")
 
     # --- Section 5: LLM Readiness (opt-in) ---
     if data.show_score and data.readiness_scores:

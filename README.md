@@ -378,6 +378,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
 | `--format` | — | `md` | Output format: `txt`, `md`, `jsonl`, `xml` (deprecated — errors, use `md`) |
+| `--layout` | — | `chunk` | `chunk`: numbered chunk files. `page`: one file per page under `pages/` plus `INDEX.md` (see [Page layout](#page-layout---layout-page)) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
 | `--token-encoding` | — | `cl100k` | Tokenizer encoding: `cl100k`, `o200k`, `p50k` |
@@ -405,7 +406,8 @@ list files → apply .docsignore → skip bot-challenge pages
            → --score? compute readiness
            → --cross-refs? resolve links
            → --format (md|txt|jsonl) + --context-header? inject → write
-             (--cross-refs markers go into each page's content)
+             (--cross-refs markers go into each page's content;
+              --layout page: one file per page under pages/ + INDEX.md)
            → --bundle? generate guide
 ```
 
@@ -665,6 +667,73 @@ policies — the CLI errors instead of silently overriding). Composes with
 `--delta`, `--dedup`, `--score`, `--context-header`, `--format jsonl`
 and `--bundle`.
 
+#### Page layout (`--layout page`)
+
+For readers that open files by name and `grep` them, such as Claude Code,
+`--layout page` writes one file per page instead of numbered chunks
+([ADR-0010](docs/adr/0010-per-page-pack-layout.md)):
+
+```
+out/
+├── INDEX.md
+└── pages/
+    ├── ActionGroup.md
+    ├── Help_Style_guide.md      # from Help:Style_guide.html
+    ├── Modding.md
+    └── Modding/
+        └── vi.md
+```
+
+- **Names.** A page keeps its path relative to `INPUT_DIR`, with the source
+  extension replaced by the `--format` one (`md` or `txt`), so
+  `Glob **/IsoPlayer.md` finds `zombie/characters/IsoPlayer.html`. The
+  characters HTTrack forbids (`\ : * ? " < > | ~`, control characters) become
+  `_`; a Windows reserved name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
+  `LPT1`–`LPT9`, any case) and a name ending in a dot or a space get a
+  trailing `_`. Names that differ only in case get `-2`, `-3`… in sorted
+  source order, so the same tree always gives the same names.
+- **`INDEX.md`.** Two header lines, then one line per page sorted by path,
+  so `grep -i term INDEX.md` answers "which page":
+
+  ```
+  # Index
+  167 pages. One line per page: - [title](<path>), N words, URL
+
+  - [ActionGroup](<pages/ActionGroup.md>), 599 words, https://pzwiki.net/wiki/ActionGroup
+  - [Help:Style guide](<pages/Help_Style_guide.md>), 4273 words, https://pzwiki.net/wiki/Help:Style_guide
+  ```
+
+  The title is the page's `<head>` `<title>` without the site suffix (the
+  text after the last ` - `, ` – `, ` — ` or ` | `) when that suffix ends
+  more than half of the run's titles; else the page's first `h1`, read before
+  extraction; else the file stem. Whitespace is collapsed, control characters
+  are neutralized and `\`, `[`, `]` are backslash-escaped. The URL comes from
+  the manifest or the page marker, as for `--context-header`, and is left out
+  when unknown. New fields are only ever appended to a line.
+- **Whole pages.** Pages are never split and lines never wrapped: a page
+  larger than one `Read` call takes stays reachable with `grep -n` plus a
+  `Read` with an offset. There is no word cap, no chunk cap and no size
+  warning. Without `--context-header` a page file holds only its content.
+- **Ownership.** Every run builds `pages/` in a temporary directory next to
+  it and swaps it in, so removed and renamed pages disappear and a failed run
+  keeps the previous pages. `pack` writes only `INDEX.md`, `pages/` and its
+  sidecars: any other file in the output directory, such as a `SKILL.md`,
+  survives every repack. A `pages/` without an `INDEX.md` next to it is not a
+  previous output, and the run exits 1 before writing anything.
+
+| Flag | With `--layout page` |
+|---|---|
+| `--max-words-per-chunk`, `--max-chunks`, `--strategy`, `--prefix`, `--with-index`/`--no-index` | usage error (exit 2) when set on the CLI or in `.dograpper.json`, even to the default value |
+| `--bundle`, `--for-queries`, `--format jsonl`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
+| `--delta` | the [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md) gate is unchanged; a run that passes it rebuilds `pages/` in full |
+| `--context-header` | one header at the top of each page file |
+| `--cross-refs` | markers name the page from the output root, `[-> pages/Target.md]`; `cross_refs.json` is keyed by page path |
+| `--score`, `--report` | one score per page; `chunk_id` in `llm-readiness.json` is the page path, stable across runs |
+| `--dry-run` | projects the page count; never needs or touches `pages/` |
+
+`explain`, `serve`, `eval` and the GitHub Action read the chunk layout only.
+Do not mix layouts in one output directory: `pack` never deletes chunk files.
+
 #### Examples
 
 ```bash
@@ -691,6 +760,9 @@ dograpper pack ./docs -o ./chunks --delta
 
 # Co-locate content by expected user queries
 dograpper pack ./docs -o ./chunks --for-queries queries.txt
+
+# One file per page plus INDEX.md, for grep-and-Read readers
+dograpper pack ./docs -o ./wiki-ref --layout page --context-header
 ```
 
 ### `dograpper explain`
@@ -742,6 +814,7 @@ dograpper sync <url> -o <dir> [options]
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
 | `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |
 | `--format` | — | `md` | `txt` \| `md` \| `jsonl` \| `xml` (deprecated) (passed to `pack`) |
+| `--layout` | — | `chunk` | `chunk` \| `page` (passed to `pack`) |
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` (passed to `pack`) |
@@ -927,6 +1000,8 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
+| 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
+| 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
@@ -1026,6 +1101,8 @@ report). The PR comment is upserted by matching the
 |----------|------|-----------|
 | `docs_chunk_*.md` | (default) | Markdown chunks |
 | `docs_chunk_*.jsonl` | `--format jsonl` | One JSON line per source file |
+| `pages/**/*.md` | `--layout page` | One file per page, mirroring the input tree (`.txt` with `--format txt`) |
+| `INDEX.md` | `--layout page` | One line per page: title, path, word count, URL |
 | `cross_refs.json` | `--cross-refs` | Cross-reference graph between chunks |
 | `llm-readiness.json` | `--score` | Quality scores per chunk |
 | `readiness-report.html` | `--report` | Visual before/after report with penalty causes |
@@ -1135,7 +1212,8 @@ Conditional extra lines (per enabled flag):
 | `--bundle` | `Import guide: <path>` |
 | bot-challenge pages found | `Challenge pages: N` |
 | `--for-queries` | `Query packing: ...` |
-| `--context-header` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
+| `--context-header` or `--layout page` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
+| `--layout page` | `Pages written: N` and `Index: <path>` replace `Chunks generated` and `Words per chunk`; no chunk-limit warnings |
 
 Warnings appear when:
 - Input `.html`/`.htm` files are Cloudflare bot-challenge interstitials

@@ -18,7 +18,7 @@ _DOWNLOADER_OPTIONS = ('downloader',) + PROFILE_OPTIONS
 _DOWNLOAD_PASSTHROUGH = ('depth', 'headless', 'delay',
                          'include_extensions') + _DOWNLOADER_OPTIONS
 _PACK_PASSTHROUGH = ('max_words_per_chunk', 'max_chunks', 'strategy', 'format',
-                     'bundle', 'context_header', 'cross_refs', 'score',
+                     'layout', 'bundle', 'context_header', 'cross_refs', 'score',
                      'dedup', 'show_tokens', 'for_queries')
 
 
@@ -55,6 +55,9 @@ def _explicit_params(ctx: click.Context, names) -> set:
 @click.option('--max-chunks', type=int, default=50, show_default=True)
 @click.option('--strategy', type=click.Choice(['size', 'semantic']), default='size', show_default=True)
 @click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True)
+@click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
+              help="chunk: numbered chunk files. page: one file per page plus INDEX.md "
+                   "(see pack --layout)")
 @click.option('--bundle', type=click.Choice(['notebooklm', 'rag-standard']), default=None)
 @click.option('--context-header', is_flag=True, default=False,
               help="Inject a dograpper-context-v1 header in each chunk file")
@@ -71,7 +74,7 @@ def _explicit_params(ctx: click.Context, names) -> set:
 @click.pass_context
 def sync(ctx, url, output, depth, headless, delay, include_extensions,
          chunks_dir, max_words_per_chunk, max_chunks, strategy, format,
-         bundle, context_header, cross_refs, score, dedup, show_tokens,
+         layout, bundle, context_header, cross_refs, score, dedup, show_tokens,
          for_queries, **downloader_kw):
     """Incremental download + pack delta in a single command.
 
@@ -80,7 +83,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
       dograpper pack <output> -o <chunks-dir> --delta [pack flags]
 
     Forwarded pack flags: max-words-per-chunk, max-chunks, strategy,
-    format, bundle, context-header, cross-refs, score, dedup,
+    format, layout, bundle, context-header, cross-refs, score, dedup,
     show-tokens. Calibration-only flags (e.g. pack's --report and
     --dry-run) are deliberately not exposed here.
     """
@@ -118,6 +121,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
             max_chunks=max_chunks,
             strategy=strategy,
             format=format,
+            layout=layout,
             bundle=bundle,
             context_header=context_header,
             cross_refs=cross_refs,

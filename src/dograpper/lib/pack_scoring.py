@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .chunker import format_chunk_index
+from .chunker import chunk_id
 from ..utils.content_extractor import extract_content
 from ..utils.html_stripper import strip_html
 from ..utils.readiness_report import PageReadiness, find_removed_blocks
@@ -84,7 +84,7 @@ def score_chunks(
     result = ScoringResult()
 
     for chunk in chunks:
-        chunk_id = f"{prefix}{format_chunk_index(chunk.index, len(chunks))}"
+        cid = chunk_id(prefix, chunk, len(chunks))
 
         raw_total = 0
         extracted_total = 0
@@ -131,7 +131,7 @@ def score_chunks(
                 ))
 
         result.scores.append(score_chunk(
-            chunk_id=chunk_id,
+            chunk_id=cid,
             text="\n\n".join(chunk_text_parts),
             raw_words=raw_total,
             extracted_words=extracted_total,
@@ -140,6 +140,6 @@ def score_chunks(
         ))
 
         if with_report:
-            result.report_pages[chunk_id] = chunk_pages
+            result.report_pages[cid] = chunk_pages
 
     return result

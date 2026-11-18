@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
-from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, format_chunk_index, read_source_text
+from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, read_source_text
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,9 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Include a file summary in the header of each chunk")
 @click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True,
               help="Chunk output format. 'xml' is deprecated.")
+@click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
+              help="chunk: numbered chunk files. page: one md/txt file per page "
+                   "under pages/, mirroring INPUT_DIR, plus INDEX.md.")
 @click.option('--no-extract', is_flag=True, default=False,
               help="Disable smart content extraction. Use the whole HTML as in the previous behavior.")
 @click.option('--show-tokens', is_flag=True, default=False,
@@ -169,7 +172,7 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, layout: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -185,6 +188,13 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     Packaging presets (--bundle):
       notebooklm    ≤50 balanced chunks + IMPORT_GUIDE.md
       rag-standard  No restrictions, with mapping guide
+
+    \b
+    Layouts (--layout):
+      chunk  Numbered chunk files (default).
+      page   One file per page under pages/, plus INDEX.md; chunk-only
+             flags, --bundle, --for-queries, --format jsonl and --dedup
+             other than off are usage errors.
 
     If a single file exceeds `--max-words-per-chunk`, it is placed alone
     in its own chunk and a warning is emitted (the CLI does not fail).
@@ -203,6 +213,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'prefix': prefix,
         'with_index': with_index,
         'format': format,
+        'layout': layout,
         'no_extract': no_extract,
         'show_tokens': show_tokens,
         'token_encoding': token_encoding,
@@ -231,6 +242,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     pref = merged_params.get('prefix', prefix)
     w_index = merged_params.get('with_index', with_index)
     fmt = merged_params.get('format', format)
+    page_layout = merged_params.get('layout', layout) == 'page'
     no_ext = merged_params.get('no_extract', no_extract)
     s_tokens = merged_params.get('show_tokens', show_tokens)
     t_encoding = merged_params.get('token_encoding', token_encoding)
@@ -248,6 +260,13 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     for_queries_path = merged_params.get('for_queries', for_queries)
     is_report = merged_params.get('report', report)
 
+    # 2a. Page layout (ADR-0010): reject chunk-only settings, never touch a pages/ we did not write
+    if page_layout:
+        from ._page_layout import check_flags, check_ownership
+        check_flags(ctx, merged_params, config_path)
+        if not is_dry_run:
+            check_ownership(output_dir)
+
     # 2b. Bundle overrides
     if bundle_preset == 'notebooklm':
         max_c = min(max_c, 50)
@@ -258,8 +277,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     # 2c-2e. Flag validation, fail fast and with no silent fallback
     query_list, is_score = _validate_flags(
         ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score)
-    # 2f. Manifest for --context-header URLs, loaded before any page is read
-    manifest_data = _load_url_manifest(ctx, manifest_path) if ctx_header else None
+    # 2f. Manifest for --context-header (and INDEX.md) URLs, loaded before any page is read
+    manifest_data = _load_url_manifest(ctx, manifest_path) if ctx_header or page_layout else None
 
     # 3. List all files
     # The queries file drives the ordering; it is never corpus content,
@@ -384,9 +403,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             else:
                 heading_map[rel] = []
 
-    # 7c. Source URLs for --context-header: manifest entry, else page marker
+    # 7c. Source URLs for --context-header and INDEX.md: manifest entry, else page marker
     url_resolution = None
-    if ctx_header:
+    if ctx_header or page_layout:
         from ..lib.source_urls import resolve_source_urls
 
         url_resolution = resolve_source_urls(filtered_paths, input_dir, manifest_data)
@@ -407,7 +426,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         filtered_paths = ordering.paths
 
     # 8. Execute chunking
-    if strat == 'semantic':
+    if page_layout:
+        from ..lib.page_layout import page_chunks
+        chunks = page_chunks(filtered_paths, input_dir, fmt, no_ext)
+    elif strat == 'semantic':
         chunks = chunk_by_semantic(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts)
     else:
         chunks = chunk_by_size(filtered_paths, input_dir, max_w, no_extract=no_ext, word_counts=dedup_word_counts, preserve_order=query_pack_result is not None)
@@ -419,8 +441,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     generated_chunk_count = len(chunks)
 
-    # 9. Validate against max
-    if generated_chunk_count > max_c:
+    # 9. Validate against max (the page layout has no chunk cap)
+    if not page_layout and generated_chunk_count > max_c:
         logger.warning(f"Generated {generated_chunk_count} chunks, exceeding max-chunks limit of {max_c}. Consider increasing --max-words-per-chunk or adding --ignore rules.")
 
     # 9b. Dry-run: generate report and exit without writing
@@ -490,6 +512,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             token_encoding=t_encoding,
             oversize_files=oversize,
             dedup_stats=dedup_stats,
+            layout='page' if page_layout else 'chunk',
         )
 
         if is_score:
@@ -497,7 +520,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
             dr_scores = []
             for chunk in chunks:
-                chunk_id = f"{pref}{format_chunk_index(chunk.index, generated_chunk_count)}"
+                cid = chunk_id(pref, chunk, generated_chunk_count)
                 raw_total = 0
                 extracted_total = 0
                 headings_count = 0
@@ -516,7 +539,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                             max_heading_level = max(max_heading_level, max(h.level for h in hdgs))
 
                 cs = _dr_score_chunk(
-                    chunk_id=chunk_id,
+                    chunk_id=cid,
                     text="",  # no final text in dry-run
                     raw_words=raw_total,
                     extracted_words=extracted_total,
@@ -570,7 +593,16 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         annotate = cross_ref_result.annotate
 
     # 10. Write outputs
-    write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate)
+    index_path = None
+    if page_layout:
+        from ._page_layout import write as write_page_layout
+        index_path = write_page_layout(
+            chunks, input_dir=input_dir, output_dir=output_dir, no_extract=no_ext,
+            text_overrides=dedup_text_overrides,
+            url_map=url_resolution.urls if url_resolution else None,
+            readiness_map=readiness_map, annotate=annotate, with_header=ctx_header)
+    else:
+        write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate)
 
     # 10b. Delta report (opt-in, after write)
     if is_delta and diff is not None:
@@ -636,12 +668,16 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     click.echo(f"  Files excluded:  {files_excluded}")
     if challenge_paths:
         click.echo(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
-    click.echo(f"  Chunks generated: {generated_chunk_count} / {max_c} (max)")
-    
-    if generated_chunk_count > 0:
-         click.echo(f"  Words per chunk:  ~{avg_w:,.0f} avg (min: {min_w:,}, max: {max_w_actual:,})")
+    if page_layout:
+        click.echo(f"  Pages written:   {generated_chunk_count}")
+        click.echo(f"  Index:           {index_path}")
     else:
-         click.echo("  Words per chunk:  0")
+        click.echo(f"  Chunks generated: {generated_chunk_count} / {max_c} (max)")
+
+        if generated_chunk_count > 0:
+             click.echo(f"  Words per chunk:  ~{avg_w:,.0f} avg (min: {min_w:,}, max: {max_w_actual:,})")
+        else:
+             click.echo("  Words per chunk:  0")
 
     click.echo(f"  Total words:     {total_words:,}")
 
@@ -692,13 +728,13 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         from ..utils.token_counter import format_token_summary
         click.echo(format_token_summary(token_counts))
     
-    # Warnings at bottom
-    oversized = [c for c in chunks if c.total_words > max_w]
+    # Warnings at bottom (the page layout has no word or chunk cap)
+    oversized = [] if page_layout else [c for c in chunks if c.total_words > max_w]
     if oversized:
         plural = "s" if len(oversized) > 1 else ""
         click.echo(f"  \u26a0 {len(oversized)} chunk{plural} exceeds the word limit")
         
-    if generated_chunk_count > max_c:
+    if not page_layout and generated_chunk_count > max_c:
         click.echo(f"  \u26a0 Chunk count exceeds max-chunks limit ({generated_chunk_count} > {max_c})")
 
     # 12. Readiness report terminal summary (after the normal pack summary)

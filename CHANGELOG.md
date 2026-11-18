@@ -63,6 +63,19 @@ and fixes alone are a PATCH bump.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
   summary as `Failed: N URLs (first 5 shown)` with each URL and HTTP status;
   `--verbose` lists them all ([#97](https://github.com/lorenzoervedosa/dograpper/issues/97)).
+- `pack --layout page` (config key `layout`, forwarded by `sync`) writes one
+  file per page under `pages/`, mirroring `INPUT_DIR` with the `--format`
+  extension (`Modding/vi.html` -> `pages/Modding/vi.md`), plus an `INDEX.md`
+  with one line per page: `- [title](<path>), N words, URL`. Names are
+  portable (HTTrack's forbidden characters, Windows reserved names and a
+  trailing dot or space get `_`; case-only collisions get `-2`, `-3`...).
+  Every run rebuilds `pages/` and swaps it in, with no word cap, chunk cap or
+  size warning, and never touches other files in the output directory.
+  `--context-header` writes one header per page; `--cross-refs` markers,
+  `cross_refs.json`, `llm-readiness.json` and `delta_manifest.json` name pages
+  by path. Chunk-only settings, `--bundle`, `--for-queries`, `--format jsonl`
+  and `--dedup` other than `off` exit 2; a `pages/` without `INDEX.md` exits
+  1. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md), [#84])
 
 ### Changed
 
@@ -218,3 +231,4 @@ and fixes alone are a PATCH bump.
 [#67]: https://github.com/lorenzoervedosa/dograpper/issues/67
 [#94]: https://github.com/lorenzoervedosa/dograpper/issues/94
 [#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
+[#84]: https://github.com/lorenzoervedosa/dograpper/issues/84

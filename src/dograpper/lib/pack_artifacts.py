@@ -14,7 +14,7 @@ import os
 from dataclasses import dataclass
 from typing import Dict, List
 
-from .chunker import format_chunk_index
+from .chunker import chunk_id
 from ..utils.link_extractor import LinkRef, annotate_cross_refs, build_cross_ref_index, extract_links
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,6 @@ class CrossRefs:
         return annotate_cross_refs(content, links, self.file_to_chunk)
 
 
-def _chunk_id(prefix: str, chunk, total_chunks: int) -> str:
-    return f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
-
-
 def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
                      output_dir: str, prefix: str) -> CrossRefs:
     """Write ``cross_refs.json`` and return the resolved links.
@@ -51,7 +47,7 @@ def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
     # index.html so links resolved by extract_links can match.
     file_to_chunk = {}
     for chunk in chunks:
-        cid = _chunk_id(prefix, chunk, len(chunks))
+        cid = chunk_id(prefix, chunk, len(chunks))
         for cf in chunk.files:
             file_to_chunk[cf.relative_path] = cid
             rp = cf.relative_path
@@ -98,7 +94,7 @@ def write_delta_manifest(diff, chunks, output_dir: str, prefix: str,
         "removed": diff.removed,
         "chunks_generated": [
             {
-                "chunk": _chunk_id(prefix, c, len(chunks)),
+                "chunk": chunk_id(prefix, c, len(chunks)),
                 "files": [cf.relative_path for cf in c.files],
             }
             for c in chunks
@@ -162,7 +158,7 @@ def count_chunk_tokens(chunks, output_dir: str, prefix: str, fmt: str,
 
     token_counts = []
     for chunk in chunks:
-        chunk_filename = f"{_chunk_id(prefix, chunk, len(chunks))}.{fmt}"
+        chunk_filename = chunk.page_path or f"{chunk_id(prefix, chunk, len(chunks))}.{fmt}"
         chunk_filepath = os.path.join(output_dir, chunk_filename)
         try:
             with open(chunk_filepath, 'r', encoding='utf-8', errors='replace') as cf:

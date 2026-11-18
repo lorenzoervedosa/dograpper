@@ -27,18 +27,19 @@ src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
 │   ├── _httrack_profile.py # Modo `--downloader httrack` do download: resolve_profile() (opções do perfil, guarda sob wget, policy_kw), discovery_fetch() (robots antes do GET), run_httrack() (fetch semeado + relatório + fail-loud)
+│   ├── _page_layout.py     # Modo `pack --layout page` (ADR-0010): check_flags() (flags só-chunk na CLI ou no config, --bundle, --for-queries, --format jsonl, --dedup ≠ off → exit 2), check_ownership() (pages/ sem INDEX.md → exit 1), write() (falha de escrita → exit 1)
 │   ├── doctor.py           # Detecta e instala deps pesadas (wget, chromium) em DOGRAPPER_HOME; --check-system-libs
 │   ├── download.py         # Opções click + despacho do --downloader; cascade 4-layer do wget: llms.txt → sitemap → wget --mirror → Playwright bounded (layers 1+2 compartilhadas com o perfil httrack)
 │   ├── drift.py            # Drift de contexto entre dois llm-readiness.json (+ delta_manifest.json opcional)
 │   ├── eval.py             # Hit-rate empírico do pack JSONL: golden Q&A offline → BM25 → hit-rate@k/MRR por grade
 │   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project)
-│   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary
+│   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary; --layout chunk|page (modo page em _page_layout.py)
 │   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
-│   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader e as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py)
+│   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader, as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py) e --layout
 ├── lib/
-│   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile, write_chunks() (md, txt, jsonl)
-│   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source)
+│   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile (Chunk.page_path no layout page), chunk_id() (id único de chunk nos sidecars), write_chunks() (md, txt, jsonl)
+│   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source); read_config_section() — seção do JSON (quais chaves o config define)
 │   ├── eval_harness.py     # evaluate() — hit-rate@k e MRR sobre pares golden, com breakdown por readiness grade
 │   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
 │   ├── httrack/
@@ -53,6 +54,7 @@ src/dograpper/
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
 │   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, read (levanta erro)/load (tolerante)/save/build, diff e narrow_diff_to_paths
 │   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
+│   ├── page_layout.py      # Layout por página (ADR-0010): assign_page_paths() (espelho do INPUT_DIR em pages/, regras de utils/portable_names.py + nomes reservados do Windows), page_chunks() (um Chunk por página), page_titles() (<title> sem sufixo do site → h1 cru → stem), write_pages() (pages/ montado em diretório temporário e trocado, INDEX.md atômico); owns_pages()
 │   ├── pack_artifacts.py   # Sidecars do pack: cross_refs.json, delta_manifest.json, llm-readiness.json, report HTML, tokens
 │   ├── pack_reader.py      # load_chunks() — leitura tolerante dos chunks JSONL do pack em PackedChunk
 │   ├── pack_scoring.py     # score_chunks() — readiness por chunk + páginas do --report, lê cada fonte uma vez
@@ -121,6 +123,7 @@ tests/
 ├── test_link_extractor.py  # Link extraction, cross-ref index, annotation, CLI integration
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
 ├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
+├── test_page_layout.py     # Layout por página: nomes portáveis e colisões, títulos (sufixo, h1 fora do container, stem), INDEX.md literal, exit 2 de flags só-chunk (CLI e config), posse de pages/ (rebuild, exit 1, falha preserva), delta/cross-refs/score/tokens/dry-run, sync
 ├── test_pack.py            # word_counter, ignore_parser, chunker, write_chunks, CLI integration
 ├── test_pack_challenge.py  # Pack: páginas de challenge (Cloudflare) detectadas, avisadas e fora dos chunks; falso positivo em prosa
 ├── test_pack_artifacts.py  # Sidecars: cross-refs, delta manifest, snapshot de readiness, contagem de tokens
@@ -166,6 +169,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `.dograpper.json.example` | Ao mexer em `config_loader.py` ou no merge de configuração |
 | `.docsignore.example` | Ao mexer em `ignore_parser.py` |
 | `tests/test_pack.py` | Antes de alterar qualquer coisa em `lib/chunker.py` ou `commands/pack.py` |
+| `tests/test_page_layout.py` | Antes de alterar `lib/page_layout.py`, `commands/_page_layout.py` ou o despacho `--layout` de `commands/pack.py` (nomes, formato do `INDEX.md`, posse de `pages/`, flags rejeitadas) |
 | `tests/test_query_packer.py` | Antes de alterar `lib/query_packer.py` ou a integração `--for-queries` em `commands/pack.py` |
 | `tests/test_pack_challenge.py` | Antes de alterar `utils/challenge.py` ou a etapa 6a de `commands/pack.py` |
 | `tests/test_pack_scoring.py` | Antes de alterar `lib/pack_scoring.py` ou a etapa 9c de `commands/pack.py` |

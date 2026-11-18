@@ -27,6 +27,13 @@ class Chunk:
     index: int
     files: List[ChunkFile] = field(default_factory=list)
     total_words: int = 0
+    # Page layout (ADR-0010): the page file's path from the pack root, also its id.
+    page_path: str = ""
+
+
+def chunk_id(prefix: str, chunk: Chunk, total_chunks: int) -> str:
+    """Id of a chunk in sidecars and headers: its page path in the page layout."""
+    return chunk.page_path or f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
 
 def chunk_by_size(files: List[str], base_dir: str, max_words: int, no_extract: bool = False, word_counts: Dict[str, int] = None, preserve_order: bool = False) -> List[Chunk]:
     """Group incoming files in chunks keeping them under the soft limit max_words per chunk.
