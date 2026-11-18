@@ -5,13 +5,11 @@ clean text output, tracking heading positions in the stripped text
 for hierarchical context injection into chunks.
 """
 
-import re
-import html as html_mod
 from html.parser import HTMLParser
 from dataclasses import dataclass
 from typing import List, Dict
 
-from .html_stripper import BLOCK_TAGS
+from .html_stripper import BLOCK_TAGS, render_text
 
 
 @dataclass
@@ -87,13 +85,7 @@ class _HeadingExtractorParser(HTMLParser):
         self._current_offset += len(data)
 
     def get_result(self):
-        text = "".join(self._output)
-        text = html_mod.unescape(text)
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        blocks = text.split('\n\n')
-        blocks = [re.sub(r'\s+', ' ', b).strip() for b in blocks]
-        text = '\n\n'.join(b for b in blocks if b)
-        return text.strip(), self._headings
+        return render_text(self._output), self._headings
 
 
 def extract_with_headings(html: str, source_path: str = "") -> ExtractedDocument:

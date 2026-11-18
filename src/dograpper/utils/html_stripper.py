@@ -36,14 +36,17 @@ class HTMLStripper(HTMLParser):
         if not self.ignore:
             self.text.append(d)
 
-    def get_data(self):
-        return ''.join(self.text)
 
 def strip_html(text: str) -> str:
     """Read an HTML string and strip all tags, script contents, and style contents."""
     s = HTMLStripper()
     s.feed(text)
-    data = s.get_data()
+    return render_text(s.text)
+
+
+def render_text(parts: list) -> str:
+    """Join a parser's text output into clean text, one block per paragraph."""
+    data = ''.join(parts)
     # Unescape HTML entities that might be lingering
     data = html.unescape(data)
     # Collapse 3+ newlines into exactly 2 (preserve block separators)
