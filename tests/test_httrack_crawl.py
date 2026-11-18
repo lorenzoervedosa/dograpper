@@ -316,6 +316,26 @@ def test_links_between_seeded_pages_are_rewritten(server, tmp_path):
     assert res.report.errors == []
 
 
+
+def test_seeded_scripts_and_stylesheets_are_rewritten(server, tmp_path):
+    """The links the script scans take, in a page and in a seeded stylesheet, are
+    rewritten too (htsparse.c:3379-3502, 3807-3852); a seed is a start URL, so no page
+    loaded it and its links resolve against itself (htsparse.c:1280-1285)."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/a"] = (200, HTML, b'<script>img.src = "b";</script>')
+    script["/docs/b"] = (200, HTML, b"<p>b</p>")
+    script["/docs/s.css"] = (200, {"content-type": "text/css"}, b"p{background:url(b)}")
+    res = run([f"{base}/docs/a", f"{base}/docs/b", f"{base}/docs/s.css"], tmp_path,
+              exts="html,css")
+    docs = tmp_path / base.split("//")[1] / "docs"
+    assert (docs / "a.html").read_bytes() == b'<script>img.src = "b.html";</script>'
+    assert (docs / "s.css").read_bytes() == b"p{background:url(b.html)}"
+    assert res.report.errors == []
+    run([f"{base}/docs/a", f"{base}/docs/b"], tmp_path / "off", parse_scripts=False)
+    assert (tmp_path / "off" / docs.relative_to(tmp_path) / "a.html").read_bytes() == (
+        b'<script>img.src = "b";</script>')
+
 # -- update mode: the previous run's manifest records drive conditional revalidation --
 
 from dograpper.lib.manifest import build_manifest  # noqa: E402

@@ -19,7 +19,7 @@ from dograpper.utils.redact import redact_url
 
 from .escape import request_target
 from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
-from .links import rewrite_links, url_key
+from .links import JS_MIMES, rewrite_file_links, rewrite_links, url_key
 from .naming import NameRegistry, no_page
 from .policy import (NAVIGATION, SITES, FetchMeta, HttrackPolicy, conditional_headers,
                      response_validators, site_of)
@@ -224,19 +224,30 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
         return "ok", url, res
 
 
-def relink(pages: Mapping[str, str], local: Mapping[str, str], report: RunReport) -> None:
-    """Rewrite the links of the saved HTML `pages` (file -> URL it was fetched from) as
-    HTTrack -K0 does, `local` mapping links.url_key() to saved files; a failure is an error
-    of the report, the page keeps its links."""
-    for path, url in pages.items():
+def relink(pages: Mapping[str, str], local: Mapping[str, str], report: RunReport,
+           scripts: Mapping[str, tuple[str, str | None, bool]] | None = None, *,
+           parse_scripts: bool = True, extended_parsing: bool = True) -> None:
+    """Rewrite the links of the saved HTML `pages` (file -> URL it was fetched from) and of
+    the saved stylesheets and `scripts` (file -> (URL, page that loaded a script or None,
+    stylesheet?)) as HTTrack -K0 does, `local` mapping links.url_key() to saved files; the
+    links the script scans take are rewritten under the same switches. A failure is an
+    error of the report, the file keeps its links."""
+    def one(path: str, url: str, rewrite, **kw) -> None:
         try:
             with open(path, "rb") as f:
                 body = f.read()
-            new = rewrite_links(body, url, path, local)
+            new = rewrite(body, url, path, local, parse_scripts=parse_scripts,
+                          extended_parsing=extended_parsing, **kw)
             if new is not body:
                 atomic_write_bytes(path, new)
         except OSError as exc:
             report.errors.append((redact_url(url), f"link rewrite failed: {exc}", None))
+
+    for path, url in pages.items():
+        one(path, url, rewrite_links)
+    for path, (url, page, css) in (scripts or {}).items():
+        one(path, url, rewrite_file_links, css=css, page=page,
+            page_path=local.get(url_key(page)) if page else None)
 
 
 def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
@@ -261,6 +272,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     requested: dict[str, tuple[bool, str]] = {}
     writing: dict[str, threading.Event] = {}  # file -> set once its write ended, either way
     pages: dict[str, str] = {}  # written HTML file -> URL it came from, for relink
+    scripts: dict[str, tuple] = {}  # written stylesheet or script -> relink's (URL, None, css?)
     reached: list[tuple[str, str]] = []  # (seed or final URL, file it reached)
     seeds = list(dict.fromkeys(urls))
     if len(seeds) > policy.max_links:
@@ -341,8 +353,11 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
             size[0] += len(res.body)
             fields[path] = record_of(res)
             reached.extend(((url, path), (seed, path)))
-            if (res.headers.get("content-type") or "").split(";")[0].strip().lower() == "text/html":
+            mime = (res.headers.get("content-type") or "").split(";")[0].strip().lower()
+            if mime == "text/html":
                 pages[path] = url
+            elif mime == "text/css" or mime in JS_MIMES:  # a seed: no page loaded it
+                scripts[path] = (url, None, mime == "text/css")
         return "written"
 
     def run(seed: str) -> None:
@@ -357,7 +372,9 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         list(pool.map(run, seeds))  # list() re-raises any worker exception
     progress.finish()
 
-    relink(pages, {url_key(u): p for u, p in reached if p in written or p in kept}, report)
+    relink(pages, {url_key(u): p for u, p in reached if p in written or p in kept}, report,
+           scripts, parse_scripts=policy.parse_scripts,
+           extended_parsing=policy.extended_parsing)
     report.challenged.sort()
     report.robots_blocked.sort()
     report.out_of_scope.sort()

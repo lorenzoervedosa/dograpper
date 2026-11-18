@@ -79,7 +79,9 @@ and fixes alone are a PATCH bump.
   targets queued as links; a deterministic output whatever the request order;
   `[progress] httrack crawl:` lines. On both paths, links between saved pages
   are rewritten to relative paths (HTTrack `-K0`), so the mirror browses
-  offline and `pack --cross-refs` resolves them. A run over an earlier one is
+  offline and `pack --cross-refs` resolves them; the links found in scripts,
+  stylesheets and quoted strings are rewritten too, in pages and in saved
+  stylesheets and scripts, as HTTrack writes them ([#133]). A run over an earlier one is
   an update, as HTTrack `-C2`: each saved file is revalidated with
   `If-None-Match` / `If-Modified-Since` from its manifest record (new manifest
   fields `status`, `content_type`, `redirected`; `etag` and `last_modified`
@@ -464,3 +466,4 @@ and fixes alone are a PATCH bump.
 [#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
+[#133]: https://github.com/lorenzoervedosa/dograpper/issues/133

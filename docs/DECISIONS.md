@@ -201,3 +201,43 @@ Entry format:
 - **Why:** `challenge.py` is Cloudflare-specific and shared with the httrack fetcher; the error-page rule has no fetcher use. Both layouts and `--dry-run` run after 6a, so they inherit the skip. Second copy tolerated per the project rule; a third skip class should extract the shared block.
 - **Rejected:** matching "404" anywhere in the text; requiring an `<h1>` (not all servers emit one).
 - **Pending:** none.
+
+## 2026-11-18 — -K0 of the links the script scans take (#133)
+
+- **Decision:** a link the scans take (script, stylesheet, `style=`, handler,
+  `javascript:`, `-%P`) is written exactly as HTTrack writes it
+  (`escape_uri_utf` path, `%28`/`%29` in a CSS `url()`, query appended, `&` raw
+  in script text), while a link attribute keeps PR 2's form (`%`/`#` only, no
+  query).
+- **Why:** the brief asks for HTTrack's form; `pack --cross-refs` reads only
+  `<a href>` and resolves it as a path with no percent-decoding or query cut,
+  so changing the attribute form would break it. Recorded as a deviation in
+  spec §5.6.
+- **Rejected:** one form for both (either breaks `--cross-refs` or deviates on
+  scanned links with no reason).
+- **Pending:** none.
+
+- **Decision:** a script whose loading page has no saved file gets absolute
+  links (its module specifiers stay relative to the script).
+- **Why:** HTTrack writes them relative to the page's planned name; dograpper
+  makes any link to an unsaved file absolute (PR 2), and with no saved page
+  there is nothing to be relative to. Recorded in spec §5.6.
+- **Rejected:** writing them relative to the script itself (wrong base).
+- **Pending:** none.
+
+- **Decision:** `_kept_links` reads kept stylesheets and scripts too, and
+  decodes a kept link with `unquote` instead of `%25`/`%23` only.
+- **Why:** once relink rewrites them, a kept copy holds saved names; reading
+  them against the URL would request names that are not URLs (a regression
+  the update test shows). `unquote` inverts both escapes in use.
+- **Rejected:** leaving kept stylesheets and scripts unrewritten (they are
+  rewritten when first saved, so the copy already holds names).
+- **Pending:** none.
+
+- **Decision:** `import "./m.js"` is written `import "m.js"`, as HTTrack does
+  (`./` dropped, `src/htsparse.c:2717-2726`; `lienrelatif` adds none).
+- **Why:** faithful port; a browser refuses a bare module specifier, so an
+  offline mirror of module code breaks there as HTTrack's does.
+- **Rejected:** prefixing `./` (an unrecorded deviation).
+- **Pending:** maintainer: keep HTTrack's form, or deviate (spec §5) to keep
+  module imports working offline.

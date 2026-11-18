@@ -419,9 +419,14 @@ HTTrack's mirror loop:
   chain (`none` after a start URL).
 - **Links rewritten** (HTTrack `-K0`): once the crawl ends, every saved HTML
   page links to the files saved for its links with relative paths, other
-  links become absolute URLs, and `<base href>` is emptied. The mirror browses
-  offline and `pack --cross-refs` resolves its links. No other byte of the
-  page changes.
+  links become absolute URLs, and `<base href>` is emptied. The links found
+  in scripts, stylesheets and quoted strings (above) are rewritten too, in
+  pages and in saved stylesheets and scripts, as HTTrack writes them: the
+  relative path percent-encoded, `(` `)` as `%28` `%29` inside a CSS `url()`,
+  the link's query kept, `&` as `&amp;` only inside a tag; a script's links
+  are written from the page that loaded it (a module specifier from the
+  script). The mirror browses offline and `pack --cross-refs` resolves its
+  links. No other byte of the file changes.
 - **Output is deterministic:** requests run in parallel, but responses are
   handled in queue order, so names, files, report and manifest never depend on
   which request finished first.
@@ -443,7 +448,7 @@ not empty, is revalidated.
   response's `Last-Modified`, else its `Date`.
 - **304 Not Modified:** the file is left byte-identical (its links are not
   rewritten again) and keeps its manifest record; the crawl follows the links
-  of a kept page from that copy.
+  of a kept page, stylesheet or script from that copy.
 - **Any other answer but a 2xx or a redirect** (404, 500, 429, a challenge):
   the previous copy is kept and the answer is not retried, as HTTrack does on
   an update. The URL is listed as `Kept the previous copy after an error` (a
@@ -498,13 +503,18 @@ protect the corpus:
 - A `--filter` rule never widens the crawl to another host.
 - No asset mirroring: the crawl does not request links whose extension is a
   known non-page type left out of `--include-extensions`.
+- Link rewriting: a link to a file the run did not save is made absolute
+  (HTTrack writes the name it planned); an absolute link is left as written;
+  a link attribute (`href`, `src`...) escapes only `%` and `#` of a saved name
+  and drops the query, so `pack --cross-refs` resolves it.
 - Updates keep no cache beside the mirror (HTTrack's `hts-cache/`), so:
   - the manifest never records a redirect target: the validators of a file
     reached through a redirect go to the hop whose file name is that file's;
   - the links of a kept page are read from the saved copy and mapped back
     through the manifest: a file recorded with `"url": null` is not reached
     from a kept page and never revalidated;
-  - a kept file is never renamed, and a kept page never rewritten;
+  - a kept file is never renamed nor rewritten, and a kept script's links are
+    read against the page that loads it in this run;
   - robots.txt is fetched in full on every run.
 - A `Retry-After` on a revalidation still pauses the whole queue, and a
   challenged start URL still exits 1 on an update (HTTrack treats both as a
@@ -523,9 +533,7 @@ is used when available. The release binary includes this extra.
 
 **Current gaps (temporary).** Under `httrack`, the Playwright fallback is
 not implemented yet and fails loud (exit 1); use `--downloader wget` for
-those sites. Links found in scripts, stylesheets and by extended parsing are
-followed but not rewritten to the saved files (HTTrack rewrites them too).
-With a manifest an update always revalidates (HTTrack `-C2`): the
+those sites. With a manifest an update always revalidates (HTTrack `-C2`): the
 other cache modes (`-C0`, `-C1`/`--continue`), the `-%s`, `-%n` and
 `--changes` options and file times from `Last-Modified` are not ported yet.
 None of these is a deviation from HTTrack.

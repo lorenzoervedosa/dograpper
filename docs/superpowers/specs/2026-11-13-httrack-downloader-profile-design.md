@@ -254,6 +254,7 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - It is a static scan; nothing is executed.
   - The URLs it finds go through scope, filters and `--include-extensions`
     like any other link, so assets are still dropped.
+  - They are rewritten like any other link (§5.6, "Link rewriting").
   - Turned off as in HTTrack, with `[httrack]` flags (usage errors under
     `wget`, like §5.7's): `--no-parse-scripts` is `-j4`, which also stops CSS
     `url()` / `@import` (one scanner in HTTrack); `--no-extended-parsing` is
@@ -330,6 +331,36 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   missing `Last-Modified` (`src/htslib.c:1632-1653`). `ManifestEntry` gains
   `status`, `content_type` and `redirected` in a backward-compatible way: old
   manifests still load.
+- **Link rewriting (`-K0`, #133):** once every name is known, every saved page,
+  stylesheet and script is written again with each link HTTrack records
+  rewritten: the link attributes, and the links the script scans and `-%P`
+  take (§5.5), under the same switches. HTTrack writes the buffer it parsed
+  for every hypertext file (`src/htsparse.c:1223`, `3807-3852`), with each
+  link in its place (`2400-2406`, `3379-3502`).
+  - A link to a saved file becomes its relative path; any other relative link
+    becomes its absolute URL; `<base href>` is emptied; no other byte changes.
+  - A link the scans took is written exactly as HTTrack writes it: the path
+    through `escape_uri_utf` (lower-case `%xx`, `src/htslib.c:4613-4618`),
+    `(` and `)` as `%28`/`%29` in a CSS `url()` (`src/htsparse.c:851-870`),
+    then the link's query (`includequery`, `3475-3480`); an absolute URL with
+    `" ' < >` percent-encoded (`1000-1033`); `&` as `&amp;` in a tag, never in
+    `<script>`/`<style>` text or a saved file (`977-988`, `history.txt:151`).
+    A script's links are written from the page that loaded it, a module
+    specifier's from the script (`src/htscore.h:276-283`).
+  - **Deviation:** a link attribute keeps PR 2's form: only `%` and `#` of a
+    saved name are escaped and the query is dropped, where HTTrack escapes the
+    path with `escape_uri_utf` and appends the query (`src/htsparse.c:3389`,
+    `3475-3480`). `pack --cross-refs` (`utils/link_extractor.py`) resolves an
+    `<a href>` as a path, neither percent-decoding it nor cutting a query, so
+    HTTrack's form would leave those links unresolved. `pack` never reads a
+    scanned link, which keeps HTTrack's form.
+  - **Deviation:** a link to a file the run did not save (an error, a type
+    `--include-extensions` leaves out) is made absolute, where HTTrack writes
+    the name it planned for it before the fetch; a local link to a missing
+    file browses nowhere. For the same reason, a script loaded by a page that
+    has no saved file gets absolute links (a module specifier still relative).
+  - **Deviation:** an absolute link is left as written, where HTTrack writes
+    back its own normalized form (`sink_add_absolute_url`).
   - **Deviation:** the final URL of a redirect is not recorded, where HTTrack's
     cache keeps every hop. It can carry a secret, and the manifest is meant to
     be shared (README "Incremental"); `redirected` says a chain was taken.
@@ -373,8 +404,11 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
       previous manifest recorded for that file, any other link read as
       written. HTTrack parses the original page from its cache. A file whose URL the manifest withholds (a query
       off the allowlist) is therefore not reached from a kept page, and is
-      never revalidated. The kept page is not relinked either, where HTTrack
-      writes it again from its cache.
+      never revalidated. A kept stylesheet or script is read back the same
+      way, a script against the page that loads it in this run: when that is
+      not the page that loaded it last time, its rewritten links do not map
+      back and are read as written. A kept file is not relinked either, where
+      HTTrack writes it again from its cache.
     - A file an update may keep keeps its name: no other URL takes it, and
       it is never moved. HTTrack computes names again and renames a file
       whose name changed (`src/htsback.c:2425-2456`); moving one would break
@@ -433,14 +467,6 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
-
-- **Links found in scripts, stylesheets and by `-%P` are not rewritten
-  (`-K0`).** HTTrack rewrites every link it records, those in a script or a
-  stylesheet too (`src/htsparse.c:3385-3393`; `history.txt:151`, #1616); the profile rewrites the link
-  attributes of HTML pages only, so such a link still points at the site.
-  - The crawl follows them (#122); only offline browsing of those links is
-    affected, not what `pack` reads.
-  - Pending a follow-up under #78.
 
 - **HTTrack's other cache modes and update options** are not in PR 3:
   - `-C0` (no cache) and `-C1`/`--continue` (trust the cache: no request for a

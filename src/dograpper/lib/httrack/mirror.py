@@ -14,11 +14,10 @@ suffixes), the files and the report never depend on which request finished first
 
 import logging
 import os
-import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from dograpper.lib.manifest import Manifest
 from dograpper.lib.url_filter import UrlFilters
@@ -61,23 +60,25 @@ def _revalidates(own: Previous | None, carried: Previous | None, mine: bool) -> 
 _KEPT_ROOT = "http://kept.invalid/"  # output_dir as a URL, to resolve a kept page's own links
 
 
-def _kept_links(body: bytes, url: str, path: str, root: str, url_of: dict[str, str], *,
-                frame: str, robots: bool, **scans) -> list:
-    """Links of the page `url` kept from the previous run at `path`, which HTTrack
-    re-parses from its cache (htsback.c:4437-4494). relink() made its links to saved files
-    relative paths: one that resolves, against the page's own path under `root`, to a file
-    there maps back through the previous manifest (`url_of`: local path -> URL recorded),
-    and is not followed when no URL was recorded. Any other link (absolute, or one relink
-    leaves as written, such as CSS in <style>) resolves against `url`. Both readings come
-    from the same scan of `body`, so they pair up one to one."""
+def _kept_links(read, url: str, path: str, root: str, url_of: dict[str, str],
+                page: str | None = None, page_path: str | None = None) -> list:
+    """Links of the file `url` kept from the previous run at `path`, which HTTrack
+    re-parses from its cache (htsback.c:4437-4494); `read(base, page base)` scans it (a
+    script loaded by `page`, saved at `page_path`, takes that page's base). relink() made
+    its links to saved files relative paths: one that resolves, against the file's own
+    path under `root` (a script's, against its page's), to a file there maps back through
+    the previous manifest (`url_of`: local path -> URL recorded), and is not followed when
+    no URL was recorded. Any other link (absolute, or one relink leaves as written)
+    resolves against `url` (or `page`). Both readings come from the same scan, so they pair
+    up one to one."""
     def local(p: str) -> str:  # as links._local_ref writes a saved file's name
-        return p.replace("%", "%25").replace("#", "%23")
-    base = _KEPT_ROOT + local(os.path.relpath(path, root).replace(os.sep, "/"))
+        return _KEPT_ROOT + os.path.relpath(p, root).replace(os.sep, "/").replace(
+            "%", "%25").replace("#", "%23")
     links = []
-    for real, link in zip(page_links(body, url, frame=frame, robots=robots, **scans),
-                          page_links(body, base, frame=frame, robots=robots, **scans), strict=True):
-        name = re.sub("%(25|23)", lambda m: "%" if m[1] == "25" else "#",
-                      urlsplit(link.url).path[1:]) if link.url.startswith(_KEPT_ROOT) else None
+    for real, link in zip(read(url, page or url), read(local(path), local(page_path or path)),
+                          strict=True):
+        # unquote: a scan's rewritten link is percent-encoded whole (links._uri_utf)
+        name = unquote(urlsplit(link.url).path[1:]) if link.url.startswith(_KEPT_ROOT) else None
         if name is not None and os.path.isfile(os.path.join(root, name)):
             if name in url_of:
                 links.append(real._replace(url=url_of[name]))
@@ -109,8 +110,8 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     written file to the URL requested for it (preferring one that needed no redirect, then
     the smallest), and front_failed is set when the start URL, or the redirect chain it
     starts, ends without a page. With the `previous` run's manifest its files are
-    revalidated (crawl.fetch_page); a kept page is left byte-identical and its links are
-    followed from that copy (_kept_links)."""
+    revalidated (crawl.fetch_page); a kept file is left byte-identical and the links of a
+    kept page, stylesheet or script are followed from that copy (_kept_links)."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
     prev = previous_files(previous, names, output_dir)
@@ -129,6 +130,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     moved: dict[str, str] = {}           # url_key -> url_key of its redirect target
     saved: dict[str, str] = {}           # url_key -> file written from that URL
     pages: dict[str, str] = {}           # HTML file -> URL fetched, for the link rewrite
+    scripts: dict[str, tuple] = {}       # stylesheet or script -> relink's (URL, page, css?)
     progress = ProgressReporter("httrack crawl")
     state = {"bytes": 0, "front_ok": False, "front_failed": False}
 
@@ -239,6 +241,9 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                 state["bytes"] += len(res.body)
                 if mime == "text/html":
                     pages[path] = entry.url
+                elif mime == "text/css" or mime in JS_MIMES:  # a script: its page's base
+                    scripts[path] = (entry.url, None if mime == "text/css" else entry.referer,
+                                     mime == "text/css")
         for link in links:
             got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta,
                           initiator=entry.url)
@@ -269,11 +274,16 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         scans = {"parse_scripts": policy.parse_scripts,
                  "extended_parsing": policy.extended_parsing}
         if mime == "text/css":
-            return css_links(body, entry.url, **scans)
-        if mime in JS_MIMES:  # as handle() scans a fetched script
-            return script_links(body, entry.url, entry.referer or entry.url, **scans)
-        return _kept_links(body, entry.url, p.path, root, url_of, frame=entry.meta.dest,
-                           robots=policy.obey_robots, **scans)
+            return _kept_links(lambda own, _: css_links(body, own, **scans), entry.url, p.path,
+                               root, url_of)
+        if mime in JS_MIMES:  # as handle() scans a fetched script, from its page's file
+            page = entry.referer
+            return _kept_links(lambda own, base: script_links(body, own, base, **scans),
+                               entry.url, p.path, root, url_of, page,
+                               saved.get(url_key(page)) if page else None)
+        return _kept_links(lambda own, _: page_links(body, own, frame=entry.meta.dest,
+                                                     robots=policy.obey_robots, **scans),
+                           entry.url, p.path, root, url_of)
 
     root = os.path.realpath(output_dir)
     window = 2 * policy.connections  # responses held at once stay bounded
@@ -303,7 +313,8 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         return saved.get(k)
 
     local = {k: f for k in (*saved, *moved) if (f := file_of(k))}
-    relink(pages, local, report)
+    relink(pages, local, report, scripts, parse_scripts=policy.parse_scripts,
+           extended_parsing=policy.extended_parsing)
     chosen: dict[str, tuple[bool, str]] = {}
     for k, asked in requested.items():
         if (f := file_of(k)) is not None:
