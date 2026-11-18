@@ -325,3 +325,38 @@ def test_pack_md_drops_links_to_the_page_itself(tmp_path):
     for extra in ((), ("--context-header",)):
         out = _pack(tmp_path, "md", "--no-index", *extra, pages={"page.html": page})
         assert "See above and [other](other.html)." in next(out.glob("*.md")).read_text()
+
+
+# ---------------------------------------------------------------------------
+# <br> separates its neighbours (issue #116)
+# ---------------------------------------------------------------------------
+
+BR_CELL = ("<table><tr><th>Name</th><th>Example</th></tr><tr><td>debuglog</td>"
+           "<td><code>-debuglog=All</code><br/><code>-debuglog=Network,Sound</code></td></tr></table>")
+
+
+def test_br_in_a_table_cell_separates_the_values_and_keeps_the_row_on_one_line():
+    assert md(BR_CELL).splitlines()[-1] == (
+        "| debuglog | -debuglog=All; -debuglog=Network,Sound |")
+
+
+def test_br_in_a_table_cell_separates_the_values_in_txt():
+    assert "-debuglog=All\n-debuglog=Network,Sound" in strip_html(BR_CELL)
+
+
+@pytest.mark.parametrize("markdown", [True, False])
+def test_br_in_body_text_is_a_line_break_inside_one_paragraph(markdown):
+    out = strip_html("<p>one<br>two <br/> <br>three</p><p>four</p>", markdown=markdown)
+    assert out == "one\ntwo\nthree\n\nfour"
+
+
+@pytest.mark.parametrize("markdown", [True, False])
+def test_br_does_not_add_words(markdown):
+    assert count_words(strip_html("<p>one<br>two</p>", markdown=markdown)) == 2
+    assert count_words(strip_html("<p>a<br>b <br> c</p>", markdown=markdown)) == count_words("a b c")
+
+
+@pytest.mark.parametrize("markdown", [True, False])
+@pytest.mark.parametrize("page", ["<p>onetwo</p>", "<p>one&#xE000;two</p>", "<p>one&amp;#xE000;two</p>"])
+def test_a_page_cannot_forge_a_br(page, markdown):
+    assert "\n" not in strip_html(page, markdown=markdown)

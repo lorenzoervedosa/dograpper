@@ -22,6 +22,10 @@ BLOCK_TAGS = frozenset({
     "table", "dl", "dt", "dd", "figcaption", "figure", "hr",
 })
 
+# What <br> leaves in the text until the prose is rendered: \s does not match it, so
+# whitespace collapsing keeps it. A page's own U+E000 is replaced by U+FFFD on the way in.
+_BR = "\ue000"
+
 # Classes naming a code block's language: MediaWiki (mw-highlight-lang-*),
 # Prism / highlight.js (language-*), lang-* and Sphinx (highlight-*). The name
 # becomes the fence's info string, so it is limited to characters that cannot
@@ -127,6 +131,8 @@ class HTMLStripper(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in self.ignore_tags:
             self.ignore = True
+        elif tag == "br" and not self.ignore and not self.pre.depth:
+            self.text.append(_BR)
         self.pre.starttag(tag, attrs)
 
     def handle_endtag(self, tag):
@@ -145,7 +151,7 @@ class HTMLStripper(HTMLParser):
         if self.pre.depth:
             self.pre.data(d)
         else:
-            self.text.append(d)
+            self.text.append(d.replace(_BR, "\ufffd"))
 
 
 def strip_html(text: str, markdown: bool = False, page: str = "") -> str:
@@ -209,12 +215,13 @@ def _flatten(parts: list):
 
 def _prose_blocks(data: str) -> list:
     # Unescape HTML entities that might be lingering
-    data = html.unescape(data)
+    # (an entity can decode to the marker here, so each piece is neutralized after decoding)
+    data = _BR.join(html.unescape(piece).replace(_BR, "\ufffd") for piece in data.split(_BR))
     # Collapse 3+ newlines into exactly 2 (preserve block separators)
     data = re.sub(r'\n{3,}', '\n\n', data)
     # Within each block, collapse whitespace (but not across \n\n boundaries)
     lines = data.split('\n\n')
-    lines = [re.sub(r'\s+', ' ', block).strip() for block in lines]
+    lines = [re.sub(r' ?(?:\ue000 ?)+', '\n', re.sub(r'\s+', ' ', block)).strip() for block in lines]
     # Drop empty blocks
     return [block for block in lines if block]
 
@@ -274,7 +281,7 @@ def _inline(parts, plain: bool = False) -> str:
         else:
             out += _prose_blocks("".join(p.text if plain and isinstance(p, _Link) else p
                                          for p in run))
-    return " ".join(out)
+    return " ".join(out).replace("\n", "; ")  # a <br> in one line
 
 
 def _pipe_table(rows) -> str:
