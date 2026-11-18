@@ -12,6 +12,7 @@ import gzip
 import io
 import logging
 import re
+import zlib
 from typing import Callable, List
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
@@ -39,7 +40,11 @@ def _fetch_url(url: str, timeout: int = TIMEOUT_SECONDS) -> bytes | None:
                 return None
             data = resp.read()
             if data[:2] == b"\x1f\x8b":
-                data = gzip.decompress(data)
+                try:  # same guard as sitemap_parser._gunzip
+                    data = gzip.decompress(data)
+                except (OSError, EOFError, zlib.error) as exc:  # bad header, truncated, corrupt
+                    logger.warning(f"llms.txt: gzip decompress failed for {redact_url(url)}: {exc}")
+                    return None
             return data
     except HTTPError as exc:
         logger.info(f"llms.txt: {redact_url(url)} HTTPError {exc.code}")

@@ -1,6 +1,9 @@
 """Tests for dograpper.lib.llms_txt_parser."""
 
+import gzip
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from dograpper.lib.llms_txt_parser import (
     _parse_llms_txt,
@@ -108,6 +111,16 @@ def test_fetch_llms_txt_handles_gzip_body():
     with patch("dograpper.lib.llms_txt_parser.urlopen", return_value=_mock_response(200, body)):
         urls = fetch_llms_txt("https://gz.io/")
     assert urls == ["https://gz.io/a"]
+
+
+@pytest.mark.parametrize("body", [
+    gzip.compress(b"[A](https://gz.io/a)\n", mtime=0)[:20],               # EOFError
+    b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03not deflate data at all",  # zlib.error
+], ids=["truncated", "not-deflate"])
+def test_corrupt_gzip_body_skips_the_candidate(body, caplog):
+    with patch("dograpper.lib.llms_txt_parser.urlopen", return_value=_mock_response(200, body)):
+        assert fetch_llms_txt("https://gz.io/") == []
+    assert "gzip decompress failed" in caplog.text
 
 
 def test_fetch_param_used_when_given():
