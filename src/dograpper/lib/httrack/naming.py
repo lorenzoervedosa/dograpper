@@ -18,11 +18,14 @@ from urllib.parse import unquote, urlsplit
 from ...utils.portable_names import FORBIDDEN, claim_unique, resolve_under
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
-# An HTML page gets .html in place of these, not after them (htsname.c:1200-1215, R14):
-# htsmime.c hts_ext_dynamic, htslib.c ishtml_ext, a bare trailing dot, and every extension
-# of htsmime.c hts_mime + hts_mime_modern (is_knowntype).
-_REPLACED_EXTS = frozenset("." + e for e in """
-php3 php php4 php2 cgi asp jsp pl cfm nsf shtml phtml htmlx shtm phtm htmx
+# Names that may hold a page whatever their extension says: htsmime.c hts_ext_dynamic,
+# htslib.c ishtml_ext and a bare trailing dot.
+PAGE_EXTS = frozenset("." + e for e in """
+php3 php php4 php2 cgi asp jsp pl cfm nsf shtml phtml htmlx shtm phtm htmx htm html
+""".split()) | {"."}
+# An HTML page gets .html in place of these, not after them (htsname.c:1200-1215, R14): the
+# page extensions and every extension of htsmime.c hts_mime + hts_mime_modern (is_knowntype).
+KNOWN_EXTS = PAGE_EXTS | frozenset("." + e for e in """
 323 7z aab aac aam aas acx ai aif aifc aiff arj asf asr asx au avi avif axs bas bcpio bin
 bmp bz2 c cat cc ccad cco cdf cer cgi class clp cmx cod cpio cpt crd crl crt csh css dcr
 der dir dms doc docx dot dotx drw dtd dvi dwf dwg dxf dxr eps etx evy f90 fh fh4 fh5 fh7
@@ -37,7 +40,7 @@ skt sldx smi smil sml snd sol spc spl src sst step stl stm stp sv4cpio sv4crc sv
 tcl tex texi texinfo tgz tif tiff torrent tr trm ts tsv ttf txt uls unv ustar vcd vcf vda
 vrml w6w wasm wav wcm wdb weba webm webmanifest webp wks wmf wmv woff woff2 word wps wri
 wrl wrz xaf xbm xla xlc xlm xls xlsx xlt xltx xlw xml xof xpm xwd xyz z zip zst
-""".split()) | {"."}
+""".split())
 
 
 class NameRegistry:
@@ -97,5 +100,5 @@ class NameRegistry:
         if is_html and ext.lower() not in (".html", ".htm"):
             # shortcut: no htssniff.c magic check, so a real PDF served as text/html still
             # gets doc.html where HTTrack keeps doc.pdf; upgrade if mislabeled binaries matter.
-            ext = ".html" if ext.lower() in _REPLACED_EXTS else ext + ".html"
+            ext = ".html" if ext.lower() in KNOWN_EXTS else ext + ".html"
         return resolve_under(self._root, host, *segs, stem + ext)

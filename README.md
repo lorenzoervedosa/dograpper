@@ -298,8 +298,8 @@ The Playwright crawl's per-page `Downloading: <url>` line needs `--verbose`.
 read from `"filter": [...]` in `.dograpper.json` (a list; explicit flags replace
 it) and is forwarded by `sync`. It works with both downloaders and is applied to
 every discovered link before it is fetched: the llms.txt and sitemap lists,
-`wget --mirror`, the Playwright crawl, and the httrack profile's seeded list and
-redirect targets. The start URL itself is never filtered.
+`wget --mirror`, the Playwright crawl, and the httrack profile's seeded list,
+recursive crawl and redirect targets. The start URL itself is never filtered.
 
 - `+pattern` accepts the URLs it matches and `-pattern` refuses them. Rules are
   read in order and the **last** matching rule decides.
@@ -359,7 +359,50 @@ Precedence is unchanged: defaults < JSON < explicit CLI.
   behavior (robots.txt longest-match, retries, pacing). Layers 1 and 2
   discover URLs through the same identity, following up to 5 same-host
   redirects with a robots.txt check before every hop; the seeded URLs are
-  then fetched by the new engine.
+  then fetched by the new engine. When neither layer finds a list, the
+  engine crawls the site from the start URL instead of `wget --mirror`
+  (below).
+
+**Recursive crawl (`httrack`).** Breadth-first from the start URL, as
+HTTrack's mirror loop:
+
+- **Links:** `href` and HTTrack's link attributes (`src`, `srcset`,
+  `data-src`, `poster`, `background`, `data`, `longdesc`, `xlink:href`...),
+  `<meta http-equiv="refresh">` and CSS `url()` / `@import` (`<style>`,
+  `style=` and fetched stylesheets). `<base href>` applies to the links after
+  it; form `action` is never followed. A `<meta name="robots"
+  content="nofollow">` stops link extraction for the rest of that page
+  (ignored with `--no-robots`). Each request carries the `Referer` and the
+  `Sec-Fetch-*` values HTTrack sends for that kind of link.
+- **Scope:** the start host only; under the start URL's directory
+  (`/docs/index.html` → `/docs/`, `/modding` → `/`, `/modding/` →
+  `/modding/`) unless a `--filter` rule decides; `--depth` counts link hops
+  from the start URL (0 = unlimited); `/cdn-cgi/` is never fetched; at most
+  `--max-links` URLs, after which the report says `Partial`. Links whose
+  extension HTTrack knows as a non-page type outside `--include-extensions`
+  (images, CSS, PDF...) are not requested; any other page is fetched, its
+  links followed, and kept only when its saved name passes
+  `--include-extensions`.
+- **Dedup and names:** a URL is fetched once per HTTrack key (fragment
+  dropped, `//` collapsed, query keys sorted) and saved with the same names
+  as the seeded fetch.
+- **Redirects:** the target is queued as a fresh link and passes the same
+  scope, filter and robots checks; links to the redirecting URL then point at
+  the target's file.
+- **Links rewritten** (HTTrack `-K0`): once the crawl ends, every saved HTML
+  page links to the files saved for its links with relative paths, other
+  links become absolute URLs, and `<base href>` is emptied. The mirror browses
+  offline and `pack --cross-refs` resolves its links. No other byte of the
+  page changes.
+- **Output is deterministic:** requests run in parallel, but responses are
+  handled in queue order, so names, files, report and manifest never depend on
+  which request finished first.
+- **Progress:** `[progress] httrack crawl: 142 files · 8.3 MB · 1m12s ·
+  queued 41 · last: https://example.com/guide/`.
+- **Exit 1** when the start URL (or the redirect chain it starts) is refused,
+  challenged, blocked by robots.txt or leaves the host. A crawl that saves at
+  most one HTML page, or an SPA shell, would fall back to Playwright, which the
+  profile does not have yet (see below).
 
 `[httrack]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
@@ -390,6 +433,11 @@ protect the corpus:
 - TLS certificate verification stays on.
 - robots rules are matched on the percent-escaped target, per RFC 9309;
   redirects when fetching robots.txt are followed on the same host only.
+- A start URL that redirects out of its directory on the same host moves the
+  crawl scope to the target's directory (HTTrack would mirror nothing).
+- A `--filter` rule never widens the crawl to another host.
+- No asset mirroring: the crawl does not request links whose extension is a
+  known non-page type left out of `--include-extensions`.
 
 **OpenSSL >= 3.5.** The TLS handshake only matches HTTrack's on OpenSSL 3.5
 or newer; on older builds `dograpper` warns and some CDNs may reject the
@@ -402,11 +450,13 @@ the profile advertise and decode `br` / `zstd` over TLS. Without them it
 advertises only what it can decode. Python 3.14's stdlib `compression.zstd`
 is used when available. The release binary includes this extra.
 
-**Current gaps (fail loud, exit 1).** Under `httrack`, recursive crawling
-(cascade layer 3 when no llms.txt/sitemap wins) and the Playwright fallback
-are not implemented yet; use `--downloader wget` for those sites. Link
-rewriting also lands later, so `pack --cross-refs` finds fewer references in
-httrack-fetched trees.
+**Current gaps (temporary).** Under `httrack`, the Playwright fallback is
+not implemented yet and fails loud (exit 1); use `--downloader wget` for
+those sites. Until a follow-up PR under #78 ports them
+([#122](https://github.com/lorenzoervedosa/dograpper/issues/122)), the crawl
+does not scan JavaScript (HTTrack `-j`) or guess URLs in other attributes and
+script strings (HTTrack `-%P`), so a page that only a script links to is not
+fetched. Neither is a deviation from HTTrack.
 
 #### Incremental
 
@@ -432,8 +482,9 @@ date; the Playwright and httrack layers record the URL they requested for
 each file they write. After a redirect it is still the requested URL, never
 the one the server redirected to: that one can carry a secret (a presigned
 `X-Amz-Signature=...` link, a `token=`), and the manifest and every pack
-built from it are meant to be shared. When several httrack seeds redirect to
-one file, the one that needed no redirect wins, else the smallest URL.
+built from it are meant to be shared. When several httrack seeds (or crawled
+links) reach one file, the one that needed no redirect wins, else the
+smallest URL.
 `user:password@` is dropped. A URL with a query is recorded only when every
 parameter name is a navigation name (`title`, `oldid`, `curid`, `diff`,
 `pagefrom`, `pageuntil`, `from`, `until`, `page`, `p`, `id`, `lang`,
@@ -1328,7 +1379,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
-| 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
+| 1 | download --downloader httrack | every seed, or the start URL of the crawl, refused/challenged | retry later, switch to `--downloader wget`, or change network |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |

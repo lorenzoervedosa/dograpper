@@ -289,7 +289,7 @@ def _run_download_cascade(
                    "refuses, the last match wins (e.g. --filter '-*' --filter '+example.com/wiki/On*')")
 @click.option('--downloader', type=click.Choice(['wget', 'httrack']), default='wget',
               show_default=True,
-              help="Download backend: wget (default) or the httrack profile (pure-Python seeded fetch)")
+              help="Download backend: wget (default) or the httrack profile (pure-Python fetch and crawl)")
 @click.option('--user-agent', type=str, default=None,
               help="[httrack] User-Agent header (default: dograpper identifier)")
 @click.option('--no-robots', is_flag=True, default=False,

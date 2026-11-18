@@ -365,6 +365,22 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     failure row.
   - Otherwise it exits 0, even with per-page errors, which the report shows.
 
+## Known gaps (temporary)
+
+These are not deviations. Each is an HTTrack behavior the profile does not have
+yet and will get; none is approved as a difference from HTTrack.
+
+- **JavaScript scan (`-j`) and extended parsing (`-%P`)** are not in the
+  recursive crawl of PR 2.
+  - HTTrack runs both by default (`src/htslib.c:5406`, `5425`;
+    `src/htsparse.c:2160-2276`), so it follows URLs that only a script, or an
+    attribute outside its link table, names (§5.5).
+  - Pending a follow-up PR under #78 (#122).
+  - Reason: the linear-time tokenizer came first. PR 2 replaced `html.parser`,
+    which is quadratic on unclosed tags before CPython's 2025 fixes, with its
+    own tokenizer in `lib/httrack/links.py`. Both scanners will be ported onto
+    it, so parsing stays linear on hostile pages.
+
 ## 6. Code layout (proposal; the plan may refine)
 
 | File | Change |

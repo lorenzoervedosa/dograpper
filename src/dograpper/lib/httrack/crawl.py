@@ -3,7 +3,7 @@
 import logging
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
@@ -15,8 +15,9 @@ from dograpper.utils.redact import redact_url
 
 from .escape import request_target
 from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
+from .links import rewrite_links
 from .naming import NameRegistry
-from .policy import HttrackPolicy
+from .policy import NAVIGATION, FetchMeta, HttrackPolicy
 from .report import RunReport
 
 logger = logging.getLogger(__name__)
@@ -40,13 +41,15 @@ def _count(report: RunReport, status: int | None, error: bool) -> None:
 
 
 def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lock,
-               redirect_ok: Callable[[str, str], bool], *, kind: str = "navigate",
-               referer: str | None = None) -> tuple[str, str, FetchResult | None]:
+               redirect_ok: Callable[[str, str], bool] | None, *, kind: str = "navigate",
+               referer: str | None = None,
+               meta: FetchMeta = NAVIGATION) -> tuple[str, str, FetchResult | None]:
     """GET `url` for every fetch path: /cdn-cgi/ is never requested, robots.txt is checked
     before each hop, and a redirect is followed (at most MAX_REDIRECTS) only when
     `redirect_ok(url, target)`, called under `lock`, accepts the target. Return ("ok",
     final URL, result) for a 2xx that is no challenge, else ("scoped" | "refused", URL,
-    None) with the cause recorded in `report` (an error names `referer`)."""
+    None) with the cause recorded in `report` (an error names `referer`). Without
+    `redirect_ok` a redirect is not followed: ("moved", target, result)."""
     via, hops = (redact_url(referer) if referer else None), 0
     while True:
         safe = redact_url(url)
@@ -71,7 +74,7 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 report.robots_blocked.append(safe)
             logger.info("robots.txt disallows %s", safe)
             return "refused", url, None
-        res = fetcher.get(url, kind=kind, referer=referer)
+        res = fetcher.get(url, kind=kind, referer=referer, meta=meta)
         # the fetcher keeps a 3xx's Location even when its body fails to decode
         redirect = bool(res.status in REDIRECTS and res.location)
         with lock:
@@ -86,6 +89,8 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 except ValueError:
                     report.errors.append((safe, "malformed redirect Location", via))
                     return "refused", url, None
+                if redirect_ok is None:
+                    return "moved", nxt, res
                 if not redirect_ok(url, nxt):
                     return "scoped", url, None
                 if hops >= MAX_REDIRECTS:
@@ -100,6 +105,21 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 report.errors.append((safe, f"HTTP {res.status}", via))
                 return "refused", url, None
         return "ok", url, res
+
+
+def relink(pages: Mapping[str, str], local: Mapping[str, str], report: RunReport) -> None:
+    """Rewrite the links of the saved HTML `pages` (file -> URL it was fetched from) as
+    HTTrack -K0 does, `local` mapping links.url_key() to saved files; a failure is an error
+    of the report, the page keeps its links."""
+    for path, url in pages.items():
+        try:
+            with open(path, "rb") as f:
+                body = f.read()
+            new = rewrite_links(body, url, path, local)
+            if new is not body:
+                atomic_write_bytes(path, new)
+        except OSError as exc:
+            report.errors.append((redact_url(url), f"link rewrite failed: {exc}", None))
 
 
 def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,

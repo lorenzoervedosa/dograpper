@@ -60,8 +60,16 @@ and fixes alone are a PATCH bump.
   fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
-  `--max-retry-after`, `--disable-security-limits`). Recursive crawl and the
-  Playwright fallback fail loud under this profile for now.
+  `--max-retry-after`, `--disable-security-limits`). When llms.txt and the
+  sitemap give no URL list, it crawls the site from the start URL as HTTrack
+  does: links from `href`, HTTrack's link attributes, meta refresh and CSS;
+  the start host and directory, `--filter` and `--depth` link hops as scope;
+  meta robots `nofollow` honored and `/cdn-cgi/` never fetched; redirect
+  targets queued as links; a deterministic output whatever the request order;
+  `[progress] httrack crawl:` lines. Links between saved pages are rewritten
+  to relative paths (HTTrack `-K0`), so the mirror browses offline and `pack
+  --cross-refs` resolves them. The Playwright fallback fails loud under this
+  profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
@@ -98,7 +106,8 @@ and fixes alone are a PATCH bump.
   `sync`): HTTrack scan rules (`+pattern` accepts, `-pattern` refuses, the last
   match wins) applied to every discovered link before it is fetched, under both
   downloaders: the llms.txt/sitemap lists, `wget --mirror` (as
-  `--accept-regex`/`--reject-regex`), Playwright and httrack redirect targets.
+  `--accept-regex`/`--reject-regex`), Playwright, and the httrack crawl and
+  redirect targets.
   A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
   filtered. Refused URLs are counted as `Filtered by --filter: N` in the
   summary ([#96](https://github.com/lorenzoervedosa/dograpper/issues/96)).
