@@ -168,6 +168,16 @@ def _referer_value(page: str | None) -> str | None:
         return None
 
 
+def _port(parts) -> int:
+    """htsfetch.c origin_of: the explicit port, else the scheme default, which is also what a
+    port out of range (1-65535) or not a number gets; never a ValueError."""
+    default = 443 if parts.scheme == "https" else 80
+    try:
+        return parts.port or default
+    except ValueError:
+        return default
+
+
 def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
     """Sec-Fetch-Site of a request from page `referer` (R16, htsfetch.c hts_fetch_site_of)."""
     if not referer:
@@ -176,8 +186,7 @@ def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
     if (a.scheme == "https") != (b.scheme == "https"):
         return "cross-site"
     if a.hostname == b.hostname:
-        default = 443 if b.scheme == "https" else 80
-        return "same-origin" if (a.port or default) == (b.port or default) else "same-site"
+        return "same-origin" if _port(a) == _port(b) else "same-site"
     return "same-site" if _site_key(a.hostname or "") == _site_key(b.hostname or "") \
         else "cross-site"
 
