@@ -100,6 +100,16 @@ class TestExtractWithHeadings:
         doc = extract_with_headings("<p>text</p>", source_path="docs/api.html")
         assert doc.source_path == "docs/api.html"
 
+    def test_pre_is_fenced_verbatim_like_strip_html(self):
+        html = ('<h1>Events</h1><div class="mw-highlight mw-highlight-lang-lua">'
+                '<pre>if x then\n\n    print(x)\nend</pre></div><p>After.</p>')
+        doc = extract_with_headings(html)
+        assert doc.text == "Events\n\n```lua\nif x then\n\n    print(x)\nend\n```\n\nAfter."
+
+    def test_unclosed_pre_keeps_its_text(self):
+        doc = extract_with_headings("<h1>T</h1><pre>a\n  b")
+        assert doc.text == "T\n\n```\na\n  b\n```"
+
     def test_empty_html(self):
         doc = extract_with_headings("")
         assert doc.text == ""

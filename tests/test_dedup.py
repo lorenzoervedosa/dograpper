@@ -51,6 +51,19 @@ class TestSplitBlocks:
     def test_empty_text(self):
         assert _split_blocks("") == []
 
+    def test_keeps_a_fenced_block_with_blank_lines_whole(self):
+        text = "Intro.\n\n```lua\nlocal a = 1\n\n\n    return a\n```\n\nAfter."
+        assert _split_blocks(text) == [
+            "Intro.", "```lua\nlocal a = 1\n\n\n    return a\n```", "After."]
+
+    def test_many_fenced_blocks_split_in_one_pass(self):
+        # Untrusted pages can hold thousands of blocks; a separator-by-span scan is quadratic.
+        block = "```\na\n\nb\n```"
+        text = "\n\n".join(f"p{i}\n\n{block}" for i in range(20000))
+        blocks = _split_blocks(text)
+        assert len(blocks) == 40000
+        assert blocks[1] == block and blocks[-1] == block
+
 
 # ---------------------------------------------------------------------------
 # _normalize
@@ -355,12 +368,34 @@ class TestDeduplicateLeadingToken:
         assert ZOOM_DESC in result.texts["b.txt"]
         assert result.stats.blocks_kept_leading_token == 1
 
+    def test_leading_token_skips_the_code_fence(self):
+        a, b = f"```lua\n{POSITION_DESC}\n```", f"```lua\n{ZOOM_DESC}\n```"
+        assert _distance(a, b) <= 10
+        result = deduplicate({"a.html": a, "b.html": b}, mode="fuzzy", hamming_threshold=10)
+        assert result.texts == {"a.html": a, "b.html": b}
+        assert result.stats.blocks_kept_leading_token == 1
+
     def test_leading_token_skips_list_bullets(self):
         a, b = f"- {POSITION_DESC}", f"- {ZOOM_DESC}"
         assert _distance(a, b) <= 10
         result = deduplicate({"a.txt": a, "b.txt": b}, mode="fuzzy", hamming_threshold=10)
         assert result.stats.blocks_removed == 0
         assert result.stats.blocks_kept_leading_token == 1
+
+
+class TestDeduplicateCodeBlocks:
+
+    def test_blank_line_does_not_split_a_code_block(self):
+        # The first half is identical on both pages; split at the blank line it
+        # would be removed from b.html, leaving a broken block behind.
+        shared = "local shared = require('module') -- the same ten words on both pages"
+        texts = {
+            "a.html": f"```lua\n{shared}\n\nprint('only on the first page')\n```",
+            "b.html": f"```lua\n{shared}\n\nprint('only on the second page')\n```",
+        }
+        result = deduplicate(texts, mode="exact")
+        assert result.texts == texts
+        assert result.stats.blocks_removed == 0
 
 
 class TestDeduplicateNumbersOnly:

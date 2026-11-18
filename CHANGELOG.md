@@ -166,6 +166,15 @@ and fixes alone are a PATCH bump.
   `\u003e`, so a heading or source path holding `-->` no longer closes the
   `dograpper-context-v1` comment early; JSON parsers read the same value.
   ([ADR-0010](docs/adr/0010-per-page-pack-layout.md))
+- `pack` keeps the line breaks and indentation of HTML `<pre>` blocks in
+  `md`, `txt` and `jsonl` instead of flattening each one to a single line.
+  `md` writes them as fenced code blocks tagged with the language named by a
+  `mw-highlight-lang-*`, `language-*`, `lang-*` or Sphinx `highlight-*` class
+  (` ```lua `); `txt`
+  and `jsonl` carry the code without the fence. `--dedup` and chunking no
+  longer split a code block at a blank line, and `--score` counts a fenced
+  block as intact even when its code holds backticks or a `<pre>` sample.
+  ([#86])
 
 ### Security
 
@@ -252,3 +261,4 @@ and fixes alone are a PATCH bump.
 [#84]: https://github.com/lorenzoervedosa/dograpper/issues/84
 [#85]: https://github.com/lorenzoervedosa/dograpper/issues/85
 [#93]: https://github.com/lorenzoervedosa/dograpper/issues/93
+[#86]: https://github.com/lorenzoervedosa/dograpper/issues/86

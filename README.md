@@ -426,6 +426,16 @@ contents, "copy to clipboard" buttons, version banners, cookie and
 announcement banners, feedback widgets, edit-on-github links. Use
 `--no-extract` to keep the full HTML.
 
+Code blocks (`<pre>`) keep their line breaks and indentation, with or
+without extraction. `md` writes each one as a fenced block whose language
+comes from a `mw-highlight-lang-*`, `language-*`, `lang-*` or Sphinx
+`highlight-*` class on the `<pre>`, a `<code>` inside it or the nearest
+enclosing `<div>` that names one (` ```lua `). A bare fence is written when
+none is declared or the class is a placeholder (`highlight-default`,
+`highlight-none`, `language-none`). The fence grows past any backtick run in
+the code. `txt` and `jsonl` carry the code without the fence. Dedup and
+chunking treat a code block as one unit, blank lines included.
+
 #### Deduplication (`--dedup`)
 
 Removes text blocks duplicated across files (headers, footers,

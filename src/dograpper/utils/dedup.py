@@ -4,7 +4,8 @@ Two strategies:
 - exact: MD5 hashing of blocks to eliminate 100% identical duplicates.
 - fuzzy: simhash to identify near-identical blocks (similarity > threshold).
 
-Blocks = text segments separated by blank lines (paragraphs).
+Blocks = text segments separated by blank lines (paragraphs); a fenced code
+block is one block, blank lines included.
 
 Dedup is cross-file: a match only removes a block when no keep rule applies
 (see _keep_reason).
@@ -14,6 +15,8 @@ import hashlib
 import re
 import logging
 from dataclasses import dataclass
+
+from .code_fence import split_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -171,14 +174,15 @@ def _keep_reason(path: str, text: str, other_path: str, other_text: str):
 
 
 def _leading_token(text: str) -> str:
-    """First token holding a letter or digit, skipping list bullets and pipes."""
-    return next((t for t in text.split() if re.search(r"\w", t)), "")
+    """First token holding a letter or digit, skipping list bullets, pipes and
+    a code fence (```lua), so code blocks are keyed by their first code token."""
+    return next((t for t in text.split()
+                 if re.search(r"\w", t) and not t.startswith("```")), "")
 
 
 def _split_blocks(text: str) -> list:
-    """Split text into blocks separated by blank lines."""
-    raw_blocks = text.split("\n\n")
-    return [b.strip() for b in raw_blocks if b.strip()]
+    """Split text into blocks separated by blank lines, keeping code blocks whole."""
+    return [b.strip() for b in split_blocks(text) if b.strip()]
 
 
 def _normalize(text: str) -> str:

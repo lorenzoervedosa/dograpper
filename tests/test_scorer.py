@@ -87,6 +87,12 @@ class TestFindBoundaryIssues:
         assert issues[0].line == 1
         assert issues[0].snippet == "</pre>"
 
+    def test_longer_fence_holding_backticks_is_intact(self):
+        assert find_boundary_issues("````\n```\nnested\n````\n\nText.") == []
+
+    def test_pre_tag_inside_a_closed_fence_is_code(self):
+        assert find_boundary_issues("```html\n<pre>never closed\n```") == []
+
     def test_fence_and_pre_issues_together(self):
         text = "```\ncode\n\n<pre>never closed"
         issues = find_boundary_issues(text)

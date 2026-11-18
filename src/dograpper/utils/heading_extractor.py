@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from dataclasses import dataclass
 from typing import List, Dict
 
-from .html_stripper import BLOCK_TAGS, render_text
+from .html_stripper import BLOCK_TAGS, PreCapture, render_text
 
 
 @dataclass
@@ -45,6 +45,7 @@ class _HeadingExtractorParser(HTMLParser):
         self._heading_level: int = 0
         self._heading_parts: list = []
         self._current_offset: int = 0
+        self._pre = PreCapture()
 
     def handle_starttag(self, tag, attrs):
         if tag in SKIP_TAGS:
@@ -52,6 +53,7 @@ class _HeadingExtractorParser(HTMLParser):
             return
         if self._skip_depth > 0:
             return
+        self._pre.starttag(tag, attrs)
         if tag in HEADING_TAGS:
             self._in_heading = True
             self._heading_level = int(tag[1])
@@ -72,7 +74,10 @@ class _HeadingExtractorParser(HTMLParser):
                     char_offset=self._current_offset,
                 ))
             self._in_heading = False
-        if tag in BLOCK_TAGS:
+        code = self._pre.endtag(tag)
+        if code:
+            self._output.append(code)
+        if tag in BLOCK_TAGS and not self._pre.depth:
             self._output.append("\n\n")
             self._current_offset += 2
 
@@ -81,11 +86,14 @@ class _HeadingExtractorParser(HTMLParser):
             return
         if self._in_heading:
             self._heading_parts.append(data)
-        self._output.append(data)
+        if self._pre.depth:
+            self._pre.data(data)
+        else:
+            self._output.append(data)
         self._current_offset += len(data)
 
     def get_result(self):
-        return render_text(self._output), self._headings
+        return render_text(self._output + self._pre.close()), self._headings
 
 
 def extract_with_headings(html: str, source_path: str = "") -> ExtractedDocument:
