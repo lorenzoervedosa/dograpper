@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from dograpper.commands.pack import pack
 from dograpper.lib.source_urls import (
-    CONFLICTING, INVALID, MARKER_SCAN_BYTES, MAX_URL_CHARS, marker_url,
+    AMBIGUOUS, CONFLICTING, INVALID, MARKER_SCAN_BYTES, MAX_URL_CHARS, marker_url,
 )
 
 PAGE = "<html><head><title>T</title></head><body><h1>Title</h1><p>Some body words here.</p></body></html>"
@@ -346,3 +346,83 @@ def test_no_url_summary_without_context_header(tmp_path, monkeypatch):
     result = _pack([str(docs), "-o", str(tmp_path / "out")])
     assert result.exit_code == 0, result.output
     assert "Source URLs" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# Manifest lookup when INPUT_DIR is a subdirectory of the download output
+# ---------------------------------------------------------------------------
+
+def _wget_manifest(path, entries):
+    """Manifest as `download -o mirror` writes it: local_path is relative to
+    the download output and keeps wget's <netloc>/ directory; the key drops it."""
+    files = {lp.split("/", 1)[1]: {"url": url, "size_bytes": 1, "local_path": lp}
+             for lp, url in entries.items()}
+    _write(path, json.dumps({"base_url": "", "last_run": "", "files": files}))
+
+
+def _site(tmp_path):
+    mirror = tmp_path / "mirror"
+    for rel in ("example.com/index.html", "example.com/guide/index.html",
+                "example.com/guide/a.html"):
+        _write(mirror / rel, PAGE)
+    _wget_manifest(tmp_path / ".dograpper-manifest.json", {
+        "example.com/index.html": "https://example.com/",
+        "example.com/guide/index.html": "https://example.com/guide/",
+        "example.com/guide/a.html": "https://example.com/guide/a.html",
+    })
+    return mirror
+
+
+@pytest.mark.parametrize("sub, expected", [
+    ("", {"example.com/index.html": "https://example.com/",
+          "example.com/guide/a.html": "https://example.com/guide/a.html"}),
+    ("example.com", {"index.html": "https://example.com/",
+                     "guide/index.html": "https://example.com/guide/"}),
+    ("example.com/guide", {"index.html": "https://example.com/guide/",
+                           "a.html": "https://example.com/guide/a.html"}),
+])
+def test_manifest_resolves_from_a_subdirectory_of_the_mirror(tmp_path, monkeypatch, sub, expected):
+    monkeypatch.chdir(tmp_path)
+    mirror = _site(tmp_path)
+    result = _pack([str(mirror / sub), "-o", str(tmp_path / "out"), "--format", "jsonl",
+                    "--context-header"])
+    assert result.exit_code == 0, result.output
+    records = _records(tmp_path / "out")
+    for source, url in expected.items():
+        assert records[source]["url"] == url
+    assert ", 0 without" in result.output
+
+
+def test_relative_input_dir_resolves(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _site(tmp_path)
+    result = _pack(["mirror/example.com/guide", "-o", "out", "--format", "jsonl", "--context-header"])
+    assert result.exit_code == 0, result.output
+    assert _records(tmp_path / "out")["a.html"]["url"] == "https://example.com/guide/a.html"
+
+
+def test_ambiguous_manifest_match_gives_no_url(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    docs = tmp_path / "mirror" / "example.com" / "guide"
+    _write(docs / "a.html", _page(_httrack("https://marker.example.com/a")))
+    # Both "guide/a.html" and "example.com/guide/a.html" name the same file
+    # from an ancestor of INPUT_DIR; neither can be told to be the right one.
+    _manifest(tmp_path / ".dograpper-manifest.json", {
+        "guide/a.html": "https://one.example.com/a",
+        "example.com/guide/a.html": "https://two.example.com/a",
+    })
+    result = _pack([str(docs), "-o", str(tmp_path / "out"), "--format", "jsonl", "--context-header"])
+    assert result.exit_code == 0, result.output
+    assert "url" not in _records(tmp_path / "out")["a.html"]
+    assert f"    a.html: {AMBIGUOUS}" in result.output
+
+
+def test_manifest_without_local_path_matches_by_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write(tmp_path / "docs" / "a.html", PAGE)
+    _write(tmp_path / ".dograpper-manifest.json", json.dumps(
+        {"files": {"a.html": {"url": "https://example.com/a", "size_bytes": 1}}}))
+    result = _pack([str(tmp_path / "docs"), "-o", str(tmp_path / "out"), "--format", "jsonl",
+                    "--context-header"])
+    assert result.exit_code == 0, result.output
+    assert _records(tmp_path / "out")["a.html"]["url"] == "https://example.com/a"

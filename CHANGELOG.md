@@ -82,6 +82,11 @@ and fixes alone are a PATCH bump.
   PATH is missing or cannot be loaded, instead of silently packing without
   URLs. A broken file at the default manifest path is reported as a note and
   skipped. ([#90])
+- `pack --context-header` resolves manifest URLs when `INPUT_DIR` is a
+  subdirectory of the download output, instead of matching nothing. Files are
+  matched on their path in the mirror, so a page in a subdirectory no longer
+  takes the URL of a same-named page at the site root; a file that matches
+  several entries gets no `url` and is listed in the summary. ([#90])
 
 ### Security
 

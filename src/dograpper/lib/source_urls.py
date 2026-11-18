@@ -1,14 +1,17 @@
 """Source URL of each packed file, for --context-header.
 
-A file's download-manifest entry wins. Without one, an HTML page's URL comes
-from the marker an offline copy left in its head: HTTrack's footer comment or
-the "saved from url=" comment a browser's "Save page as" writes. A marker is
-page content, so its value is validated before it reaches any record.
+A file's download-manifest entry wins, matched on its path in the mirror even
+when a subdirectory of the download output is packed. Without one, an HTML
+page's URL comes from the marker an offline copy left in its head: HTTrack's
+footer comment or the "saved from url=" comment a browser's "Save page as"
+writes. A marker is page content, so its value is validated before it reaches
+any record.
 """
 
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -23,6 +26,7 @@ MAX_SHOWN_MISSING = 10
 NO_SOURCE = "no manifest entry or page marker"
 INVALID = "invalid page marker"
 CONFLICTING = "conflicting page markers"
+AMBIGUOUS = "several manifest entries match"
 
 _MARKER = re.compile(r"<!--\s*(Mirrored from |saved from url=)")
 # HTTrack's default footer (htsglobal.h HTS_DEFAULT_FOOTER):
@@ -111,24 +115,33 @@ def marker_url(head: str) -> tuple[Optional[str], Optional[str]]:
     return (urls.pop() if urls else None), None
 
 
-def _manifest_url(manifest, rel: str) -> Optional[str]:
-    if manifest is None:
-        return None
-    for key, entry in manifest.files.items():
-        if (entry.local_path or key) == rel or key == rel:
-            return entry.url
-    return None
+def _dir_prefixes(input_dir: str) -> list[str]:
+    """Path of ``input_dir`` relative to itself and to each of its ancestors.
+
+    A manifest's local_path is relative to the download output directory,
+    which is ``input_dir`` itself or, when a subdirectory of the mirror is
+    packed, one of its ancestors.
+    """
+    parts = Path(os.path.abspath(input_dir)).parts[1:]
+    return [""] + ["/".join(parts[i:]) + "/" for i in range(len(parts) - 1, -1, -1)]
 
 
 def resolve_source_urls(paths, input_dir: str, manifest) -> UrlResolution:
     """Source URL of each file in ``paths`` (under ``input_dir``)."""
     res = UrlResolution()
+    by_local = {(entry.local_path or key): entry.url
+                for key, entry in (manifest.files.items() if manifest else ())
+                if entry.url}
+    prefixes = _dir_prefixes(input_dir)
     for path in paths:
         rel = os.path.relpath(path, input_dir).replace(os.sep, '/')
-        url = _manifest_url(manifest, rel)
-        if url:
-            res.urls[rel] = url
+        hits = {by_local[p + rel] for p in prefixes if p + rel in by_local}
+        if len(hits) == 1:
+            res.urls[rel] = hits.pop()
             res.from_manifest += 1
+            continue
+        if hits:
+            res.missing.append((rel, AMBIGUOUS))
             continue
         reason = NO_SOURCE
         if path.lower().endswith(('.html', '.htm')):
