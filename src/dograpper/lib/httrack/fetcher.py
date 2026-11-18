@@ -14,7 +14,8 @@ from urllib.parse import urljoin, urlsplit
 from ...utils.challenge import is_challenge
 from ...utils.redact import drop_userinfo, redact_url
 from .escape import request_target
-from .policy import ZSTD_MAX_WINDOW, HttrackPolicy, decoder_module, make_ssl_context, request_headers
+from .policy import (NAVIGATION, ZSTD_MAX_WINDOW, FetchMeta, HttrackPolicy, decoder_module,
+                     make_ssl_context, request_headers)
 from .robots import NO_RULES, RobotsRules, parse_robots
 
 logger = logging.getLogger(__name__)
@@ -267,7 +268,8 @@ class Fetcher:
 
     # -- public --
 
-    def get(self, url: str, *, kind: str, referer: str | None = None) -> FetchResult:
+    def get(self, url: str, *, kind: str, referer: str | None = None,
+            meta: FetchMeta = NAVIGATION) -> FetchResult:
         res = FetchResult(url)
         try:
             parts, key = urlsplit(url), _origin(url)
@@ -275,7 +277,8 @@ class Fetcher:
         except ValueError:
             res.error = "invalid URL"
             return res
-        headers = request_headers(self.policy, host, kind=kind, referer=referer, scheme=key[0])
+        headers = request_headers(self.policy, host, kind=kind, referer=referer, scheme=key[0],
+                                  meta=meta)
         for attempt in range(1, self.policy.retries + 2):
             res.attempts = attempt
             self._acquire(key)

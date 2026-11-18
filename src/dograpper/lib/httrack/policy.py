@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import ssl
 from dataclasses import dataclass
+from typing import NamedTuple
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from urllib.parse import urlsplit
 
@@ -30,6 +31,18 @@ MAX_CONN_RATE = 5.0
 MAX_BANDWIDTH = 10_000_000
 ZSTD_MAX_WINDOW = 8 * 1024 * 1024  # RFC 9659 lets a client refuse larger windows
 MAX_RETRY_AFTER_CAP = 3600  # never lifted, even by disable_security_limits
+
+
+class FetchMeta(NamedTuple):
+    """What a browser declares for a request (htsfetch.c hts_fetch_meta): Sec-Fetch-Dest
+    (hts_fetch_dest_name; "" when HTTrack cannot classify the link, which then gets no
+    fetch metadata), Sec-Fetch-Mode, and Sec-Fetch-User for a user navigation."""
+    dest: str = "document"
+    mode: str = "navigate"
+    user: bool = True
+
+
+NAVIGATION = FetchMeta()  # a start URL, as if typed in, or a followed <a href>
 
 
 @dataclass(frozen=True)
@@ -192,27 +205,29 @@ def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
 
 
 def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str | None,
-                    scheme: str) -> list[tuple[str, str]]:
-    """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked."""
+                    scheme: str, meta: FetchMeta = NAVIGATION) -> list[tuple[str, str]]:
+    """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked;
+    `meta` is the link's fetch metadata (robots requests send none)."""
     if kind not in ("robots", "navigate", "linked"):
         raise ValueError(f"unknown request kind: {kind!r}")
     secure = scheme == "https"
-    # htslib.c fetch_meta_sent: navigations only, to a trustworthy origin, with a browser UA
-    meta = (kind != "robots" and _trustworthy(scheme, host)
+    # htslib.c fetch_meta_sent: a classified link, to a trustworthy origin, with a browser UA
+    sent = (kind != "robots" and bool(meta.dest) and _trustworthy(scheme, host)
             and policy.user_agent.startswith("Mozilla/5.0 "))
     referer = _referer_value(referer)
     h: list[tuple[str, str]] = []
     if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
         h.append(("Referer", referer))  # never an https referer to an http URL
     h += [("Connection", "keep-alive"), ("Host", host)]
-    if meta and secure:
+    if sent and secure and meta.mode == "navigate":  # hts_fetch_is_navigation
         h.append(("Upgrade-Insecure-Requests", "1"))
     h += [("User-Agent", policy.user_agent), ("Accept", ACCEPT)]
-    if meta:
+    if sent:
         h += [("Sec-Fetch-Site", _fetch_site(referer, scheme, host)),
-              ("Sec-Fetch-Mode", "navigate"),
-              ("Sec-Fetch-User", "?1"),
-              ("Sec-Fetch-Dest", "document")]
+              ("Sec-Fetch-Mode", meta.mode)]
+        if meta.user:
+            h.append(("Sec-Fetch-User", "?1"))
+        h.append(("Sec-Fetch-Dest", meta.dest))
     h += [("Accept-Language", ACCEPT_LANGUAGE), ("Accept-Encoding", accept_encoding(secure))]
     return h
 
