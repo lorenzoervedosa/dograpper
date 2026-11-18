@@ -98,7 +98,7 @@ Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/lorenzoervedosa/dograpper.git
 cd dograpper
-uv sync --extra dev --extra headless --extra httrack   # same extras as CI
+uv sync --extra dev --extra headless --extra httrack --extra fire-engine   # same extras as CI
 uv run dograpper --help
 ```
 

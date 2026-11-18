@@ -179,7 +179,7 @@ action.yml                  # Composite GitHub Action: download + full pack --sc
 ```bash
 git clone <repo-url>
 cd dograpper
-uv sync --extra dev --extra headless --extra httrack   # deps + pytest + playwright (sem baixar browser) + brotli/zstd do perfil httrack
+uv sync --extra dev --extra headless --extra httrack --extra fire-engine   # deps + pytest + playwright (sem baixar browser) + brotli/zstd do perfil httrack + curl_cffi do fire-engine
 uv run dograpper --help    # verifica que está funcionando
 ```
 
@@ -302,7 +302,7 @@ rápido é só para iterar.
    importado direto por 18, `cli.py` por 21) — rode o nível 2 desde o primeiro
    teste.
 2. **Completo (cada commit, obrigatório antes de push/PR):** `uv run pytest tests/ -q`
-   com `uv sync --extra dev --extra headless --extra httrack`, como o CI. Cada
+   com `uv sync --extra dev --extra headless --extra httrack --extra fire-engine`, como o CI. Cada
    commit da branch passa sozinho; quem monta o lote confere numa worktree
    descartável (`git worktree add --detach <dir> <sha>`).
 
@@ -367,14 +367,15 @@ nem push na `main` (o guarda `.claude/hooks/block-dangerous-git.py` bloqueia).
 ## CI/CD
 
 `.github/workflows/ci.yml` roda a suíte em push para `main` e em pull request,
-numa matriz Python 3.10 / 3.12, com `uv sync --extra dev --extra headless --extra httrack`
+numa matriz Python 3.10 / 3.12, com `uv sync --extra dev --extra headless --extra httrack --extra fire-engine`
 (o extra `headless` é necessário porque `tests/test_doctor.py` faz patch de
 `playwright.__main__` — nenhum browser é baixado; sem o extra `httrack`, os
-testes de decode br/zstd são pulados em silêncio). `.github/workflows/release.yml`
-cuida do release. Para replicar o CI localmente:
+testes de decode br/zstd são pulados em silêncio; sem o extra `fire-engine`,
+os smoke tests do `curl_cffi` real em `tests/test_fire_engine.py` também).
+`.github/workflows/release.yml` cuida do release. Para replicar o CI localmente:
 
 ```bash
-uv sync --extra dev --extra headless --extra httrack
+uv sync --extra dev --extra headless --extra httrack --extra fire-engine
 uv run pytest tests/ -v
 ```
 
