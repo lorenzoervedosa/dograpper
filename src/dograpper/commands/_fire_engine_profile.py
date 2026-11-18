@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 import click
 
-from ..lib.fire_engine.fetcher import CurlCffiFetcher
+from ..lib.fire_engine.fetcher import CurlCffiFetcher, CurlCffiMissing
 from ..lib.httrack.crawl import fetch_url_list
 from ..lib.httrack.mirror import mirror_site
 from ..lib.httrack.report import format_report
@@ -37,11 +37,16 @@ def run_fire_engine(url, output, depth, delay, include_extensions, headless, ver
             "browser-fingerprint transport). Omit --headless.")
     policy = _build_policy(delay, policy_kw, from_config)
     fetcher = CurlCffiFetcher(policy, proxy=proxy, impersonate=impersonate)
-    parts = urlsplit(url)
-    try:  # curl_cffi is imported on first use; this main-thread GET is that first use
-        sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
-    except RuntimeError as e:  # curl_cffi not installed
+    try:  # curl_cffi is imported by the first GET: robots.txt, or discovery under --no-robots
+        return _run(fetcher, policy, url, output, depth, include_extensions, verbose,
+                    discover, filters)
+    except CurlCffiMissing as e:
         raise click.ClickException(str(e))
+
+
+def _run(fetcher, policy, url, output, depth, include_extensions, verbose, discover, filters):
+    parts = urlsplit(url)
+    sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
     discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints,
                                          filters)
     if discovered:

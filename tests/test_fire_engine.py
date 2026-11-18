@@ -151,6 +151,19 @@ def test_missing_curl_cffi_surfaces_before_any_request():
         fetcher.robots_for("https://example.com")
 
 
+@pytest.mark.parametrize("extra", [[], ["--no-robots"]])
+def test_missing_curl_cffi_is_a_friendly_cli_error(tmp_path, monkeypatch, extra):
+    """Without robots.txt the first session opens in discovery, not in robots_for: the
+    install hint must still be the error, never a traceback. No request is made."""
+    monkeypatch.setitem(sys.modules, "curl_cffi", None)
+    out = str(tmp_path / "o")
+    result = CliRunner().invoke(
+        cli, ["download", "http://127.0.0.1:9/", "-o", out, "--manifest", out + ".json",
+              "--downloader", "fire-engine", *extra])
+    assert result.exit_code == 1, result.output
+    assert _MISSING in result.output
+
+
 # -- CLI wiring (no network: run_fire_engine is stubbed) --------------------
 
 def test_proxy_without_fire_engine_is_a_usage_error(tmp_path):

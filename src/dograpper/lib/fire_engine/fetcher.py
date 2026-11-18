@@ -18,11 +18,15 @@ _MISSING = (
 )
 
 
+class CurlCffiMissing(RuntimeError):
+    """curl_cffi is not installed: raised by the first session, wherever it opens."""
+
+
 def _default_session_factory(impersonate: str):
     try:
         from curl_cffi import requests as cffi_requests
     except ImportError as exc:
-        raise RuntimeError(_MISSING) from exc
+        raise CurlCffiMissing(_MISSING) from exc
     return cffi_requests.Session(impersonate=impersonate)
 
 
