@@ -481,8 +481,11 @@ Optional fields (`url`, `llm_readiness`) are omitted when not available
 (they never appear as `null`). Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
 
-`url` comes from the file's entry in the download manifest (`--manifest`).
-Without one, an HTML page's URL is read from the marker an offline copy left
+`url` comes from the file's entry in the download manifest (`--manifest`),
+matched on the file's path in the mirror (`local_path`). This also works when
+`INPUT_DIR` is a subdirectory of the download output; a file that matches
+several entries that way gets no `url` and is listed in the summary. Without
+an entry, an HTML page's URL is read from the marker an offline copy left
 in its head, so mirrors made by other tools get URLs too:
 
 - HTTrack: `<!-- Mirrored from <url> by HTTrack Website Copier/... -->`.
