@@ -16,7 +16,7 @@ from click.testing import CliRunner
 from dograpper.cli import cli
 from dograpper.utils.content_extractor import extract_content
 from dograpper.utils.html_stripper import strip_html
-from dograpper.utils.mediawiki import clean, is_mediawiki, page_metadata
+from dograpper.utils.mediawiki import clean, find_redirect_aliases, is_mediawiki, page_metadata
 
 MEDIAWIKI = '<meta name="generator" content="MediaWiki 1.43.10">'
 
@@ -95,14 +95,22 @@ def _hidden_categories(*names):
 
 
 def _page(body=BODY, generator=MEDIAWIKI, title="Sample page", page_name="Sample_page",
-          categories=""):
-    config = json.dumps({"wgPageName": page_name, "wgTitle": title})
+          categories="", redirected_from=None):
+    """``redirected_from``: the page was saved through that redirect, as MediaWiki serves one."""
+    config = {"wgPageName": page_name, "wgTitle": title}
+    subtitle = ""
+    if redirected_from:
+        config["wgRedirectedFrom"] = redirected_from
+        subtitle = ('<span class="mw-redirectedfrom">(Redirected from <a href="https://wiki.example/w/'
+                    f'index.php?title={redirected_from}&amp;redirect=no" class="mw-redirect">'
+                    f'{redirected_from}</a>)</span>')
+    config = json.dumps(config)
     return (
         f'<!DOCTYPE html>\n<html lang="en"><head><meta charset="UTF-8">\n<title>{title} - Example Wiki</title>\n'
         f'<script>RLCONF={config};</script>\n{generator}\n</head>\n'
         '<body><main class="mw-body" id="content">\n'
         f'<header class="mw-body-header"><h1 id="firstHeading">{title}</h1></header>\n'
-        '<div id="bodyContent"><div id="contentSub"><div id="mw-content-subtitle"></div></div>\n'
+        f'<div id="bodyContent"><div id="contentSub"><div id="mw-content-subtitle">{subtitle}</div></div>\n'
         '<div id="mw-content-text" class="mw-body-content">'
         f'<div class="mw-content-ltr mw-parser-output" lang="en" dir="ltr">{body}</div></div></div>\n'
         f'</main>\n<footer><div id="catlinks" class="catlinks">{categories}</div></footer>\n'
@@ -226,6 +234,49 @@ def test_a_page_from_another_generator_has_no_metadata():
 
 
 # ---------------------------------------------------------------------------
+# Redirect aliases
+# ---------------------------------------------------------------------------
+
+def _files(root, pages):
+    paths = []
+    for name, html in pages.items():
+        (root / name).write_text(html, encoding="utf-8")
+        paths.append(str(root / name))
+    return paths
+
+
+def test_an_alias_whose_target_is_packed_too_is_found(tmp_path):
+    paths = _files(tmp_path, {
+        "Translation.html": _page(page_name="Translation"),
+        "Translations.html": _page(page_name="Translation", redirected_from="Translations"),
+        "Other.html": _page(page_name="Other"),
+    })
+    assert find_redirect_aliases(paths) == [str(tmp_path / "Translations.html")]
+
+
+def test_an_alias_whose_target_is_missing_is_the_only_copy_and_stays(tmp_path):
+    paths = _files(tmp_path, {"Fliers.html": _page(page_name="Flier", redirected_from="Fliers")})
+    assert find_redirect_aliases(paths) == []
+
+
+def test_of_two_aliases_of_a_missing_target_the_first_stays(tmp_path):
+    paths = _files(tmp_path, {
+        "Fliers.html": _page(page_name="Flier", redirected_from="Fliers"),
+        "Flyers.html": _page(page_name="Flier", redirected_from="Flyers"),
+    })
+    assert find_redirect_aliases(paths) == [str(tmp_path / "Flyers.html")]
+
+
+def test_only_mediawiki_html_pages_can_be_aliases(tmp_path):
+    paths = _files(tmp_path, {
+        "Target.html": _page(page_name="Target", generator=""),
+        "Alias.html": _page(page_name="Target", redirected_from="Alias", generator=""),
+        "notes.md": _page(page_name="Target", redirected_from="Notes"),
+    })
+    assert find_redirect_aliases(paths) == []
+
+
+# ---------------------------------------------------------------------------
 # Non-MediaWiki pages: byte-identical to the generic extractor of before #88
 # ---------------------------------------------------------------------------
 
@@ -324,3 +375,24 @@ def test_jsonl_records_carry_the_version_of_a_mediawiki_page_only(tmp_path):
     assert [(r["version"], r["version_status"]) for r in wiki] == [("42.10.0", "outdated")] * len(wiki)
     assert "42.10.0" not in "".join(r["content"] for r in wiki)
     assert all("version" not in r and "version_status" not in r for r in other)
+
+
+def test_pack_skips_a_redirect_alias_of_a_packed_page_and_counts_it(tmp_path):
+    src = tmp_path / "wiki"
+    src.mkdir()
+    _files(src, {
+        "Translation.html": _page(title="Translation", page_name="Translation"),
+        "Translations.html": _page(title="Translation", page_name="Translation",
+                                   redirected_from="Translations"),
+        "Fliers.html": _page(title="Flier", page_name="Flier", redirected_from="Fliers"),
+    })
+    out = tmp_path / "out"
+    result = CliRunner().invoke(cli, ["pack", str(src), "-o", str(out), "--layout", "page"],
+                                catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    assert "1 redirect alias page(s) skipped" in result.output
+    assert "  Translations.html" in result.output
+    assert "Redirect aliases: 1 (skipped, counted in Files excluded)" in result.output
+    assert "Files processed: 2" in result.output and "Files excluded:  1" in result.output
+    assert sorted(os.listdir(out / "pages")) == ["Fliers.md", "Translation.md"]
+    assert "Translations" not in (out / "INDEX.md").read_text(encoding="utf-8")

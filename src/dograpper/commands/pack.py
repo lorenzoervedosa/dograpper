@@ -354,6 +354,18 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         if not filtered_paths:
             raise click.ClickException("Every input file is a bot-challenge page; nothing to pack.")
 
+    # 6a-2. MediaWiki redirect aliases: the content of a page that is packed too, under another name (#88)
+    from ..utils.mediawiki import find_redirect_aliases
+    alias_paths = find_redirect_aliases(filtered_paths)
+    if alias_paths:
+        # Listed like the challenge pages above.
+        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
+                           for p in alias_paths)
+        click.echo(f"Note: {len(alias_paths)} redirect alias page(s) skipped "
+                   f"(the page they redirect to is packed):\n{listed}", err=True)
+        alias_set = set(alias_paths)
+        filtered_paths = [p for p in filtered_paths if p not in alias_set]
+
     # 6b. Delta gate (opt-in, after filter, before dedup)
     #
     # The manifest diff decides WHETHER this run happens, not WHICH files it
@@ -732,6 +744,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     click.echo(f"  Files excluded:  {files_excluded}")
     if challenge_paths:
         click.echo(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
+    if alias_paths:
+        click.echo(f"  Redirect aliases: {len(alias_paths)} (skipped, counted in Files excluded)")
     if page_layout:
         click.echo(f"  Pages written:   {generated_chunk_count}")
         click.echo(f"  Index:           {index_path}")

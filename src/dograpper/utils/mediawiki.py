@@ -13,7 +13,10 @@ generator meta says so (``utils/generator.py``). Measured on MediaWiki 1.43
   ``version`` and ``version_status`` (``page_metadata``), for the context
   header. A version box whose wording is not recognised stays in the text,
   so the version is never lost;
-- without a banner, the first hidden ``Version X`` category gives ``version``.
+- without a banner, the first hidden ``Version X`` category gives ``version``;
+- a redirect alias (saved through a redirect: "Redirected from") holds its
+  target's content under another file name. ``find_redirect_aliases`` names
+  the ones whose target is in the run too, for ``pack`` to skip.
 
 The cleanup cuts the dropped elements out of the page source, so the markup
 around them reaches the extractor unchanged.
@@ -22,7 +25,7 @@ around them reaches the extractor unchanged.
 import re
 from html.parser import HTMLParser
 
-from .generator import page_generator
+from .generator import SCAN_CHARS, page_generator
 
 _DROPPED_CLASSES = frozenset({"navbox", "mw-editsection"})
 _MAINTENANCE_TOGGLE = "mw-customtoggle-mbox-"
@@ -33,6 +36,8 @@ _BANNER = re.compile(r"This page (?:(has been revised for the current stable ver
                      r"|was last updated for an older version( of the current build)?) "
                      rf"\(\s*{_VERSION}\s*\)")
 _VERSION_CATEGORY = re.compile(rf"Category:Version {_VERSION}")
+# The page's JS config: a redirect is served with its target's page name and the alias it came from.
+_CONFIG = re.compile(r'"(wgPageName|wgRedirectedFrom)"\s*:\s*"((?:[^"\\]|\\.){1,500})"')
 # Only these carry the classes above, so a void element never opens a region.
 _REGION_TAGS = frozenset({"div", "span", "table"})
 
@@ -49,6 +54,31 @@ def page_metadata(html: str) -> dict:
     if scan.banner:
         return dict(zip(("version", "version_status"), scan.banner))
     return {"version": scan.category_versions[0]} if scan.category_versions else {}
+
+
+def find_redirect_aliases(paths) -> list:
+    """The redirect aliases among ``paths`` whose content another of ``paths`` already holds.
+
+    That is every alias whose target page is in ``paths``; when the target is
+    missing, the alias is its only copy and the first one (sorted) stays.
+    """
+    targets, aliases = set(), {}
+    for path in sorted(paths):
+        if not path.lower().endswith(('.html', '.htm')):
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+                head = fh.read(SCAN_CHARS)
+        except OSError:
+            continue  # unreadable files are reported by the stage that reads them
+        config = dict(_CONFIG.findall(head)) if is_mediawiki(head) else {}
+        name = config.get("wgPageName")
+        if name and "wgRedirectedFrom" in config:
+            aliases.setdefault(name, []).append(path)
+        elif name:
+            targets.add(name)
+    return sorted(p for name, group in aliases.items()
+                  for p in (group if name in targets else group[1:]))
 
 
 def clean(html: str) -> str:

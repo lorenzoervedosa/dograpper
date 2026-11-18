@@ -119,9 +119,12 @@ and fixes alone are a PATCH bump.
   stay. The version banner leaves the text too: the context header (both
   layouts) and the JSONL records gain the optional page metadata fields
   `version` and `version_status` (`current`, `outdated`, `older-build`),
-  read from the banner, else from the first hidden `Version X` category.
-  Pages from any other generator are extracted exactly as before.
-  ([schema](docs/schema-v1.md), [#88])
+  read from the banner, else from the first hidden `Version X` category. A
+  redirect alias (a page saved through a redirect, with its target's
+  content) is skipped when its target page is packed too, listed on stderr
+  and counted as `Redirect aliases: N` in the summary. Pages from any other
+  generator are extracted exactly as before. ([schema](docs/schema-v1.md),
+  [#88])
 
 ### Changed
 

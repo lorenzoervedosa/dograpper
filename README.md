@@ -493,6 +493,7 @@ Operation order (each stage reads the output of the previous one):
 
 ```
 list files → apply .docsignore → skip bot-challenge pages
+           → skip MediaWiki redirect aliases of packed pages
            → --api-records? split API reference pages into records
              (those pages skip extraction and dedup)
            → --no-extract? yes: full HTML / no: extract
@@ -532,6 +533,14 @@ current build (42.10.0).`) leaves the text too and becomes page metadata,
 first hidden `Version X` category gives `version`. A version box whose
 wording is not one of the three known ones stays in the text. Pages from any
 other generator are not touched. Measured on MediaWiki 1.43 (Citizen skin).
+
+A MediaWiki redirect alias is a page saved through a redirect ("Redirected
+from ..."): MediaWiki serves it with its target's content and page name
+(`wgPageName`). When the target page is packed too, the alias is skipped
+before extraction, listed once on stderr and counted as `Redirect aliases: N`
+(in `Files excluded`). An alias whose target is not in the input is that
+page's only copy and is packed; of several such aliases of one target, the
+first in path order is packed.
 
 Code blocks (`<pre>`) keep their line breaks and indentation, with or
 without extraction. `md` writes each one as a fenced block whose language
@@ -1461,6 +1470,7 @@ Conditional extra lines (per enabled flag):
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
 | bot-challenge pages found | `Challenge pages: N` |
+| MediaWiki redirect aliases of packed pages found | `Redirect aliases: N` |
 | `--for-queries` | `Query packing: ...` |
 | `--context-header` or `--layout page` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
 | `--layout page` | `Pages written: N` and `Index: <path>` replace `Chunks generated` and `Words per chunk`; no chunk-limit warnings |
