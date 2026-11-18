@@ -70,9 +70,10 @@ src/dograpper/
 │   └── wget_mirror.py      # run_wget_mirror() --mirror + run_wget_urls() -i; BROWSER_UA Chrome/120, --no-parent (url_filter_args(): --accept/--reject-regex quando há --filter), --timestamping sempre
 └── utils/
     ├── api_reference/      # Registros de referência de API (ADR-0009), opt-in via `pack --api-records`
-    │   ├── __init__.py     # split_api_pages()/split_page(): detecção pelo gerador (utils/generator.py) e despacho ao adaptador; ApiRecord (url() com âncora percent-encoded), NotSplit, aviso das páginas mantidas inteiras e linha do resumo
+    │   ├── __init__.py     # split_api_pages()/split_page(): detecção (meta generator via utils/generator.py para Javadoc; markup `<dt class="sig sig-object py"` para Sphinx, que não escreve meta) e despacho ao adaptador; ApiRecord (url() com âncora percent-encoded), NotSplit, aviso das páginas mantidas inteiras e linha do resumo
     │   ├── _html.py        # Regions/Text — leitura linear de HTML dos adaptadores: texto por região em linhas, pilha com contagem por tag (tag de fechamento solta em O(1)); fonte única da garantia de tempo linear
-    │   └── javadoc.py      # records(): página de tipo javadoc 25 (javadoc/ClassWriter) → 1 registro contêiner + 1 por membro (section.detail); só a markup medida, senão NotSplit; leitura linear via _html.py
+    │   ├── javadoc.py      # records(): página de tipo javadoc 25 (javadoc/ClassWriter) → 1 registro contêiner + 1 por membro (section.detail); só a markup medida, senão NotSplit; leitura linear via _html.py
+    │   └── sphinx.py       # records(): página Sphinx autodoc (domínio Python, Sphinx 9.1/9.2, alabaster/furo; região role="main") → registro contêiner do módulo (texto fora dos objetos + nomes de topo) + 1 contêiner por class/exception + 1 membro por function/method/property/attribute/data (dl.py + dt.sig-object[id]); :no-index:, tipo desconhecido ou outra markup = NotSplit; leitura linear via _html.py
     ├── atomic_write.py     # atomic_write_bytes() — arquivo temporário no mesmo diretório + os.replace; modo padrão do umask
     ├── challenge.py        # is_challenge() / is_challenge_page() / find_challenge_files() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/); fonte única do fetcher httrack e do pack
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
@@ -97,7 +98,7 @@ src/dograpper/
 tests/
 ├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl e test_download_cascade)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
-├── test_api_reference.py   # --api-records: detecção/despacho, registros contêiner e membro sobre a fixture javadoc 25 (tests/fixtures/javadoc), markup não suportada, linearidade, CLI (erros de uso, dedup, --for-queries, --delta, serve)
+├── test_api_reference.py   # --api-records: detecção/despacho, registros contêiner e membro sobre as fixtures javadoc 25 (tests/fixtures/javadoc) e Sphinx 9.2 autodoc (tests/fixtures/sphinx), markup não suportada, linearidade, CLI (erros de uso, dedup, --for-queries, --delta, serve)
 ├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
@@ -218,7 +219,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_readiness_report.py` | Antes de alterar `utils/readiness_report.py` ou a lógica de `--report` em `commands/pack.py` |
 | `tests/test_context_v1.py` | Antes de alterar o formato `dograpper-context-v1` em `utils/heading_extractor.py` |
 | `tests/test_jsonl_format.py` | Antes de alterar a escrita JSONL em `lib/chunker.py` |
-| `tests/test_api_reference.py` | Antes de alterar `utils/api_reference/` ou a integração `--api-records` em `commands/pack.py` e `lib/chunker.py`. A fixture sai de `tests/fixtures/javadoc/src` via `tests/fixtures/javadoc/regenerate.sh` (javadoc 25; nunca editar o HTML à mão) |
+| `tests/test_api_reference.py` | Antes de alterar `utils/api_reference/` ou a integração `--api-records` em `commands/pack.py` e `lib/chunker.py`. As fixtures saem de `tests/fixtures/javadoc/src` via `tests/fixtures/javadoc/regenerate.sh` (javadoc 25) e de `tests/fixtures/sphinx/` via `tests/fixtures/sphinx/regenerate.sh` (Sphinx 9.2 num venv descartável, nunca dependência do projeto); nunca editar o HTML à mão |
 | `tests/test_delta_manifest.py` | Antes de alterar `lib/manifest.py` ou lógica de `--delta` |
 | `tests/test_delta_artifacts.py` | Antes de alterar o portão de `--delta` em `commands/pack.py` ou `PACK_STATE_FILENAME` (semântica fixada na ADR-0008) |
 | `tests/test_redact.py` | Antes de alterar `utils/redact.py` (usado por todo log que imprime URL) |

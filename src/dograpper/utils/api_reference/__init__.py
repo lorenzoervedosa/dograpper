@@ -1,8 +1,9 @@
 """API reference pages split into container and member records (ADR-0009): detection and dispatch.
 
-A page is split only when the generator it declares has an adapter here and its
-markup is the measured one. Any other page keeps one record and is reported,
-with the reason, by ``format_kept_whole``.
+A page is split only when an adapter here recognises its generator and its markup
+is the measured one. Javadoc declares itself in ``<meta name="generator">``; Sphinx
+writes no such meta, so its object markup tells. Any other page keeps one record and
+is reported, with the reason, by ``format_kept_whole``.
 """
 
 import os
@@ -57,6 +58,9 @@ def split_page(html: str) -> List[ApiRecord]:
     if generator and generator.startswith("javadoc/"):
         from . import javadoc
         return javadoc.records(html, generator)
+    from . import sphinx
+    if sphinx.SIGNATURE in html:  # Sphinx writes no generator meta: its object markup tells
+        return sphinx.records(html)
     raise NotSplit(NO_ADAPTER)
 
 

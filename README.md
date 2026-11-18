@@ -485,7 +485,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
-| `--api-records` | — | `false` | Splits API reference pages (Javadoc) into one container record and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
+| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
 
 #### Pack internal pipeline
 
@@ -758,17 +758,32 @@ dograpper pack ./javadoc-mirror -o ./pack --format jsonl --api-records --context
 dograpper serve ./pack   # search_chunks now ranks member records
 ```
 
-- **Javadoc** (javadoc 25 type pages, `<meta name="generator"
-  content="javadoc/ClassWriter">`) is the only adapter so far.
-- **Container record** (`id` `NN_path`): qualified name and kind, inheritance,
-  implemented interfaces and known subclasses, signature, description, the
-  declared member names, and the "inherited from" lists. Summary tables are
-  dropped.
+- **Javadoc**: javadoc 25 type pages (`<meta name="generator"
+  content="javadoc/ClassWriter">`).
+- **Sphinx autodoc**: Python domain pages, measured on Sphinx 9.1 and 9.2
+  with the alabaster and furo themes. Sphinx writes no generator meta, so a
+  page is recognised by its object markup (`<dt class="sig sig-object py">`)
+  inside the `role="main"` region. The page's first record is its **module**
+  container record (the module of its first module-level object): the page
+  text outside the objects (title, module docstring, usage prose) and the
+  names of the top-level objects. Each class and exception gets a container
+  record (signature, `Bases:`, docstring, member names); each function,
+  method, property, attribute and data gets a member record
+  (`packaging.version.Version.is_prerelease`, every signature with its
+  annotations, overloads included, then the docstring and its fields). The
+  anchor is the object's HTML id (`#packaging.version.parse`). A page with a
+  `:no-index:` object or an object type outside those keeps one record.
+- **Container record** (`id` `NN_path` for the page's main container,
+  `NN_path#anchor` for a Sphinx class or exception): qualified name and kind,
+  inheritance, implemented interfaces and known subclasses, signature,
+  description, the declared member names, and the "inherited from" lists.
+  Summary tables are dropped.
 - **Member record** (`id` `NN_path#anchor`): the qualified name
-  (`zombie.characters.IsoGameCharacter#getInventory()`), the full signature
-  with its type parameters, the doc comment and the notes (Overrides,
-  Specified by, Parameters, Returns, Throws). `url` ends with the member's
-  anchor; `breadcrumb` is `[container, member]`.
+  (`zombie.characters.IsoGameCharacter#getInventory()`,
+  `packaging.version.parse`), the full signature with its type parameters,
+  the doc comment and the notes (Overrides, Specified by, Parameters,
+  Returns, Throws). `url` ends with the member's anchor; `breadcrumb` is
+  `[container, member]`.
 - **Other pages** (prose, package summaries, other generators, or a type page
   whose markup differs from the measured one) keep one record each. They are
   listed in a warning with the reason (the first 10; all with `--verbose`) and

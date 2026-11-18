@@ -77,7 +77,7 @@ content.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| id | string | yes | Unique record identifier. With `--api-records`: `NN_path` for a page's main container record, `NN_path#anchor` for its member records (see below). |
+| id | string | yes | Unique record identifier. With `--api-records`: `NN_path` for a page's main container record, `NN_path#anchor` for its other records (see below). |
 | source | string | yes | Relative path of the source file |
 | words | int | yes | Word count of `content` |
 | content | string | yes | Extracted text |
@@ -87,11 +87,11 @@ content.
 | total_chunks | int | no | Total sub-chunks for this file. Same condition as `chunk_index`. |
 | url | string | no | Original URL. Present only with `--context-header` **and** either a matching manifest entry that has a `url` or a valid HTTrack / saved-from marker in the page head — `--score` alone never populates it, even against a matching manifest. On a member record it ends with the member's anchor, percent-encoded as the generator links it (`#%3Cinit%3E(int)`). |
 | readiness_grade | string | no | Bare grade letter ("A"/"B"/"C"). Present with `--score`. Not the same shape as the header's `llm_readiness` object — see below. |
-| symbol | string | no | API records only. Qualified name of the record's symbol, e.g. `zombie.characters.IsoGameCharacter#getInventory()`. |
+| symbol | string | no | API records only. Qualified name of the record's symbol, e.g. `zombie.characters.IsoGameCharacter#getInventory()` (Javadoc), `packaging.version.Version.is_prerelease` (Sphinx). |
 | kind | string | no | API records only. `container` or `member`. |
-| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). |
+| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). Sphinx containers: `module`, `class`, `exception`; members: `function`, `method` (classmethods and staticmethods too; the signature says which), `property`, `attribute`, `data` (module-level variable). |
 | container | string | no | Member records only. Qualified name of the container that declares the member. |
-| generator | string | no | API records only. The adapter that split the page: `javadoc`. |
+| generator | string | no | API records only. The adapter that split the page: `javadoc` or `sphinx`. |
 | version | string | no | Page metadata of a MediaWiki page, as in the header above. Present with `--context-header` or `--score`, only when the page states its version. |
 | version_status | string | no | As in the header above. Same condition as `version`, and only when the version comes from the banner. |
 
@@ -110,13 +110,20 @@ keep the plain record above, without the API fields.
   subclasses, type parameters), its signature and description, one line per
   member kind listing the declared member names, and the "inherited from"
   lists. Summary tables are dropped. A nested type has its own page, so it
-  gets its own container record.
+  gets its own container record. On a Sphinx page the first record is the
+  module's (`packaging.version (module)`): the page text outside the
+  objects, then the names of the top-level objects by kind; each class and
+  exception record holds its signature, `Bases:` line, docstring and member
+  names, and a nested class gets its own record.
 - **Member record**: `id` `NN_path#anchor`, the anchor being the member's
   HTML id (`getInventory()`, `<init>(int)`); `content` starts with the
   qualified name (`zombie.characters.IsoGameCharacter#getInventory()`, a
   constructor as `Box#Box(int)`), then the full signature with its type
   parameters, the doc comment and the notes (Overrides, Specified by,
-  Parameters, Returns, Throws).
+  Parameters, Returns, Throws). On a Sphinx page the anchor is the object's
+  HTML id (`packaging.version.parse`); `content` starts with the qualified
+  name, then every signature with its annotations (overloads included), the
+  docstring and its fields (Parameters, Returns, Raises).
 
 ```json
 {"id": "01_fixture/api/Box.html#of(U)", "source": "fixture/api/Box.html", "words": 37,

@@ -116,6 +116,19 @@ and fixes alone are a PATCH bump.
   notebooklm` or `--layout page` it exits 2.
   ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
   [#76](https://github.com/lorenzoervedosa/dograpper/issues/76))
+- `pack --api-records` also splits Sphinx autodoc pages (Python domain,
+  Sphinx 9.1/9.2, recognised by their object markup since Sphinx writes no
+  generator meta): the page's module becomes a container record (page text
+  outside the objects, names of the top-level objects), each class and
+  exception a container record, and each function, method, property,
+  attribute and data a member record with its qualified name
+  (`packaging.version.parse`), every signature with its annotations and its
+  docstring, anchored at the object's HTML id. `symbol_kind` gains `module`,
+  `exception`, `function`, `property`, `attribute` and `data`; `generator` is
+  `sphinx`. A page with a `:no-index:` object or unmeasured markup keeps one
+  record and is listed in the warning.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
 - `pack` cleans MediaWiki pages (detected by their `<meta name="generator">`)
   before extraction: navigation boxes (`navbox`), section edit links
   (`mw-editsection`) and maintenance boxes (stub, outdated, "help update"
