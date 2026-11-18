@@ -7,7 +7,9 @@ challenge detection and robots.txt -- is inherited unchanged.
 
 curl hands over the body as it arrived (its decoding is off): the size cap holds in
 its writer, and ``Fetcher.get`` decodes it with the bounded httrack decoder, so a
-compressed body meets the same limits as on the stdlib path.
+compressed body meets the same limits as on the stdlib path. The same writer asks a
+``stop`` predicate (``Fetcher.get``, HTTrack ``-%s``) at the first chunk and aborts the
+transfer when it says so, before any of the body is kept.
 
 ``curl_cffi`` is an optional native dependency (contract 1 / ADR-0004): it is
 imported lazily, only when a session is first created.
@@ -51,6 +53,20 @@ def split_proxy(proxy: str | None) -> tuple[str | None, tuple[str, str] | None]:
     return url, (unquote(user), unquote(password))
 
 
+def _head(curl) -> tuple[int, dict[str, str]]:
+    """The status, Content-Type and Content-Length curl has read (CURLINFO): the headers a
+    writer can see mid-transfer, which `stop` (Fetcher.get) decides on."""
+    from curl_cffi import CurlInfo  # loaded: a session is running this transfer
+    ctype = curl.getinfo(CurlInfo.CONTENT_TYPE)
+    length = curl.getinfo(CurlInfo.CONTENT_LENGTH_DOWNLOAD_T)
+    head = {}
+    if ctype:
+        head["content-type"] = ctype.decode("latin-1") if isinstance(ctype, bytes) else ctype
+    if length >= 0:
+        head["content-length"] = str(length)
+    return curl.getinfo(CurlInfo.RESPONSE_CODE), head
+
+
 class CurlCffiMissing(RuntimeError):
     """curl_cffi is not installed: raised by the first session, wherever it opens."""
 
@@ -90,7 +106,7 @@ class CurlCffiFetcher(Fetcher):
                                                                self.policy.timeout)
         return session
 
-    def _request(self, key, parts, target, headers):
+    def _request(self, key, parts, target, headers, stop=None):
         self._acquire(conn=True)  # connection-rate pacing, as the stdlib path does
         # Rebuild the URL from the IDNA host (no userinfo), as the stdlib path puts on the
         # wire, so curl targets exactly what the scope/robots checks validated.
@@ -100,10 +116,15 @@ class CurlCffiFetcher(Fetcher):
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
         session = self._session()  # outside the try: a missing curl_cffi is no transport error
-        chunks, size = [], 0
+        chunks, size, stopped = [], 0, None  # stopped: the (status, headers) `stop` took
 
         def write(chunk):  # curl's writer, in this thread: it paces and bounds the transfer
-            nonlocal size
+            nonlocal size, stopped
+            if stop is not None and stopped is None:  # the first chunk: the headers are in
+                head = _head(session.curl)
+                stopped = head if stop(*head) else False
+                if stopped:  # HTTrack -%s drops the connection: the body is never read
+                    return _WRITE_ABORT
             size += len(chunk)
             if size > MAX_BODY_BYTES:
                 return _WRITE_ABORT
@@ -117,10 +138,15 @@ class CurlCffiFetcher(Fetcher):
                                    proxy_auth=self._proxy_auth, timeout=None,
                                    allow_redirects=False, content_callback=write)
         except Exception as exc:  # curl transport error -> inherited retry path
+            if stopped:
+                return (*stopped, None)
             if size > MAX_BODY_BYTES:
                 raise ValueError("body too large") from None
             msg = f"curl_cffi: {type(exc).__name__}: {exc}"
             if self._proxy:  # curl quotes a proxy URL it cannot use (credentials are not in it)
                 msg = msg.replace(self._proxy, redact_url(self._proxy))
             raise OSError(msg) from exc
-        return resp.status_code, {k.lower(): v for k, v in resp.headers.items()}, b"".join(chunks)
+        hdrs = {k.lower(): v for k, v in resp.headers.items()}
+        if stop is not None and stopped is None and stop(resp.status_code, hdrs):
+            return resp.status_code, hdrs, None  # no chunk came: asked once it ended
+        return resp.status_code, hdrs, b"".join(chunks)

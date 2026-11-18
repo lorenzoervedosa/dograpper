@@ -328,6 +328,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     report.out_of_scope.sort()
     report.filtered.sort()
     report.kept.sort()
+    report.size_kept.sort()
     report.errors.sort(key=lambda e: (e[0], e[1]))
     files = sorted(set(saved.values()) - kept)
     front_failed = state["front_failed"] and not state["front_ok"]

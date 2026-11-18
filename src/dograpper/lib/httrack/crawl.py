@@ -64,8 +64,9 @@ def previous_files(previous: Manifest | None, names: NameRegistry,
                    output_dir: str, cache: int | None = None) -> dict[str, Previous]:
     """url_key of the recorded URL -> Previous, for each file `previous` recorded and still
     on disk, not empty, as the cache mode (policy.cache) reads the cache: -C2 (None over a
-    previous run) revalidates a cached 200 with a validator only (htsback.c:2557-2607; 203
-    is stored as 200, 4224-4226), -C1 loads any recorded 2xx (2497-2556), -C0 reads nothing
+    previous run) revalidates a cached 200 only (htsback.c:2557-2607; 203 is stored as 200,
+    4224-4226), with the validators it has (none: a plain request, -%s may keep the file),
+    -C1 loads any recorded 2xx (2497-2556), -C0 reads nothing
     (htscache.c:1174). A file erased or emptied since is fetched in full (2414-2492). A file
     not named as its URL would be (an edited manifest) is left out, so a manifest never
     chooses where a page is written; one reached through a redirect is checked against the
@@ -78,7 +79,7 @@ def previous_files(previous: Manifest | None, names: NameRegistry,
         path = resolve_under(root, e.local_path or key)
         status = e.status if type(e.status) is int else None  # an edited manifest: no bool
         usable = (status is not None and 200 <= status < 300) if cache == 1 else (
-            status in (200, 203) and bool(validators))
+            status in (200, 203))
         if not (e.url and usable and path and os.path.isfile(path)
                 and os.path.getsize(path) > 0):
             continue
@@ -116,6 +117,33 @@ def _fsize(path: str) -> int:
         return os.path.getsize(path)
     except OSError:
         return -1
+
+
+HYPERTEXT = frozenset(("text/html", "application/xhtml+xml", "text/css", "image/svg+xml",
+                       "image/svg-xml", "application/x-authorware-map", *JS_MIMES))
+
+
+def hypertext(content_type: str | None) -> bool:
+    """htslib.h is_hypertext_mime: a page, script, stylesheet or SVG, or no type at all
+    (HTTrack reads it as HTML). shortcut: no guess from the extension for an
+    application/octet-stream type (may_unknown); upgrade if a site serves documents so."""
+    mime = (content_type or "").split(";")[0].strip().lower()
+    return not mime or mime in HYPERTEXT
+
+
+def _size_hack(p: Previous, revalidating: bool) -> Callable[[int, dict], bool]:
+    """HTTrack -%s at the headers (htsback.c:4281-4357): a 200 for a type that is no
+    hypertext keeps the copy on disk when its Content-Length (htslib.c:1610) is that copy's
+    size and, on a revalidation, the size recorded for it."""
+    def stop(status: int, headers: dict) -> bool:
+        if status not in (200, 203) or hypertext(headers.get("content-type")):
+            return False
+        m = re.match(r"\s*([0-9]+)", headers.get("content-length") or "")
+        length, ondisk = (int(m[1]) if m else -1), _fsize(p.path)
+        if revalidating:  # "matching the cached size" (4283-4336)
+            return length >= 0 and p.size == length and ondisk == length
+        return ondisk >= 0 and ondisk == length  # "matching the announced size" (4338-4357)
+    return stop
 
 
 def reserve_names(names: NameRegistry, prev: Mapping[str, Previous]) -> None:
@@ -237,7 +265,8 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
     304 (htsback.c:4266-4280, 4437-4494); a challenge is also listed as challenged. A failed
     transfer is an error that keeps it too (htsback.c:1307-1321): ("kept", URL, result)
     with result.error set. Without a request, a file -C1 (policy.cache 1) finds at its
-    recorded size is ("kept", URL, an empty result)."""
+    recorded size is ("kept", URL, an empty result); a 200 that -%s (policy.updatehack)
+    takes at its headers is ("kept", URL, result) with result.stopped."""
     via, hops = (redact_url(referer) if referer else None), 0
     while True:
         safe = redact_url(url)
@@ -269,13 +298,18 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
             return "kept", url, FetchResult(url)
         # -C1 sends no validator: a file whose size changed is requested in full (2549-2554)
         sent = prev.validators if mine and fetcher.policy.cache != 1 else ()
+        stop = _size_hack(prev, bool(sent)) if mine and fetcher.policy.updatehack else None
         res = fetcher.get(url, kind=kind, referer=referer, meta=meta,
-                          **({"validators": sent} if sent else {}))
+                          **({"validators": sent} if sent else {}),
+                          **({"stop": stop} if stop else {}))
         # the fetcher keeps a 3xx's Location even when its body fails to decode
         redirect = bool(res.status in REDIRECTS and res.location)
         with lock:
             report.retried += max(res.attempts - 1, 0)
             _count(report, res.status, res.error is not None and not redirect)
+            if res.stopped:  # -%s forced a 304: the copy and its record stay
+                report.size_kept.append(safe)
+                return "kept", url, res
             if res.error is not None and not redirect:
                 report.errors.append((safe, res.error, via))
                 return ("kept", url, res) if sent else ("refused", url, None)
@@ -472,6 +506,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     report.out_of_scope.sort()
     report.filtered.sort()
     report.kept.sort()
+    report.size_kept.sort()
     report.errors.sort(key=lambda e: (e[0], e[1]))
     files = sorted(written)
     front_failed = not files and bool(seeds) and refused[0] == len(seeds)

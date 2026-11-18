@@ -437,3 +437,8 @@ def test_cache_mode_defaults_as_in_httrack():
     assert build_policy().cache is None and build_policy(cache=0).cache == 0
     with pytest.raises(ValueError, match="cache"):
         build_policy(cache=3)
+
+
+def test_update_hacks_are_off_by_default_as_in_httrack():
+    """-%s (opt->sizehack = HTS_FALSE, htslib.c:5429)."""
+    assert build_policy().updatehack is False

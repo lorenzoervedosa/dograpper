@@ -35,6 +35,23 @@ Entry format:
   that switches to `2` over a manifest).
 - **Pending:** none.
 
+- **Decision:** `--updatehack` decides at the headers through a `stop`
+  predicate of `Fetcher.get`, passed to `_request` only when set;
+  `CurlCffiFetcher._request` honors it too, in curl's writer (#130): at the
+  first chunk it asks `stop` with the status, `Content-Type` and
+  `Content-Length` curl reports (`CURLINFO`, the headers a writer can read
+  mid-transfer) and aborts the transfer, so no byte of the body is kept or
+  charged; a transfer that brings no chunk is asked once it ends, with the
+  response's headers. Its keeps are listed apart in the report (`Kept on a
+  matching size (--updatehack)`), not in `Not modified (304)`.
+- **Why:** HTTrack drops the connection before the body (`deletehttp`), so
+  reading the body and discarding it differs on the wire; passing `stop` only
+  when set keeps every `_request` override working. A separate line says why
+  a file was kept, as HTTrack's NOTICE does.
+- **Rejected:** comparing sizes after the full body is read; a thread-local
+  channel to `_request`.
+- **Pending:** none.
+
 - **Decision:** `--cache 0` neither reads nor writes the records: each file
   keeps the record the previous run made for its URL.
 - **Why:** HTTrack `-C0` leaves `hts-cache/` untouched (`src/htscache.c:59`,

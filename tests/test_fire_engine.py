@@ -550,3 +550,37 @@ def test_real_proxy_credentials_stay_out_of_the_report(server, tmp_path):
     assert result.exit_code == 1
     assert "Unsupported proxy scheme for 'bogus://127.0.0.1:1'" in result.output
     assert "s3cret" not in result.output
+
+
+# -- --updatehack's `stop` (HTTrack -%s) at curl's writer -----------------------
+
+def test_real_stop_aborts_at_the_first_chunk_so_the_body_is_never_read(server):
+    """-%s decides at the headers and drops the connection (htsback.c:4283-4357): curl's
+    writer asks `stop` at the first chunk, with the status, Content-Type and Content-Length
+    curl has read, and aborts the transfer; nothing is stored or charged."""
+    base, script, _ = server
+    script["/big"] = (200, {"Content-Type": "text/plain"}, b"x" * (4 << 20))
+    fetcher = real_fetcher()
+    charged, asked = [], []
+    fetcher._charge_bandwidth = charged.append
+
+    res = fetcher.get(base + "/big", kind="navigate",
+                      stop=lambda status, h: asked.append((status, h)) or True)
+
+    assert res.stopped and (res.status, res.body, res.error) == (200, b"", None)
+    assert asked == [(200, {"content-type": "text/plain", "content-length": str(4 << 20)})]
+    assert charged == []
+    whole = fetcher.get(base + "/big", kind="navigate", stop=lambda status, h: False)
+    assert (whole.stopped, whole.body) == (False, b"x" * (4 << 20))
+
+
+def test_real_stop_is_asked_once_a_transfer_with_no_body_ends(server):
+    """No chunk reaches the writer: `stop` is asked with the response's headers then."""
+    base, script, _ = server
+    script["/empty"] = (200, {"Content-Type": "text/plain"}, b"")
+    asked = []
+
+    res = real_fetcher().get(base + "/empty", kind="navigate",
+                             stop=lambda status, h: asked.append(h) or True)
+
+    assert res.stopped and asked[0]["content-length"] == "0"

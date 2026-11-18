@@ -747,3 +747,63 @@ def test_cache_0_fetches_in_full_and_leaves_the_records_as_they_were(server, tmp
     assert log == [{}] and res.kept == [] and open(a, "rb").read() == b"<p>a, new</p>"
     assert res.records[a] == first.records[a] and res.records[a]["etag"] == '"a1"'
     assert res.records[c] == dict.fromkeys(RECORD_FIELDS)
+
+
+# -- --updatehack (HTTrack -%s): a matching size keeps the copy on disk --
+
+TXT = {"content-type": "text/plain"}
+
+
+def test_updatehack_keeps_a_revalidated_file_whose_size_still_matches(server, tmp_path):
+    """htsback.c:4283-4336: a 200 to a revalidation, for a type that is no hypertext, whose
+    Content-Length is the recorded size and the size on disk, is forced to a 304: the copy
+    and its record stay ("Kept existing file ..., matching the cached size")."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n1"'}, b"old!")
+    script["/p"] = (200, {**HTML, "etag": '"p1"'}, b"<p>old</p>")
+    first = run([f"{base}/n.txt", f"{base}/p"], tmp_path, exts="html,txt")
+    previous = again(first, base, tmp_path)
+    script["/n.txt"] = (200, {**TXT, "etag": '"n2"'}, b"new!")  # ignores If-None-Match
+    script["/p"] = (200, {**HTML, "etag": '"p2"'}, b"<p>new</p>")
+    res = run_update([f"{base}/n.txt", f"{base}/p"], tmp_path, previous, "html,txt",
+                     updatehack=True)
+    n, p = sorted(first.files_downloaded)
+    assert open(n, "rb").read() == b"old!" and res.kept == [n]
+    assert res.records[n] == first.records[n] and res.report.size_kept == [f"{base}/n.txt"]
+    assert open(p, "rb").read() == b"<p>new</p>"  # a page is hypertext: never kept so
+    assert "Kept on a matching size (--updatehack): 1" in format_report(res.report, False)
+    off = run_update([f"{base}/n.txt"], tmp_path, previous, "html,txt")  # off by default
+    assert open(n, "rb").read() == b"new!" and off.report.size_kept == []
+
+
+def test_updatehack_rewrites_a_file_whose_size_changed(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n1"'}, b"old!")
+    first = run([f"{base}/n.txt"], tmp_path, exts="txt")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n2"'}, b"longer")
+    res = run_update([f"{base}/n.txt"], tmp_path, again(first, base, tmp_path), "txt",
+                     updatehack=True)
+    assert open(res.files_downloaded[0], "rb").read() == b"longer" and res.kept == []
+
+
+def test_updatehack_keeps_a_file_sent_no_validator_on_the_size_on_disk(server, tmp_path):
+    """htsback.c:4338-4357: a cached file sent no validator (its record has none) is kept
+    when the announced size is the size on disk ("matching the announced size")."""
+    base, script, _ = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, TXT, b"old!")
+    first = run([f"{base}/n.txt"], tmp_path, exts="txt")
+    previous = again(first, base, tmp_path)
+    for e in previous.files.values():  # a server that sent no Date, no ETag
+        e.etag = e.last_modified = None
+
+    def reply(h):
+        log.append(h.get("If-Modified-Since"))
+        return (200, TXT, b"new!")
+    script["/n.txt"] = reply
+    res = run_update([f"{base}/n.txt"], tmp_path, previous, "txt", updatehack=True)
+    assert log == [None] and res.kept == first.files_downloaded
+    assert open(res.kept[0], "rb").read() == b"old!"

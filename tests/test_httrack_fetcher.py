@@ -720,3 +720,21 @@ def test_conditional_request_sends_validators_first_and_is_not_retried(server):
     f.get(base + "/b", kind="navigate")
     assert ft.sleeps[0] == pytest.approx(5.0)
     assert not any(k.startswith("If-") for k, _ in seen[1][1])
+
+
+def test_stop_drops_the_connection_before_the_body(server):
+    """-%s decides at the headers and drops the connection (deletehttp, htsback.c:4283-4336):
+    the body is never read, nor its bandwidth charged, and the next request reconnects."""
+    base, script, _ = server
+    script["/big"] = [(200, {"content-type": "text/plain"}, b"x" * 50_000)]
+    ft = FakeTime()
+    f = Fetcher(build_policy(retries=0, max_bandwidth=1000), clock=ft.clock, sleep=ft.sleep)
+    opened, connect = [], f._connect
+    f._connect = lambda parts: opened.append(parts) or connect(parts)
+    asked = []
+    res = f.get(base + "/big", kind="navigate",
+                stop=lambda status, h: asked.append((status, h["content-length"])) or True)
+    assert res.stopped and (res.status, res.body, res.error) == (200, b"", None)
+    assert asked == [(200, "50000")] and sum(ft.sleeps) < 1  # reading it costs 50 s
+    assert f.get(base + "/big", kind="navigate").body == b"x" * 50_000
+    assert len(opened) == 2

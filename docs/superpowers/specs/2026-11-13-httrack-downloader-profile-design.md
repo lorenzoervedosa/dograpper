@@ -434,6 +434,16 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     still requested (HTTrack loads the cached 3xx too), and a hypertext file
     whose size changed is fetched in full, where HTTrack writes it again from
     the body its cache holds (`src/htscache.c:264-272`).
+- **Update hacks** (`--updatehack`, HTTrack `-%s`, off as in HTTrack,
+  `src/htslib.c:5429`; #132). At the headers of a 200 for a recorded file whose
+  type is no hypertext (`src/htslib.h:884-905`), the copy on disk and its
+  record are kept, as a forced 304, the body unread and the connection dropped
+  (`src/htsback.c:4281-4357`, `back_keep_existing`): on a revalidation when
+  `Content-Length` is both the recorded size and the size on disk; without
+  validators when it is the size on disk. A recorded 200 with no validator is
+  therefore part of the update (sent plain, its name kept). HTTrack's third
+  hack, for `Range` resumes, has nothing to apply to: the profile sends no
+  `Range`.
 - **File times:** each saved file gets its recorded `Last-Modified` (else the
   `Date`) as access and modification time, once its links are rewritten, read
   as HTTrack reads the date (`src/htscore.c:451-452`, `src/htsback.c:2119-2128`,
@@ -494,9 +504,8 @@ These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
 - **HTTrack's other update options** are not ported yet (#132):
-  - `-%s` update hacks (off by default, `src/htsback.c:4281-4395`), `-%n`
-    do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and `-%d`
-    `--changes` (off, writes `hts-changes.json`);
+  - `-%n` do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and
+    `-%d` `--changes` (off, writes `hts-changes.json`);
   - Pending a follow-up PR under #78. Evidence: discovery note §2.9.
 
 ## 6. Code layout (proposal; the plan may refine)

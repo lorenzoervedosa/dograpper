@@ -690,3 +690,21 @@ def test_cache_1_follows_a_loaded_stylesheet_from_its_relinked_copy(server, tmp_
                       previous=previous)
     assert seen == ["/robots.txt"] and res.report.from_cache == 4
     assert res.kept == sorted(first.files_downloaded) and res.files_downloaded == []
+
+
+def test_updatehack_keeps_a_crawled_file_whose_size_matches(server, tmp_path):
+    """-%s in the crawl (htsback.c:4283-4336): the forced 304 keeps the copy, which is no
+    page, so no link is read from it."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/"] = (200, {**HTML, "etag": '"i"'}, b'<a href="n.txt">n</a>')
+    script["/n.txt"] = (200, {"content-type": "text/plain", "etag": '"n1"'}, b"old!")
+    policy = build_policy(retries=0, updatehack=True)
+    first = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy))
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    script["/n.txt"] = (200, {"content-type": "text/plain", "etag": '"n2"'}, b"new!")
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy),
+                      previous=previous)
+    n = next(f for f in first.files_downloaded if f.endswith("n.txt"))
+    assert res.kept == [n] and open(n, "rb").read() == b"old!"
+    assert res.report.size_kept == [f"{base}/n.txt"] and res.records[n] == first.records[n]

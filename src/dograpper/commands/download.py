@@ -330,8 +330,13 @@ def _run_download_cascade(
                    "file still on disk at its recorded size is not requested, HTTrack "
                    "--continue), 2 revalidates each recorded file (HTTrack --update). "
                    "Default: 2 when -o holds a manifest, else 1")
+@click.option('--updatehack', is_flag=True, default=False,
+              help="[httrack] Keep a recorded file other than a page, script or stylesheet "
+                   "when a 200 announces the size it has on disk (and, on a revalidation, the "
+                   "size recorded); its body is not read (HTTrack -%s). Default: off, as in "
+                   "HTTrack")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -368,6 +373,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'no_parse_scripts': no_parse_scripts,
         'no_extended_parsing': no_extended_parsing,
         'cache': cache,
+        'updatehack': updatehack,
     }
     merged_params = load_config(config_path, 'download', cli_params, ctx)
 
