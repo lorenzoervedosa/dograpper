@@ -83,7 +83,7 @@ src/dograpper/
     └── word_counter.py     # count_words() e count_words_file()
 tests/
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
-├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp
+├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
 ├── test_claude_md_inventory.py # Guard estrutural do CLAUDE.md: árvore completa e referências de caminho válidas
