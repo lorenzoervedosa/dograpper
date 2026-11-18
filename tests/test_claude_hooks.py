@@ -263,6 +263,7 @@ def test_reminder_names_the_docs_of_a_contract_file(rel, doc, tmp_path):
     context = reminder(tmp_path / rel, tmp_path)
     assert doc in context
     assert f"you edited {rel}," in context
+    assert "docs/DECISIONS.md, docs/DEBT.md" in context
 
 
 def test_reminder_covers_edits_inside_a_worktree(tmp_path):
@@ -312,6 +313,7 @@ def test_doc_check_flags_contract_files_and_a_missing_changelog(commit):
     repo = commit("feat(pack): new header field", "src/dograpper/lib/chunker.py")
     context = doc_check('git commit -m "feat(pack): new header field"', repo)
     assert "touched contract files" in context
+    assert "DECISIONS.md, DEBT.md" in context
     assert "feat(pack) commit without CHANGELOG.md" in context
 
 

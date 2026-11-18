@@ -278,6 +278,66 @@ uv sync --extra dev --extra headless --extra httrack
 uv run pytest tests/ -v
 ```
 
+## Manutenção do harness (obrigatório)
+
+Documentos vivos que DEVEM acompanhar o código, no mesmo PR da mudança. Hooks
+em `.claude/settings.json` lembram você: `.claude/hooks/harness-reminder.sh`
+ao editar arquivo de contrato, `.claude/hooks/commit-doc-check.sh` depois de
+cada `git commit` (só lembretes, nunca bloqueiam; testes em
+`tests/test_claude_hooks.py`). Ao lado deles, `.claude/hooks/block-dangerous-git.py`
+bloqueia git destrutivo sem consentimento — modelo de ameaça: guarda best-effort
+contra comando ACIDENTAL de agente ou pessoa, não sandbox; bypass deliberado
+(alias já no git config, git chamado de outra linguagem, `eval` de string
+montada) fica fora por design, e o controle continua sendo as regras de
+consentimento.
+
+| Documento | Atualize quando |
+|---|---|
+| `CHANGELOG.md` | A mudança é observável pelo usuário (regra no cabeçalho do arquivo) |
+| `README.md` | Muda comando, flag, config, output, exit code ou arquivo escrito — é o contrato observável |
+| `docs/schema-v1.md` | Muda campo do header `dograpper-context-v1` ou do registro JSONL (`utils/heading_extractor.py`, `lib/chunker.py`, `utils/api_reference/`) |
+| `docs/adr/` | Decisão arquitetural nova, revertida ou contornada, ou mudança de contrato inviolável. ADR supersedido nunca é apagado: marque `Superseded by` |
+| `docs/DECISIONS.md` | Decisão autônoma de sessão: escolha entre leituras do pedido, desvio do brief, convenção nova, pendência para o mantenedor |
+| `docs/DEBT.md` | Achado de review aceito sem fix (com o gatilho do fix); item corrigido é marcado ✅, não apagado |
+| `GLOSSARY.md` | Termo de domínio novo, renomeado ou com sentido mudado (skill `domain-modeling`) |
+| `docs/glossario.md` | Jargão técnico explicado ao mantenedor (seção "Glossário vivo" abaixo) |
+| `docs/superpowers/` | Spec ou plano de uma fase nova |
+| `.claude/hooks/` | Muda o conjunto de arquivos de contrato: atualize o mapa de `harness-reminder.sh` e a regex de `commit-doc-check.sh` juntos |
+| Este `CLAUDE.md` | Módulo ou teste novo (árvore e tabela, guardadas por `tests/test_claude_md_inventory.py`), contrato novo ou alterado, comando ou fluxo novo |
+
+Regra prática: se o diff toca arquivo de contrato (o mapa de
+`.claude/hooks/harness-reminder.sh`) e nenhum documento acima mudou,
+justifique por que não era necessário antes de commitar.
+
+## Glossário vivo (`docs/glossario.md`)
+
+`docs/glossario.md` é um glossário de APRENDIZADO, em pt-BR: explica em
+linguagem acessível os jargões técnicos do trabalho neste projeto para quem
+está construindo fluência de decisão. Os comandos `/explique` e `/revisao`
+leem e escrevem nele — mantenha o formato idêntico. Não confunda com o
+`GLOSSARY.md`, a linguagem de domínio normativa (página, registro, chunk,
+símbolo…) usada para nomear coisas em código e docs: termo de domínio nunca é
+redefinido no `docs/glossario.md` — a entrada aponta para o `GLOSSARY.md`.
+
+- **Consulta:** antes de explicar um termo técnico ao usuário, procure-o em
+  `docs/glossario.md`. Marcado ✅: só referencie ("como já vimos, …"). 🔁, 🆕
+  ou ausente: explique.
+- **Manutenção proativa:** quando surgir no trabalho um jargão que o usuário
+  provavelmente não domina, ADICIONE a entrada, mesmo sem pedido. Termo que já
+  existe é ATUALIZADO, nunca duplicado.
+- **Não invente o "Onde apareceu":** conceito geral ainda não usado aqui
+  recebe exatamente esse texto.
+- **Formato fixo das entradas** (copie a estrutura):
+
+  ```markdown
+  ## <termo>
+  **Em uma frase:** <explicação sem jargão>
+  **Analogia:** <analogia curta, ou "—">
+  **Onde apareceu:** <decisão/arquivo + data, ou "conceito geral, ainda não usado no projeto">
+  **Por que importa pra decisão:** <o que muda na minha escolha>
+  **Nível:** 🆕 novo | 🔁 revisar | ✅ entendido
+  ```
+
 ## Comandos úteis
 
 ```bash
