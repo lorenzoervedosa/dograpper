@@ -86,6 +86,7 @@ src/dograpper/
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
     ├── mediawiki.py        # is_mediawiki() (meta generator via generator.py), clean(), page_metadata() e find_redirect_aliases() — limpeza por página de MediaWiki antes do extrator genérico: corta do fonte navbox, mw-editsection e caixas de manutenção (mbox com toggle mw-customtoggle-mbox-*); o banner de versão vira version/version_status do header e do registro JSONL (senão a 1ª categoria oculta Version X); banner de redação desconhecida fica no texto; alias de redirect (wgRedirectedFrom) cujo alvo (mesmo wgPageName) está no run é pulado pelo pack; página não-MediaWiki volta intacta
     ├── portable_names.py   # FORBIDDEN (caracteres proibidos pelo HTTrack → _), claim_unique() (colisão casefold → -N), resolve_under() (caminho real contido na raiz) — regras de nome compartilhadas por lib/httrack/naming.py e o layout por página do pack (ADR-0010)
+    ├── progress.py         # ProgressReporter — linhas [progress] com throttle (≤1 a cada 5 s, só quando muda, final no finish()), forma lista fixa (N/M URLs, %, ETA após 10) ou total crescente (files, queued, last redigida); um reporter por etapa de fetch do download (#98, #78)
     ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
     ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
@@ -140,6 +141,7 @@ tests/
 ├── test_pack_artifacts.py  # Sidecars: cross-refs, delta manifest, snapshot de readiness, contagem de tokens
 ├── test_pack_reader.py     # load_chunks: campos, linhas malformadas, ordem determinística entre arquivos
 ├── test_pack_scoring.py    # score_chunks: ids, report pages, overrides de texto, tolerância a falha
+├── test_progress.py       # ProgressReporter: formas lista fixa/total crescente, ETA após 10 URLs, throttle com relógio fake, finish() único, URL redigida, logger INFO
 ├── test_query_packer.py    # load_queries (comments/blanks, erros) e order_files_by_queries (determinismo, co-locação, tie-break)
 ├── test_readiness_report.py # Readiness report: find_removed_blocks, builders HTML/terminal, CLI --report
 ├── test_redact.py          # redact_url: userinfo removido, URL sem credenciais intacta, URL inválida falha seguro, caracteres de controle neutralizados
@@ -181,6 +183,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `.docsignore.example` | Ao mexer em `ignore_parser.py` |
 | `tests/test_pack.py` | Antes de alterar qualquer coisa em `lib/chunker.py` ou `commands/pack.py` |
 | `tests/test_page_layout.py` | Antes de alterar `lib/page_layout.py`, `commands/_page_layout.py` ou o despacho `--layout` de `commands/pack.py` (nomes, formato do `INDEX.md`, posse de `pages/`, flags rejeitadas) |
+| `tests/test_progress.py` | Antes de alterar `utils/progress.py` (formato e throttle das linhas `[progress]`) |
 | `tests/test_query_packer.py` | Antes de alterar `lib/query_packer.py` ou a integração `--for-queries` em `commands/pack.py` |
 | `tests/test_pack_challenge.py` | Antes de alterar `utils/challenge.py` ou a etapa 6a de `commands/pack.py` |
 | `tests/test_pack_scoring.py` | Antes de alterar `lib/pack_scoring.py` ou a etapa 9c de `commands/pack.py` |
