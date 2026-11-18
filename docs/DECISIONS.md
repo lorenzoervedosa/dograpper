@@ -52,6 +52,14 @@ Entry format:
   channel to `_request`.
 - **Pending:** none.
 
+- **Decision:** `--do-not-recatch` under `--cache 1` does not empty a file
+  whose size changed before requesting it, where HTTrack `-%n` does
+  (`src/htscache.c:796-814`). Recorded in spec §5.6 as a deviation.
+- **Why:** the spec's deviations are where HTTrack spoils the corpus (user
+  option "1"): emptying first loses the copy when the request then fails.
+- **Rejected:** emptying it as HTTrack does.
+- **Pending:** none.
+
 - **Decision:** `--cache 0` neither reads nor writes the records: each file
   keeps the record the previous run made for its URL.
 - **Why:** HTTrack `-C0` leaves `hts-cache/` untouched (`src/htscache.c:59`,

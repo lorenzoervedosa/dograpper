@@ -440,5 +440,5 @@ def test_cache_mode_defaults_as_in_httrack():
 
 
 def test_update_hacks_are_off_by_default_as_in_httrack():
-    """-%s (opt->sizehack = HTS_FALSE, htslib.c:5429)."""
-    assert build_policy().updatehack is False
+    """-%s and -%n (opt->sizehack, opt->norecatch = HTS_FALSE, htslib.c:5427, 5429)."""
+    assert (build_policy().updatehack, build_policy().do_not_recatch) == (False, False)

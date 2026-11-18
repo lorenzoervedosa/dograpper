@@ -807,3 +807,34 @@ def test_updatehack_keeps_a_file_sent_no_validator_on_the_size_on_disk(server, t
     res = run_update([f"{base}/n.txt"], tmp_path, previous, "txt", updatehack=True)
     assert log == [None] and res.kept == first.files_downloaded
     assert open(res.kept[0], "rb").read() == b"old!"
+
+
+# -- --do-not-recatch (HTTrack -%n): an erased file stays empty --
+
+@pytest.mark.parametrize("cache", [None, 1])
+def test_do_not_recatch_leaves_an_erased_file_empty_without_a_request(server, tmp_path, cache):
+    """htsback.c:2466-2480, 2653-2694: a recorded file that is no hypertext, missing since,
+    is created empty and not requested ("Null-size file not recaught", an error at its
+    link); a page keeps its body in HTTrack's cache, never reaches that branch, and is
+    fetched again."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n1"'}, b"notes")
+    script["/e.txt"] = (200, {**TXT, "etag": '"e1"'}, b"empty me")
+    script["/p"] = (200, {**HTML, "etag": '"p1"'}, b"<p>p</p>")
+    seeds = [f"{base}/n.txt", f"{base}/e.txt", f"{base}/p"]
+    first = run(seeds, tmp_path, exts="html,txt")
+    previous = again(first, base, tmp_path)
+    e, n, p = sorted(first.files_downloaded)
+    os.remove(n), os.remove(p)
+    open(e, "wb").close()
+    seen.clear()
+    res = run_update(seeds, tmp_path, previous, "html,txt", do_not_recatch=True, cache=cache)
+    assert "/n.txt" not in seen and "/e.txt" not in seen and "/p" in seen
+    assert open(n, "rb").read() == b"" and open(e, "rb").read() == b""
+    assert res.kept == [e, n] and res.records[n] == first.records[n]
+    assert res.files_downloaded == [p] and not res.front_failed
+    assert res.report.errors == [(f"{base}/e.txt", "null-size file not recaught", None),
+                                 (f"{base}/n.txt", "null-size file not recaught", None)]
+    again_ = run_update(seeds, tmp_path, again(res, base, tmp_path), "html,txt")
+    assert open(n, "rb").read() == b"notes" and again_.kept == []  # off: "recatching"

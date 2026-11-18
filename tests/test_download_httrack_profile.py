@@ -115,7 +115,7 @@ def test_profile_options_tuple_matches_download_and_sync():
 @pytest.mark.parametrize("flag", ["--no-robots", "--connections=2", "--user-agent=x",
                                   "--retries=2", "--no-parse-scripts",
                                   "--no-extended-parsing", "--cache=2",
-                                  "--updatehack"])  # explicit, even at its default
+                                  "--updatehack", "--do-not-recatch"])  # explicit, even at its default
 def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     res = run(str(tmp_path / "o"), flag)
     assert res.exit_code == 2
@@ -411,6 +411,7 @@ def test_httrack_non_numeric_config_value_is_usage_error(ht, tmp_path):
     ("no-extended-parsing", "false", "extended_parsing", True),
     ("cache", "1", "cache", 1),
     ("updatehack", "true", "updatehack", True),
+    ("do-not-recatch", True, "do_not_recatch", True),
     ("cache", 0, "cache", 0),
 ])
 def test_httrack_config_value_converted_like_cli(ht, tmp_path, key, value, attr, expected):

@@ -50,6 +50,7 @@ class Previous(NamedTuple):
     redirected: bool                         # its URL reached it through a redirect
     record: dict                             # its manifest RECORD_FIELDS, kept with it
     size: int | None = None                  # its recorded size_bytes (--cache 1 checks it)
+    erased: bool = False                     # missing or empty since: -%n leaves it so
 
 
 def _named(name: str | None, path: str) -> bool:
@@ -60,17 +61,19 @@ def _named(name: str | None, path: str) -> bool:
     return re.fullmatch(re.escape(stem) + r"(-[0-9]+)?" + re.escape(ext), path) is not None
 
 
-def previous_files(previous: Manifest | None, names: NameRegistry,
-                   output_dir: str, cache: int | None = None) -> dict[str, Previous]:
+def previous_files(previous: Manifest | None, names: NameRegistry, output_dir: str,
+                   cache: int | None = None, do_not_recatch: bool = False
+                   ) -> dict[str, Previous]:
     """url_key of the recorded URL -> Previous, for each file `previous` recorded and still
     on disk, not empty, as the cache mode (policy.cache) reads the cache: -C2 (None over a
     previous run) revalidates a cached 200 only (htsback.c:2557-2607; 203 is stored as 200,
     4224-4226), with the validators it has (none: a plain request, -%s may keep the file),
-    -C1 loads any recorded 2xx (2497-2556), -C0 reads nothing
-    (htscache.c:1174). A file erased or emptied since is fetched in full (2414-2492). A file
-    not named as its URL would be (an edited manifest) is left out, so a manifest never
-    chooses where a page is written; one reached through a redirect is checked against the
-    hop that reaches it (sends)."""
+    -C1 loads any recorded 2xx (2497-2556), -C0 reads nothing (htscache.c:1174). A file
+    erased or emptied since is fetched in full (2414-2492), unless `do_not_recatch` (-%n)
+    and its type is no hypertext: it is `erased` then (2466-2480, 2653-2694). A file not
+    named as its URL would be (an edited manifest) is left out, so a manifest never chooses
+    where a page is written; one reached through a redirect is checked against the hop
+    that reaches it (sends)."""
     if cache == 0:
         return {}
     root, out = os.path.realpath(output_dir), {}
@@ -78,10 +81,12 @@ def previous_files(previous: Manifest | None, names: NameRegistry,
         validators = conditional_headers(e.etag, e.last_modified)
         path = resolve_under(root, e.local_path or key)
         status = e.status if type(e.status) is int else None  # an edited manifest: no bool
-        usable = (status is not None and 200 <= status < 300) if cache == 1 else (
-            status in (200, 203))
-        if not (e.url and usable and path and os.path.isfile(path)
-                and os.path.getsize(path) > 0):
+        ok = status is not None and 200 <= status < 300
+        present = bool(path) and os.path.isfile(path) and os.path.getsize(path) > 0
+        erased = (do_not_recatch and bool(path) and not present and ok
+                  and not hypertext(e.content_type))  # data on disk only (htscache.c:264)
+        usable = erased or present and (ok if cache == 1 else status in (200, 203))
+        if not (e.url and usable):
             continue
         try:
             k = url_key(e.url)
@@ -90,7 +95,8 @@ def previous_files(previous: Manifest | None, names: NameRegistry,
         except ValueError:  # an unusable URL (an edited manifest)
             continue
         out.setdefault(k, Previous(e.url, path, validators, bool(e.redirected),
-                                   {f: getattr(e, f) for f in RECORD_FIELDS}, e.size_bytes))
+                                   {f: getattr(e, f) for f in RECORD_FIELDS}, e.size_bytes,
+                                   erased))
     return out
 
 
@@ -129,6 +135,20 @@ def hypertext(content_type: str | None) -> bool:
     application/octet-stream type (may_unknown); upgrade if a site serves documents so."""
     mime = (content_type or "").split(";")[0].strip().lower()
     return not mime or mime in HYPERTEXT
+
+
+NOT_RECAUGHT = "null-size file not recaught"
+
+
+def _not_recaught(path: str, report: RunReport, safe: str, via: str | None) -> None:
+    """-%n: a missing file is created empty ("erased by user ?), ignoring",
+    htsback.c:2466-2480), and the URL is an error at its link (htsmirror.c:476-482)."""
+    if not os.path.exists(path):
+        try:
+            open(path, "xb").close()
+        except OSError as exc:
+            report.errors.append((safe, f"empty file not created: {exc}", via))
+    report.errors.append((safe, NOT_RECAUGHT, via))
 
 
 def _size_hack(p: Previous, revalidating: bool) -> Callable[[int, dict], bool]:
@@ -265,8 +285,10 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
     304 (htsback.c:4266-4280, 4437-4494); a challenge is also listed as challenged. A failed
     transfer is an error that keeps it too (htsback.c:1307-1321): ("kept", URL, result)
     with result.error set. Without a request, a file -C1 (policy.cache 1) finds at its
-    recorded size is ("kept", URL, an empty result); a 200 that -%s (policy.updatehack)
-    takes at its headers is ("kept", URL, result) with result.stopped."""
+    recorded size is ("kept", URL, an empty result), and one erased under -%n
+    (prev.erased) ("kept", URL, result) with result.error NOT_RECAUGHT; a 200 that -%s
+    (policy.updatehack) takes at its headers is ("kept", URL, result) with
+    result.stopped."""
     via, hops = (redact_url(referer) if referer else None), 0
     while True:
         safe = redact_url(url)
@@ -292,6 +314,10 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
             logger.info("robots.txt disallows %s", safe)
             return "refused", url, None
         mine = sends(prev, url, hops > 0, names)
+        if mine and prev.erased:  # -%n: "Null-size file not recaught" (htsback.c:2653-2694)
+            with lock:
+                _not_recaught(prev.path, report, safe, via)
+            return "kept", url, FetchResult(url, error=NOT_RECAUGHT)
         if mine and fetcher.policy.cache == 1 and _fsize(prev.path) == prev.size:
             with lock:  # -C1: "File immediately loaded from cache" (htsback.c:2497-2556)
                 report.from_cache += 1
@@ -386,7 +412,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     (fetch_page) and a kept one is left byte-identical, relink included."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
-    prev = previous_files(previous, names, output_dir, policy.cache)
+    prev = previous_files(previous, names, output_dir, policy.cache, policy.do_not_recatch)
     reserve_names(names, prev)
     kept: set[str] = set()
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record

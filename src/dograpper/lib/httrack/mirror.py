@@ -114,7 +114,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     kept page, stylesheet or script are followed from that copy (_kept_links)."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
-    prev = previous_files(previous, names, output_dir, policy.cache)
+    prev = previous_files(previous, names, output_dir, policy.cache, policy.do_not_recatch)
     reserve_names(names, prev)
     url_of = {e.local_path or k: e.url for k, e in (previous.files if previous else {}).items()
               if e.url}

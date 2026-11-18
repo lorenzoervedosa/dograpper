@@ -708,3 +708,21 @@ def test_updatehack_keeps_a_crawled_file_whose_size_matches(server, tmp_path):
     n = next(f for f in first.files_downloaded if f.endswith("n.txt"))
     assert res.kept == [n] and open(n, "rb").read() == b"old!"
     assert res.report.size_kept == [f"{base}/n.txt"] and res.records[n] == first.records[n]
+
+
+def test_do_not_recatch_in_the_crawl(server, tmp_path):
+    """-%n in the crawl: the erased file linked from a kept page is not requested."""
+    base, script, seen = server
+    log = []
+    vsite(script, {"/": page("n.txt"), "/n.txt": ({"content-type": "text/plain"}, b"n")}, log)
+    policy = build_policy(retries=0)
+    first = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy))
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    n = next(f for f in first.files_downloaded if f.endswith("n.txt"))
+    os.remove(n)
+    log.clear()
+    policy = build_policy(retries=0, do_not_recatch=True)
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy),
+                      previous=previous)
+    assert log == [("/", '"/"')] and open(n, "rb").read() == b""
+    assert res.kept == sorted(first.files_downloaded) and res.success

@@ -465,7 +465,7 @@ not empty, is revalidated.
   reported as an error, and the previous copy and its record are kept (its
   links are not followed).
 - **A 2xx** replaces the file and its record. A file erased or emptied since
-  is fetched again in full.
+  is fetched again in full (unless `--do-not-recatch`, below).
 - The summary counts the kept files as `Files skipped: N (cached)`, the 304s
   as `Not modified (304): N`, and the files of the previous run this one did
   not reach as `Not reached this run, kept on disk: N` (`--verbose` lists
@@ -499,6 +499,13 @@ manifest recorded) keeps that copy and its record, as a 304 would: the body is
 never read and the connection is dropped, as HTTrack drops it. The summary
 counts these as `Kept on a matching size (--updatehack): N`.
 
+**`--do-not-recatch` (HTTrack `-%n`, off).** A recorded file other than a
+page, a script or a stylesheet that was erased or emptied since is not fetched
+again: a missing one is created empty, and its URL is listed under `Errors` as
+`null-size file not recaught`, as HTTrack logs it. A page, script or
+stylesheet is fetched again in full (HTTrack restores it from the body its
+cache holds).
+
 `[httrack]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
 `.dograpper.json` keys get the same type and range checks as the flags, so
@@ -520,6 +527,7 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--no-extended-parsing` | off | Do not follow quoted strings that look like links (HTTrack `-%P0`, or `-j8`) |
 | `--cache` | `2` with a manifest, else `1` | Cache mode (HTTrack `-C`): `0` ignores the manifest, `1` trusts it, `2` revalidates (see "Cache modes") |
 | `--updatehack` | off | Keep a recorded non-page file when a `200` announces its size (HTTrack `-%s`, see "Update hacks") |
+| `--do-not-recatch` | off | Leave a recorded non-page file erased since empty instead of fetching it (HTTrack `-%n`) |
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -554,6 +562,8 @@ protect the corpus:
     redirect is still requested (its target is not), and a page, script or
     stylesheet whose size changed is fetched in full, where HTTrack loads both
     from its cache.
+- Under `--cache 1 --do-not-recatch`, a file whose size changed is fetched in
+  full and left as it was if that fails; HTTrack empties it before the request.
 - A `Retry-After` on a revalidation still pauses the whole queue, and a
   challenged start URL still exits 1 on an update (HTTrack treats both as a
   304).
@@ -571,7 +581,7 @@ is used when available. The release binary includes this extra.
 
 **Current gaps (temporary).** Under `httrack`, the Playwright fallback is
 not implemented yet and fails loud (exit 1); use `--downloader wget` for
-those sites. HTTrack's `-%n` and `--changes` options are not ported yet.
+those sites. HTTrack's `--changes` option (`-%d`, `hts-changes.json`) is not ported yet.
 None of these is a deviation from HTTrack.
 
 ##### fire-engine
@@ -1294,7 +1304,7 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |

@@ -72,9 +72,10 @@ and fixes alone are a PATCH bump.
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
   `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`,
-  `--no-extended-parsing`, `--cache`, `--updatehack`). When llms.txt and the
-  sitemap give no URL list, it crawls the site from the start URL as HTTrack
-  does: links from `href`, HTTrack's link attributes, meta refresh and CSS,
+  `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`).
+  When llms.txt and the sitemap give no URL list, it crawls the site from the
+  start URL as HTTrack does: links from `href`, HTTrack's link attributes,
+  meta refresh and CSS,
   from scripts and event handlers (HTTrack `-j`) and from quoted strings that
   name a file (HTTrack `-%P`), both on by default as in HTTrack;
   the start host and directory, `--filter` and `--depth` link hops as scope;
@@ -97,10 +98,12 @@ and fixes alone are a PATCH bump.
   manifest's records as they were. `--updatehack` (HTTrack `-%s`, off) keeps
   a recorded file other than a page, script or stylesheet when a 200
   announces the size it has on disk, without reading the body (`Kept on a
-  matching size (--updatehack): N`). Each saved file gets the
-  response's `Last-Modified` (else its `Date`) as its modification and access
-  time, as HTTrack sets it. The Playwright fallback fails loud under this
-  profile for now.
+  matching size (--updatehack): N`). `--do-not-recatch` (HTTrack `-%n`, off)
+  leaves a recorded file other than a page, script or stylesheet that was
+  erased since empty instead of fetching it again, and reports it as `null-size
+  file not recaught`. Each saved file gets the response's `Last-Modified`
+  (else its `Date`) as its modification and access time, as HTTrack sets it.
+  The Playwright fallback fails loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the

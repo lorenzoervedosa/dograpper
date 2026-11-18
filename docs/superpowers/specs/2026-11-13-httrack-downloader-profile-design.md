@@ -444,6 +444,18 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   therefore part of the update (sent plain, its name kept). HTTrack's third
   hack, for `Range` resumes, has nothing to apply to: the profile sends no
   `Range`.
+- **Do not recatch** (`--do-not-recatch`, HTTrack `-%n`, off as in HTTrack,
+  `src/htslib.c:5427`; #132). A recorded 2xx file whose type is no hypertext,
+  missing or empty since, is not requested: a missing one is created empty,
+  and the URL is an error at its link, "null-size file not recaught"
+  (`src/htsback.c:2466-2480`, `2653-2694`; `src/htsmirror.c:476-482`). It is
+  kept with its record, so the next run without the option fetches it again.
+  A hypertext file never reaches this branch in HTTrack (its body is in the
+  cache) and is fetched in full.
+  - **Deviation (protects the corpus):** under `--cache 1`, HTTrack `-%n`
+    empties a file whose size changed before requesting it in full
+    (`src/htscache.c:796-814`); the profile requests it without emptying it,
+    so a failed request leaves the copy as it was.
 - **File times:** each saved file gets its recorded `Last-Modified` (else the
   `Date`) as access and modification time, once its links are rewritten, read
   as HTTrack reads the date (`src/htscore.c:451-452`, `src/htsback.c:2119-2128`,
@@ -503,9 +515,9 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- **HTTrack's other update options** are not ported yet (#132):
-  - `-%n` do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and
-    `-%d` `--changes` (off, writes `hts-changes.json`);
+- **HTTrack's change report** is not ported yet (#132):
+  - `-%d` `--changes` (off, `src/htslib.c:5441`) writes `hts-changes.json`
+    (discovery note §2.9, "Cache modes and update options");
   - Pending a follow-up PR under #78. Evidence: discovery note §2.9.
 
 ## 6. Code layout (proposal; the plan may refine)
