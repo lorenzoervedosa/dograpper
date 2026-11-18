@@ -229,6 +229,9 @@ and fixes alone are a PATCH bump.
   ([#86])
 - `download`'s Playwright layer follows the links of a page it skips as
   cached on an incremental run, instead of ending the crawl there. ([#94])
+- `pack --cross-refs` writes its marker after a Markdown link whose text it
+  matched (`[Item](Item.html) [-> docs_chunk_02]`) instead of inside the
+  brackets, and never inside a link's target, where it broke the link. ([#87])
 
 ### Security
 
@@ -323,3 +326,4 @@ and fixes alone are a PATCH bump.
 [#93]: https://github.com/lorenzoervedosa/dograpper/issues/93
 [#86]: https://github.com/lorenzoervedosa/dograpper/issues/86
 [#95]: https://github.com/lorenzoervedosa/dograpper/issues/95
+[#87]: https://github.com/lorenzoervedosa/dograpper/issues/87

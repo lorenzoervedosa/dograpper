@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # Schemes that indicate an external (non-local) link.
 _EXTERNAL_SCHEMES = ("http://", "https://", "mailto:", "javascript:")
 
+# The "](destination)" of a Markdown link, in the two forms md output writes:
+# bare (no whitespace, no parentheses) or <...>.
+_DESTINATION = re.compile(r"\]\((?:<[^>\n]*>|[^\s()]*)\)")
+
 
 @dataclass
 class LinkRef:
@@ -193,6 +197,9 @@ def annotate_cross_refs(
     dot, so short link text (e.g. "Install") does not corrupt an unrelated
     word that merely contains it as a substring (e.g. "Installation") or
     a dotted identifier (e.g. "pkg.AttachedItems.AttachedItems").
+
+    In md text a match that labels a link ``[text](url)`` gets the marker
+    after the link, and a match inside a link's destination is skipped.
     """
     annotated = set()  # link_text values already processed
 
@@ -205,13 +212,28 @@ def annotate_cross_refs(
         if target_chunk is None:
             continue
 
-        marker = f"{lt} [-> {target_chunk}]"
-        new_text = _link_text_pattern(lt).sub(lambda m: marker, text, count=1)
-        if new_text != text:
-            text = new_text
+        for m in _link_text_pattern(lt).finditer(text):
+            end = m.end()
+            destination = _DESTINATION.match(text, end)
+            if destination:
+                end = destination.end()
+            elif _in_destination(text, m.start()):
+                continue
+            text = f"{text[:end]} [-> {target_chunk}]{text[end:]}"
             annotated.add(lt)
+            break
 
     return text
+
+
+def _in_destination(text: str, pos: int) -> bool:
+    """True when ``pos`` falls inside a link destination. A destination never
+    spans lines, so the search stops at the line start."""
+    start = text.rfind("](", text.rfind("\n", 0, pos) + 1, pos)
+    if start < 0:
+        return False
+    destination = _DESTINATION.match(text, start)
+    return destination is not None and destination.end() > pos
 
 
 # ---------------------------------------------------------------------------
