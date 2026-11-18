@@ -114,6 +114,17 @@ and fixes alone are a PATCH bump.
   length, characters, host) and the manifest still wins. The pack summary gains
   a `Source URLs` line counting URLs by source and listing files left without
   one, including rejected or conflicting markers. ([#90])
+- `download --manifest` resolves a relative path against `-o`, so the default
+  `.dograpper-manifest.json` now lives in the output directory instead of the
+  current one: a re-run from another directory stays incremental and two
+  mirrors no longer share a manifest. A manifest left at the old location is
+  not read; `download` prints a one-line note naming the new path.
+  `pack --manifest` resolves against `INPUT_DIR`; by default `pack` looks in
+  `INPUT_DIR` and, inside a mirror, up to its root (the parent of the host
+  directory, at most 8 levels up), naming a manifest found above `INPUT_DIR`
+  in a note. The GitHub Action's manifest moves into `input-dir` and is left
+  out of the source-file drift list; a repo-root one from earlier runs is no
+  longer read. ([#95])
 
 ### Fixed
 

@@ -282,7 +282,8 @@ def _run_download_cascade(
 @click.option('--include-extensions', type=str, default="html,md,txt", show_default=True,
               help="Allowed extensions, comma-separated")
 @click.option('--manifest', type=str, default=".dograpper-manifest.json", show_default=True,
-              help="JSON cache file for incremental downloads")
+              help="JSON cache file for incremental downloads; a relative path "
+                   "resolves against --output")
 @click.option('--filter', multiple=True, metavar='RULE',
               help="URL rule in HTTrack syntax, repeatable: +pattern accepts, -pattern "
                    "refuses, the last match wins (e.g. --filter '-*' --filter '+example.com/wiki/On*')")
@@ -353,7 +354,9 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     include_extensions = normalize_extensions(
         merged_params.get('include_extensions', include_extensions)
     )
-    manifest_path = merged_params.get('manifest', manifest)
+    manifest_name = merged_params.get('manifest', manifest)
+    # Relative to -o, not the CWD, so a re-run from anywhere finds it (#95).
+    manifest_path = os.path.join(output, manifest_name)
 
     downloader = merged_params.get('downloader', downloader)
     if downloader not in ('wget', 'httrack'):
@@ -369,6 +372,11 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     report_lines: List[str] = []
 
     os.makedirs(output, exist_ok=True)
+    if (not os.path.isabs(manifest_name) and not os.path.exists(manifest_path)
+            and os.path.isfile(manifest_name)):
+        click.echo(f"Note: ignoring {manifest_name} in the current directory (the old "
+                   f"default location); the manifest is now kept in -o: {manifest_path}",
+                   err=True)
     manifest_data = load_manifest(manifest_path)
 
     if downloader == 'httrack':

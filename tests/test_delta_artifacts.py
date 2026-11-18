@@ -271,7 +271,7 @@ def test_sync_packs_on_the_first_run_and_no_ops_on_the_second(tmp_path, monkeypa
 
     docs = str(tmp_path / "docs")
     chunks = str(tmp_path / "chunks")
-    monkeypatch.chdir(tmp_path)  # sync's default --manifest is cwd-relative
+    monkeypatch.chdir(tmp_path)  # the fake download writes the raw --manifest value
 
     def _fake_download(url, output, depth, headless, delay, include_extensions,
                        manifest, **_httrack_flags):

@@ -62,20 +62,29 @@ def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
     return query_list, is_score
 
 
-def _load_url_manifest(ctx, manifest_path):
+def _load_url_manifest(ctx, manifest_name, input_dir):
     """Download manifest for source URLs, or None.
 
-    A manifest named with --manifest must load. The default path is optional:
-    absent is the normal case for mirrors made by other tools, and a file
-    there that cannot be loaded is reported and skipped.
+    A relative path resolves against INPUT_DIR, as download's does against -o.
+    A manifest named with --manifest must load. The default is searched for
+    (find_manifest) and optional: absent is the normal case for mirrors made
+    by other tools, and a file there that cannot be loaded is reported and
+    skipped. One found above INPUT_DIR is named in a note.
     """
-    from ..lib.manifest import read_manifest
+    from ..lib.manifest import find_manifest, read_manifest
 
     explicit = is_explicit(ctx, 'manifest')
-    if not os.path.exists(manifest_path):
-        if explicit:
+    if explicit:
+        manifest_path = os.path.join(input_dir, manifest_name)
+        if not os.path.exists(manifest_path):
             raise click.ClickException(f"manifest not found: {manifest_path}")
-        return None
+    else:
+        manifest_path = find_manifest(input_dir, manifest_name)
+        if manifest_path is None:
+            return None
+        if os.path.dirname(manifest_path) != os.path.abspath(input_dir):
+            click.echo(f"Note: using manifest {manifest_path} from a parent of INPUT_DIR",
+                       err=True)
     try:
         return read_manifest(manifest_path)
     except (OSError, ValueError, TypeError, AttributeError) as e:
@@ -154,7 +163,9 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--manifest', type=str, default=".dograpper-manifest.json",
               show_default=True,
               help="Download manifest, used to resolve source URLs for "
-                   "--context-header.")
+                   "--context-header. A relative path resolves against INPUT_DIR; "
+                   "by default it is looked for in INPUT_DIR, then up to the mirror "
+                   "root when INPUT_DIR is inside a download.")
 @click.option('--bundle', type=click.Choice(['notebooklm', 'rag-standard']),
               default=None,
               help="Optimized packaging preset. "
@@ -254,7 +265,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     is_delta = merged_params.get('delta', delta)
     include_exts = normalize_extensions(
         merged_params.get('include_extensions', include_extensions))
-    manifest_path = merged_params.get('manifest', manifest)
+    manifest_name = merged_params.get('manifest', manifest)
     bundle_preset = merged_params.get('bundle', bundle)
     is_score = merged_params.get('score', score)
     for_queries_path = merged_params.get('for_queries', for_queries)
@@ -278,7 +289,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     query_list, is_score = _validate_flags(
         ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score)
     # 2f. Manifest for --context-header (and INDEX.md) URLs, loaded before any page is read
-    manifest_data = _load_url_manifest(ctx, manifest_path) if ctx_header or page_layout else None
+    manifest_data = _load_url_manifest(ctx, manifest_name, input_dir) if ctx_header or page_layout else None
 
     # 3. List all files
     # The queries file drives the ordering; it is never corpus content,

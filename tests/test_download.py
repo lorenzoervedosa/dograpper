@@ -847,6 +847,91 @@ def test_download_manifest_inside_output_does_not_list_itself():
         assert sorted(e.local_path for e in load_manifest(manifest_path).files.values()) == [
             "h.example/p0.html", "h.example/p1.html"]
 
+# --- where the manifest lives (#95) ---
+
+def _download_from(cwd, *args, config=None):
+    """`download` run from ``cwd`` with wget --mirror mocked over two pages in ``cwd/../dl``."""
+    from dograpper.lib.wget_mirror import WgetResult
+    dl = os.path.join(os.path.dirname(cwd), "dl")
+    paths = [os.path.join(dl, "h.example", f"p{i}.html") for i in range(2)]
+    os.makedirs(os.path.dirname(paths[0]), exist_ok=True)
+    for p in paths:
+        if not os.path.exists(p):
+            with open(p, "w") as f:
+                f.write("1")
+    pre = ["--config", config] if config else []
+    old = os.getcwd()
+    os.chdir(cwd)
+    try:
+        # paths as run_wget_mirror lists them: under -o as given
+        listed = [os.path.relpath(p, cwd) for p in paths]
+        with patch('dograpper.commands.download.run_wget_mirror',
+                   return_value=WgetResult(True, "../dl", listed, [], 0)) as wget, \
+                patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+                patch('dograpper.commands.download.is_spa', return_value=False):
+            res = CliRunner().invoke(cli, [*pre, 'download', 'http://h.example', '-o', '../dl', *args])
+    finally:
+        os.chdir(old)
+    assert res.exit_code == 0, res.output
+    return res, wget
+
+
+def test_download_default_manifest_lives_in_output_not_cwd(tmp_path):
+    (tmp_path / "cwd").mkdir()
+    res, _ = _download_from(str(tmp_path / "cwd"))
+    assert os.listdir(tmp_path / "cwd") == []
+    assert (tmp_path / "dl" / ".dograpper-manifest.json").is_file()
+    assert "Manifest:         ../dl/.dograpper-manifest.json" in res.output
+
+
+def test_download_rerun_from_another_cwd_is_incremental(tmp_path):
+    for d in ("one", "two"):
+        (tmp_path / d).mkdir()
+    _download_from(str(tmp_path / "one"))
+    res, wget = _download_from(str(tmp_path / "two"))
+    assert wget.call_args.kwargs["incremental"] is True
+    assert "Files skipped:    2 (cached)" in res.output
+
+
+def test_download_relative_manifest_resolves_against_output_absolute_as_is(tmp_path):
+    (tmp_path / "cwd").mkdir()
+    _download_from(str(tmp_path / "cwd"), "--manifest", "state.json")
+    assert (tmp_path / "dl" / "state.json").is_file()
+    absolute = tmp_path / "elsewhere.json"
+    _download_from(str(tmp_path / "cwd"), "--manifest", str(absolute))
+    assert absolute.is_file()
+    assert os.listdir(tmp_path / "cwd") == []
+
+
+def test_download_config_manifest_resolves_against_output_and_cli_wins(tmp_path):
+    (tmp_path / "cwd").mkdir()
+    config = tmp_path / "c.json"
+    config.write_text(json.dumps({"download": {"manifest": "cfg.json"}}))
+    _download_from(str(tmp_path / "cwd"), config=str(config))
+    assert (tmp_path / "dl" / "cfg.json").is_file()
+    _download_from(str(tmp_path / "cwd"), "--manifest", "cli.json", config=str(config))
+    assert (tmp_path / "dl" / "cli.json").is_file()
+
+
+def test_download_ignores_a_manifest_at_the_old_cwd_default_with_a_note(tmp_path):
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    old = cwd / ".dograpper-manifest.json"
+    old.write_text(json.dumps({"base_url": "http://h.example", "last_run": "", "files": {
+        "p0.html": {"url": "http://h.example/p0", "size_bytes": 1,
+                    "local_path": "h.example/p0.html"}}}))
+    before = old.read_text()
+    res, wget = _download_from(str(cwd))
+    assert wget.call_args.kwargs["incremental"] is False  # not read
+    assert ("Note: ignoring .dograpper-manifest.json in the current directory (the old "
+            "default location); the manifest is now kept in -o: "
+            "../dl/.dograpper-manifest.json") in res.stderr
+    assert old.read_text() == before
+    assert (tmp_path / "dl" / ".dograpper-manifest.json").is_file()
+    res, _ = _download_from(str(cwd))  # once the new one exists, no note
+    assert "Note:" not in res.stderr
+
+
 def test_download_wget_not_installed():
     runner = CliRunner()
     from dograpper.lib.wget_mirror import run_wget_mirror

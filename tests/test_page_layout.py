@@ -506,7 +506,7 @@ def test_header_url_comes_from_the_manifest_or_the_page_marker(tmp_path):
             "url": "https://pzwiki.net/wiki/Modding", "local_path": "Modding.html",
             "size_bytes": 1, "etag": None, "last_modified": None, "mtime": 0}}}, f)
     result = _pack("docs", "-o", "out", "--layout", "page", "--context-header",
-                   "--manifest", "docs/.dograpper-manifest.json")
+                   "--manifest", ".dograpper-manifest.json")  # relative to INPUT_DIR (#95)
     assert result.exit_code == 0, result.output
     assert _header("out/pages/Modding.md")["url"] == "https://pzwiki.net/wiki/Modding"
     assert _header("out/pages/ActionGroup.md")["url"] == "http://pzwiki.net/wiki/ActionGroup"

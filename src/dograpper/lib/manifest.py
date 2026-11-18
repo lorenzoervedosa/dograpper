@@ -1,6 +1,7 @@
 """Manifest management and generation."""
 
 import os
+import re
 import json
 import hashlib
 import logging
@@ -13,6 +14,15 @@ from ..utils.redact import recordable_url
 from .ignore_parser import DOGRAPPER_STATE_NAMES
 
 logger = logging.getLogger(__name__)
+
+# How far above INPUT_DIR pack looks for the download root holding the manifest.
+MAX_MANIFEST_LEVELS = 8
+# A directory download names after a host: "<host>[:port]" (wget, Playwright)
+# or an IPv6 literal in brackets (httrack). The last label of a name starts
+# with a letter, so version segments such as "3.12" or "v1.2" do not match.
+_HOST_DIR = re.compile(
+    r"(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z][a-z0-9-]*"
+    r"|\[[0-9a-f:._]+\])(?::\d+)?", re.IGNORECASE)
 
 @dataclass
 class ManifestEntry:
@@ -73,6 +83,29 @@ def load_manifest(path: str) -> Optional[Manifest]:
     except Exception as e:
         logger.warning(f"Failed to parse manifest at {path}, treating as missing: {e}")
         return None
+
+def find_manifest(input_dir: str, name: str) -> Optional[str]:
+    """The manifest ``name`` pack uses by default for ``input_dir``, or None.
+
+    download keeps it in ``-o`` and saves pages under ``-o/<host>/``, so when a
+    subdirectory of a mirror is packed the manifest sits in the parent of the
+    nearest directory named after a host. The search covers ``input_dir`` and its
+    ancestors up to that root, at most MAX_MANIFEST_LEVELS up, and never above
+    it: a manifest in /tmp, $HOME or a shared parent is not this mirror's. The
+    nearest one wins. An absolute ``name`` is used as is.
+    """
+    if os.path.isabs(name):
+        return name if os.path.exists(name) else None
+    chain = [os.path.abspath(input_dir)]
+    while len(chain) <= MAX_MANIFEST_LEVELS and os.path.dirname(chain[-1]) != chain[-1]:
+        chain.append(os.path.dirname(chain[-1]))
+    hosts = [i for i, d in enumerate(chain[:-1]) if _HOST_DIR.fullmatch(os.path.basename(d))]
+    for d in chain[:hosts[0] + 2] if hosts else chain[:1]:
+        candidate = os.path.join(d, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
 
 def save_manifest(manifest: Manifest, path: str) -> None:
     """Save manifest to disk."""

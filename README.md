@@ -213,7 +213,7 @@ dograpper download <url> -o <directory> [options]
 | `--headless` | — | `false` | Skip wget and use playwright directly |
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions (csv) |
-| `--manifest` | — | `.dograpper-manifest.json` | Cache file path |
+| `--manifest` | — | `.dograpper-manifest.json` | Manifest file for incremental downloads. A relative path resolves against `-o` (so the default lives in the output directory); an absolute path is used as is |
 | `--filter` | — | *(none)* | URL rule, repeatable: `+pattern` accepts, `-pattern` refuses, the last match wins (see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | Download backend: `wget` or `httrack` (see [Downloader profiles](#downloader-profiles)) |
 
@@ -387,9 +387,19 @@ httrack-fetched trees.
 #### Incremental
 
 A `.dograpper-manifest.json` manifest is generated after each download,
-recording mirrored files with SHA-256 hashes and mtimes. Future re-runs
+recording mirrored files with MD5 content hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
 changed on the server.
+
+The manifest lives in the output directory: a relative `--manifest`
+resolves against `-o`, an absolute one is used as is, so a re-run from any
+directory finds it and two mirrors never share one. It never lists itself,
+`delta_manifest.json` or `pack_state.json`. `pack` reads it the same way,
+relative to `INPUT_DIR` (its `--manifest` row says how a subdirectory of a
+mirror finds the mirror's manifest). Up to 0.4.0 the default was relative to the current
+directory; a manifest left there is not read (it may belong to another
+mirror) and `download` says so in one line, then writes the new one in `-o`.
+wget's own timestamping keeps that first run cheap.
 
 Each entry's `url` is the URL dograpper requested for the file (the seed, a
 discovered or a listed URL), and `pack --context-header` copies it into the
@@ -470,7 +480,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON), with the source `url` from the manifest or the page's HTTrack / saved-from marker |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` |
 | `--delta` | — | `false` | Skip the run entirely when nothing changed since the last pack; pack in full when something did |
-| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`; its entry wins over a page marker. Given explicitly, it must exist and load (exit 1 otherwise); at the default path a missing file is skipped and a broken one is skipped with a note |
+| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`; its entry wins over a page marker. A relative path resolves against `INPUT_DIR`, an absolute one is used as is. Given explicitly, it must exist and load (exit 1 otherwise). Not given (or set in `.dograpper.json`), it is looked for in `INPUT_DIR` and, when `INPUT_DIR` lies inside a mirror (`<root>/<host dir>/...`), in its parents up to that root, at most 8 levels up and never above: packing a subdirectory finds the manifest `download` left in `-o`, and one in `/tmp` or `$HOME` is never picked up. The nearest wins, and one found above `INPUT_DIR` is named in a note. None found is skipped; a broken one is skipped with a note |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
@@ -1162,11 +1172,10 @@ deterministic, so no upstream change means an empty drift
 (see [ADR-0007](docs/adr/0007-freshness-action-and-drift-command.md)).
 
 It assumes **ubuntu runners** (python3, wget, `jq` and the `gh` CLI are
-preinstalled) and that the docs mirror, the chunks directory (with
-`llm-readiness.json`) and the repo-root `.dograpper-manifest.json`
-(written relative to the working directory, not inside `chunks-dir`)
-are **versioned in your repo**: that is what carries state across
-stateless CI runners (see
+preinstalled) and that the docs mirror (`input-dir`, which holds the
+`.dograpper-manifest.json` that `download` writes there) and the chunks
+directory (with `llm-readiness.json`) are **versioned in your repo**: that is
+what carries state across stateless CI runners (see
 [Incremental maintenance](#incremental-maintenance-cicd)).
 
 ```yaml
@@ -1202,7 +1211,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ./docs ./chunks .dograpper-manifest.json
+          git add ./docs ./chunks
           git diff --cached --quiet || git commit -m "chore: refresh packed context"
           git push
 ```
@@ -1223,6 +1232,10 @@ Outputs: `drift` (`true`/`false`) and `report-path` (the markdown
 report). The PR comment is upserted by matching the
 `<!-- dograpper-drift -->` marker, so re-runs edit the same comment.
 
+The manifest is left out of the comment's source-file list (it changes on
+every download). Up to 0.4.0 it was written at the repo root; that file is no
+longer read and can be deleted once `input-dir` holds the new one.
+
 ---
 
 ## Generated artifacts
@@ -1239,7 +1252,7 @@ report). The PR comment is upserted by matching the
 | `IMPORT_GUIDE.md` | `--bundle` | Upload guide with recommended ordering (both `notebooklm` and `rag-standard`) |
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
 | `pack_state.json` | `--delta` | Corpus state as of this pack; the next `--delta` run diffs against it |
-| `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes) |
+| `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes), in the `-o` directory |
 
 ---
 
