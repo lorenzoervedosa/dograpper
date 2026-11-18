@@ -481,8 +481,9 @@ target to the chunk where the file was packed, and generates
 `cross_refs.json` with `references_to`, `referenced_by`, and `links`
 lists per chunk. As each chunk is written, every page's content (each of
 its records, when a long page is split) gets a `[-> chunk_id]` marker after
-the first whole-word occurrence of the text of each link that page holds,
-letting LLMs navigate between chunks. Record
+the first whole-word occurrence of the text of each link that page holds
+(never inside a dotted identifier such as `pkg.Item.Item`), letting LLMs
+navigate between chunks. Record
 metadata (JSONL `id`/`source`, the file index, context headers) is never
 annotated.
 

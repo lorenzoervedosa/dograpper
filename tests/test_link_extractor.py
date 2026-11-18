@@ -234,6 +234,19 @@ def test_link_text_preceded_by_word_char_not_annotated():
     assert result == "ReInstall the tool, then Install [-> docs_chunk_01] it."
 
 
+def test_link_text_inside_dotted_identifier_not_annotated():
+    """A marker never lands inside a dotted identifier (#67:
+    "zombie.characters.AttachedItems [-> docs_chunk_01].AttachedItems"); a
+    sentence-final period still ends the match."""
+    fqn = "java.lang.Object zombie.characters.AttachedItems.AttachedItems"
+    text = f"{fqn}\n\nRead AttachedItems."
+    links = [LinkRef("a.html", "AttachedItems.html", "", "AttachedItems")]
+    file_to_chunk = {"AttachedItems.html": "docs_chunk_01"}
+
+    result = annotate_cross_refs(text, links, file_to_chunk)
+    assert result == f"{fqn}\n\nRead AttachedItems [-> docs_chunk_01]."
+
+
 def test_regex_special_chars_in_link_text_escaped():
     """Link text containing regex-special characters is treated literally."""
     text = "See C++ (advanced) for details."

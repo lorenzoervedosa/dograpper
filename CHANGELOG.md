@@ -110,9 +110,11 @@ and fixes alone are a PATCH bump.
 - `pack --cross-refs` annotates each page's own content, for the links that
   page holds, as the chunk is written, instead of the first occurrence of the
   link text anywhere in the written chunk file. Markers no longer rewrite
-  JSONL `id`/`source` values, md/txt file indexes or context headers, or land
-  in another page that merely mentions the link text, and large corpora no
-  longer stall (each link text's pattern is compiled once per run). ([#67])
+  JSONL `id`/`source` values, md/txt file indexes or context headers, land in
+  another page that merely mentions the link text, or split a dotted
+  identifier (`pkg.AttachedItems [-> docs_chunk_01].AttachedItems`), and
+  large corpora no longer stall (each link text's pattern is compiled once
+  per run). ([#67])
 
 ### Security
 
