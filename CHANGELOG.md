@@ -57,6 +57,16 @@ and fixes alone are a PATCH bump.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 
+### Changed
+
+- `pack` now packs documentation formats only by default (`.html`, `.htm`,
+  `.md`, `.txt`). `.js`, `.css`, `.json` and other text files are skipped and
+  listed by extension in one summary line; `robots.txt`,
+  `.dograpper-manifest.json`, `delta_manifest.json` and `pack_state.json` are
+  always skipped. `--include-extensions` (config key `include-extensions`)
+  brings other extensions back. Corpora that relied on packing e.g. `.json`
+  or extensionless files must now opt in. ([#91])
+
 ### Fixed
 
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
@@ -147,3 +157,4 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#91]: https://github.com/lorenzoervedosa/dograpper/issues/91

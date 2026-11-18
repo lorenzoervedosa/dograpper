@@ -618,3 +618,90 @@ def test_pack_for_queries_dry_run_shows_summary():
         assert "2 queries, 2 files matched, 0 unmatched" in result.output
         # dry-run must not write anything
         assert not os.path.exists(out)
+
+
+# --- Documentation-extension filter (issue #91) ---
+
+def _doc_tree(d):
+    for name, body in {
+        'page.html': '<html><body><p>alpha beta</p></body></html>',
+        'old.htm': '<html><body><p>gamma</p></body></html>',
+        'notes.md': 'delta epsilon',
+        'plain.txt': 'zeta',
+        'member-search-index.js': 'memberSearchIndex = []',
+        'style.css': 'body {}',
+        'asset.json': '{"a": 1}',
+        'robots.txt': 'User-agent: *',
+        '.dograpper-manifest.json': '{}',
+    }.items():
+        with open(os.path.join(d, name), 'w') as f:
+            f.write(body)
+
+
+def _packed_sources(out):
+    text = ''.join(open(os.path.join(out, n)).read() for n in sorted(os.listdir(out))
+                   if n.startswith('docs_chunk_'))
+    return text
+
+
+def test_pack_default_takes_documentation_extensions_only():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs('in')
+        _doc_tree('in')
+        result = runner.invoke(pack, ['in', '-o', 'out'])
+        assert result.exit_code == 0, result.output
+        text = _packed_sources('out')
+        for kept in ('page.html', 'old.htm', 'notes.md', 'plain.txt'):
+            assert kept in text
+        for dropped in ('member-search-index.js', 'style.css', 'asset.json',
+                        'robots.txt', '.dograpper-manifest.json'):
+            assert dropped not in text
+        assert 'Skipped non-documentation files: 5' in result.output
+        assert '.js x1' in result.output and 'robots.txt x1' in result.output
+        assert '.dograpper-manifest.json x1' in result.output
+
+
+def test_pack_include_extensions_brings_extension_back_but_not_named_files():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs('in')
+        _doc_tree('in')
+        result = runner.invoke(
+            pack, ['in', '-o', 'out', '--include-extensions', 'html,json,txt'])
+        assert result.exit_code == 0, result.output
+        text = _packed_sources('out')
+        assert 'asset.json' in text
+        assert 'robots.txt' not in text
+        assert '.dograpper-manifest.json' not in text
+        assert 'notes.md' not in text  # md was not listed
+
+
+def test_pack_include_extensions_config_and_precedence():
+    import json as _json
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs('in')
+        _doc_tree('in')
+        with open('.dograpper.json', 'w') as f:
+            _json.dump({"pack": {"include-extensions": ["html", "css"]}}, f)
+        result = runner.invoke(pack, ['in', '-o', 'out'])
+        assert result.exit_code == 0, result.output
+        text = _packed_sources('out')
+        assert 'style.css' in text and 'notes.md' not in text
+        result = runner.invoke(
+            pack, ['in', '-o', 'out2', '--include-extensions', 'md'])
+        assert result.exit_code == 0, result.output
+        text = _packed_sources('out2')
+        assert 'notes.md' in text and 'style.css' not in text
+
+
+def test_pack_all_files_skipped_keeps_exclusion_error():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        os.makedirs('in')
+        with open('in/a.js', 'w') as f:
+            f.write('x')
+        result = runner.invoke(pack, ['in', '-o', 'out'])
+        assert result.exit_code != 0
+        assert "All files were excluded by ignore rules" in result.output

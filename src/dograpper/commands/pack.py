@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..lib.config_loader import load_config
-from ..lib.ignore_parser import filter_files
+from ..lib.ignore_parser import filter_files, normalize_extensions, split_by_extension
 from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, read_source_text
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,9 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--delta', is_flag=True, default=False,
               help="Skip the run when nothing changed since the last pack; "
                    "pack in full when something did.")
+@click.option('--include-extensions', type=str, default="html,htm,md,txt", show_default=True,
+              help="Extensions packed as documentation, comma-separated. "
+                   "robots.txt and dograpper's own manifests are always skipped.")
 @click.option('--manifest', type=str, default=".dograpper-manifest.json",
               show_default=True,
               help="Download manifest, used to resolve source URLs for "
@@ -142,7 +145,7 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -185,6 +188,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'context_header': context_header,
         'cross_refs': cross_refs,
         'delta': delta,
+        'include_extensions': include_extensions,
         'manifest': manifest,
         'bundle': bundle,
         'score': score,
@@ -212,6 +216,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     ctx_header = merged_params.get('context_header', context_header)
     do_cross_refs = merged_params.get('cross_refs', cross_refs)
     is_delta = merged_params.get('delta', delta)
+    include_exts = normalize_extensions(
+        merged_params.get('include_extensions', include_extensions))
     manifest_path = merged_params.get('manifest', manifest)
     bundle_preset = merged_params.get('bundle', bundle)
     is_score = merged_params.get('score', score)
@@ -246,7 +252,13 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         raise click.ClickException(f"No files found in {input_dir}. Did you run `download` first?")
         
     # 5. Filter
-    filtered_paths = filter_files(all_files, ign_file, ign_inline, input_dir)
+    doc_files, skipped_types = split_by_extension(all_files, include_exts)
+    if skipped_types:
+        listing = ", ".join(f"{k} x{n}" for k, n in sorted(skipped_types.items()))
+        click.echo(f"Skipped non-documentation files: "
+                   f"{sum(skipped_types.values())} ({listing}). "
+                   f"Use --include-extensions to pack other extensions.")
+    filtered_paths = filter_files(doc_files, ign_file, ign_inline, input_dir)
     
     # 6. Check empty after filter
     if not filtered_paths:
