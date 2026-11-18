@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 
+import pytest
 from click.testing import CliRunner
 
 from dograpper.utils.link_extractor import (
@@ -333,3 +334,55 @@ def test_cross_refs_summary_line():
         assert result.exit_code == 0
         assert "Cross-refs:" in result.output
         assert "cross_refs.json" in result.output
+
+
+# Issue #67 repro: the page that holds the link is not the first place its
+# text appears in the chunk, and its text also appears in metadata ("Item.html").
+_REPRO_PAGES = [
+    ("Item.html", "<html><body><main><h1>Item</h1><p>The Item class represents "
+                  "an inventory item with a weight and a name field.</p></main></body></html>"),
+    ("z_guide.html", '<html><body><main><h1>Guide</h1><p>To pick something up, call '
+                     'the getter on <a href="Item.html">Item</a> and check the weight '
+                     'first.</p></main></body></html>'),
+]
+
+
+def _pack_repro(d, fmt, *extra):
+    input_dir = os.path.join(d, 'input')
+    os.makedirs(input_dir)
+    _create_html_files(input_dir, _REPRO_PAGES)
+    output_dir = os.path.join(d, 'out')
+    result = CliRunner().invoke(
+        pack, [input_dir, '-o', output_dir, '--format', fmt, '--cross-refs', *extra])
+    assert result.exit_code == 0, result.output
+    with open(os.path.join(output_dir, f'docs_chunk_01.{fmt}'), encoding='utf-8') as f:
+        return f.read()
+
+
+@pytest.mark.parametrize("extra", [(), ("--context-header",)])
+def test_cross_refs_jsonl_annotates_only_the_linking_record(extra):
+    """The marker goes into the content of the record that holds the link,
+    never into id/source or another record (#67)."""
+    with tempfile.TemporaryDirectory() as d:
+        text = _pack_repro(d, 'jsonl', *extra)
+
+    records = [json.loads(line) for line in text.splitlines()]
+    assert [(r["id"], r["source"]) for r in records] == [
+        ("01_Item.html", "Item.html"), ("01_z_guide.html", "z_guide.html")]
+    item, guide = records
+    assert "[-> " not in item["content"]
+    assert "call the getter on Item [-> docs_chunk_01] and check" in guide["content"]
+    assert text.count("[-> ") == 1
+
+
+@pytest.mark.parametrize("fmt", ["md", "txt"])
+@pytest.mark.parametrize("extra", [(), ("--context-header",)])
+def test_cross_refs_text_formats_annotate_only_the_linking_page(fmt, extra):
+    """md/txt: the file index, source separators and context headers stay
+    intact; only the linking page's content gets the marker (#67)."""
+    with tempfile.TemporaryDirectory() as d:
+        text = _pack_repro(d, fmt, *extra)
+
+    assert "- Item.html (15 words)" in text
+    assert "call the getter on Item [-> docs_chunk_01] and check" in text
+    assert text.count("[-> ") == 1

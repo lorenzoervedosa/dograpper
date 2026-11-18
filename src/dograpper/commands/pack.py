@@ -516,19 +516,22 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         if ctx_header or fmt == 'jsonl':
             readiness_map = scoring.header_map()
 
-    # 10. Write outputs
-    write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_map, readiness_map=readiness_map)
-
-    # 10a. Cross-references (opt-in, after write)
+    # 9d. Cross-references (opt-in, before write: markers go into each page's
+    # content as it is serialized, never into record metadata — issue #67)
     cross_ref_total = 0
     cross_ref_unresolved = 0
+    annotate = None
     if do_cross_refs:
         from ..lib.pack_artifacts import write_cross_refs
 
-        cross_ref_stats = write_cross_refs(
-            chunks, filtered_paths, input_dir, output_dir, pref, fmt)
-        cross_ref_total = cross_ref_stats.total
-        cross_ref_unresolved = cross_ref_stats.unresolved
+        cross_ref_result = write_cross_refs(
+            chunks, filtered_paths, input_dir, output_dir, pref)
+        cross_ref_total = cross_ref_result.total
+        cross_ref_unresolved = cross_ref_result.unresolved
+        annotate = cross_ref_result.annotate
+
+    # 10. Write outputs
+    write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_map, readiness_map=readiness_map, annotate=annotate)
 
     # 10b. Delta report (opt-in, after write)
     if is_delta and diff is not None:

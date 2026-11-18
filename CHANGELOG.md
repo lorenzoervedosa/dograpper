@@ -72,6 +72,11 @@ and fixes alone are a PATCH bump.
   size matches but mtime disagrees, instead of trusting mtime alone; the
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
+- `pack --cross-refs` annotates each page's own content, for the links that
+  page holds, as the chunk is written, instead of the first occurrence of the
+  link text anywhere in the written chunk file. Markers no longer rewrite
+  JSONL `id`/`source` values, md/txt file indexes or context headers, or land
+  in another page that merely mentions the link text. ([#67])
 
 ### Security
 
@@ -147,3 +152,4 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#67]: https://github.com/lorenzoervedosa/dograpper/issues/67
