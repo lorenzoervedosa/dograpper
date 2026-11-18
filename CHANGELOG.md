@@ -216,6 +216,10 @@ and fixes alone are a PATCH bump.
   (`debuglog<TAB>-debuglog=All`, not `debuglog-debuglog=All`). The tab is whitespace, so word counts
   change only where gluing had merged two words. md is unchanged.
   ([#125](https://github.com/lorenzoervedosa/dograpper/issues/125))
+- md output renders Javadoc 25 summary grids (`div.summary-table`) as pipe tables, one line per
+  row (`| static final double | PI | 3.14159 |`), so a grep hit on a member or constant carries its
+  type and value. Word counts and readiness grades are unchanged.
+  ([#120](https://github.com/lorenzoervedosa/dograpper/issues/120))
 - `pack` renders MediaWiki red links (`a.new`, `redlink=1` or `action=edit`
   targets) as plain text, so no `index.php?...&action=edit&redlink=1`
   destination reaches the output.

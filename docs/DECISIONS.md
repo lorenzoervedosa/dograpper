@@ -22,6 +22,25 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — Table cells in plain text, Javadoc grids in md only (#125, #120)
+
+- **Decision:** (#125) the plain-text renderer starts each `td`/`th` with a
+  tab (private marker, turned into `\t` when the prose is rendered; a `<tr>`
+  also starts a block, since `</td>` and `</tr>` may be omitted); the md
+  renderer does not emit it. (#120) a Javadoc `div.summary-table` with a
+  `two|three-column-summary` class is a table in md: its child divs are the
+  cells, N to a row, the first row the header. The plain path keeps one cell
+  per paragraph for these grids.
+- **Why:** `text.split()` counts ` | ` as a word, a tab is whitespace, so
+  word counts (ADR-0003) change only where gluing had merged two words. The
+  grid reuses the md table frame and `_pipe_table`; the plain path has no
+  frames, so one line per grid row there needs a second row tracker in the
+  base class, and the issue asks for md.
+- **Rejected:** ` | ` in plain text (inflates counts); a space (cells with
+  several words become ambiguous); a plain-text grid renderer (follow-up if
+  grep over txt/jsonl needs it).
+- **Pending:** whether txt/jsonl should also get one line per Javadoc grid row.
+
 ## 2026-11-18 — Harness patterns mirrored from open-notes (#35)
 
 - **Decision:** Phases 2–5 of the epic ship as one commit each in a single

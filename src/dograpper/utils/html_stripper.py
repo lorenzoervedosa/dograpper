@@ -247,6 +247,9 @@ def _prose_blocks(data: str) -> list:
 _HEADING_LEVELS = {f"h{n}": n for n in range(1, 7)}
 _LISTS = ("ul", "ol")
 _CELLS = ("td", "th")
+# Javadoc 25 summary grids (#120): <div class="summary-table N-column-summary"> whose
+# cells are its flat child divs, N to a row, the first N being the header.
+_GRID_COLUMNS = {"two-column-summary": 2, "three-column-summary": 3}
 # A list item holding one of these is a container, not an entry (Javadoc puts each
 # member's section in one): it is written as its blocks, without a marker.
 _ITEM_BLOCKERS = BLOCK_TAGS - {"p", "li", "ul", "ol"}
@@ -368,6 +371,9 @@ class _Frame:
         self.block = False     # li: holds a block, so it is no list entry
         self.number = 0        # ol: number of its last item
         self.rows = []         # table: one list of cell frames per row
+        self.cols = 0          # Javadoc grid (a table): cells per row
+        self.depth = 0         # Javadoc grid and its cells: open <div>s at its own <div>
+        self.closed = False
 
 
 class MarkdownStripper(HTMLStripper):
@@ -395,6 +401,8 @@ class MarkdownStripper(HTMLStripper):
         self.link = None  # (frame, index of its "[" placeholder, destination)
         self.code = 0       # open <code> elements
         self.signature = 0  # <div> depth inside a Javadoc member signature
+        self.divs = 0       # open <div> elements
+        self.div_frames = {}  # <div> depth -> the grid or cell frame that div opened
         self.references = {}  # destination -> its number, in first-use order
 
     def handle_starttag(self, tag, attrs):
@@ -427,6 +435,9 @@ class MarkdownStripper(HTMLStripper):
         frame = self.frames[-1]
         if frame.tag == "li" and tag in _ITEM_BLOCKERS:
             frame.block = True
+        if tag == "div":
+            self._open_div(frame, dict(attrs).get("class") or "")
+            frame = self.frames[-1]
         if tag == "code":
             self.code += 1
         elif tag == "div" and (self.signature
@@ -468,7 +479,34 @@ class MarkdownStripper(HTMLStripper):
                     frame.rows[-1].append(cell)
                     self._push(cell)
 
+    def _open_div(self, frame, classes):
+        """Count the <div>; a Javadoc summary grid is a table, and its child divs are cells."""
+        cell = None
+        if frame.cols and frame.depth == self.divs:
+            cell = _Frame("td")
+            if not frame.rows or len(frame.rows[-1]) == frame.cols:
+                frame.rows.append([])
+            frame.rows[-1].append(cell)
+        elif frame.tag not in _HEADING_LEVELS and "summary-table" in classes.split():
+            cols = max((_GRID_COLUMNS.get(c, 0) for c in classes.split()), default=0)
+            if cols:
+                cell = _Frame("table")
+                cell.cols = cols
+        self.divs += 1
+        if cell:
+            cell.depth = self.divs
+            self.div_frames[self.divs] = cell
+            self._push(cell)
+
+    def _close_div(self):
+        frame = self.div_frames.pop(self.divs, None)
+        self.divs = max(self.divs - 1, 0)
+        while frame and not frame.closed:  # a cell or grid whose own </div> this is
+            self._end()
+
     def _close(self, tag):
+        if tag == "div":
+            self._close_div()
         if tag == "code":
             self.code = max(self.code - 1, 0)
         elif tag == "div" and self.signature:
@@ -502,6 +540,7 @@ class MarkdownStripper(HTMLStripper):
     def _end(self):
         """Close the innermost frame and place its output in the enclosing one."""
         frame = self.frames.pop()
+        frame.closed = True
         self.open[frame.tag] -= 1
         parent = self.frames[-1]
         self.text = parent.parts
