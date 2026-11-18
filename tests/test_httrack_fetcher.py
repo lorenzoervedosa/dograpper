@@ -688,8 +688,8 @@ def test_request_target_escaped_like_httrack(url, target):
 
 
 def test_host_header_is_idna_encoded():
-    assert fetcher_mod._wire_host(urlsplit("http://u:p@Café.example:8080/")) == "xn--caf-dma.example:8080"
-    assert fetcher_mod._wire_host(urlsplit("https://Example.com:8443/")) == "Example.com:8443"
+    assert fetcher_mod.wire_host(urlsplit("http://u:p@Café.example:8080/")) == "xn--caf-dma.example:8080"
+    assert fetcher_mod.wire_host(urlsplit("https://Example.com:8443/")) == "Example.com:8443"
     f, _ = make()
     assert f.get("http://é" + "a" * 70 + ".com/", kind="navigate").error == "invalid URL"
 

@@ -155,7 +155,7 @@ def same_host(a: str, b: str) -> bool:
         return False
 
 
-def _wire_host(parts) -> str:
+def wire_host(parts) -> str:
     """Host header value: netloc without userinfo, a non-ASCII name IDNA-encoded
     (UnicodeError, a ValueError, when IDNA cannot encode it)."""
     host = drop_userinfo(parts).netloc
@@ -277,7 +277,7 @@ class Fetcher:
         res = FetchResult(url)
         try:
             parts, key = urlsplit(url), _origin(url)
-            host, target = _wire_host(parts), request_target(parts)
+            host, target = wire_host(parts), request_target(parts)
         except ValueError:
             res.error = "invalid URL"
             return res

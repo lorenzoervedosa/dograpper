@@ -10,7 +10,7 @@ imported lazily, only when a session is first created.
 """
 from urllib.parse import urlunsplit
 
-from ..httrack.fetcher import CHUNK, MAX_BODY_BYTES, Fetcher, _wire_host
+from ..httrack.fetcher import CHUNK, MAX_BODY_BYTES, Fetcher, wire_host
 
 _MISSING = (
     "curl_cffi is required for --downloader fire-engine. "
@@ -51,7 +51,7 @@ class CurlCffiFetcher(Fetcher):
         self._acquire(conn=True)  # connection-rate pacing, as the stdlib path does
         # Rebuild the URL from the IDNA host (no userinfo), as the stdlib path puts on the
         # wire, so curl targets exactly what the scope/robots checks validated.
-        host = _wire_host(parts)  # raises ValueError on a host http.client/the checks reject
+        host = wire_host(parts)  # raises ValueError on a host http.client/the checks reject
         netloc = host if parts.port is None else f"{host}:{parts.port}"
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
         referer = next((v for k, v in headers if k.lower() == "referer"), None)
