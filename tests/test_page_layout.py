@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from dograpper.cli import cli
 from dograpper.lib import page_layout
 from dograpper.lib.page_layout import assign_page_paths, page_titles
+from dograpper.utils.word_counter import count_words
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +203,8 @@ def test_index_lists_every_page_once_in_the_adr_format(tmp_path):
     result = _pack("docs", "-o", "out", "--layout", "page")
     assert result.exit_code == 0, result.output
     lines = _read("out/INDEX.md").split("\n")
-    words = {rel: len(_read(f"out/pages/{rel}").split()) for rel in
+    # md pages are Markdown: their "##" heading markers are not words (#87).
+    words = {rel: count_words(_read(f"out/pages/{rel}"), markdown=True) for rel in
              ("ActionGroup.md", "Help_Style_guide.md", "Modding.md", "Modding/vi.md")}
     assert lines == [
         "# Index",
@@ -234,6 +236,25 @@ def test_page_layout_writes_no_chunk_files_and_respects_format_txt(tmp_path):
     assert not [f for f in os.listdir("out") if f.startswith("docs_chunk_")]
     assert os.path.isfile("out/pages/Modding/vi.txt")
     assert "(<pages/Modding/vi.txt>)" in _read("out/INDEX.md")
+
+
+def test_txt_pages_carry_code_without_its_fence(tmp_path):
+    code = "local function onTick()\n    if x then\n\n        print(x)\n    end\nend"
+    _write("docs", {"Events.html": (
+        "<html><body><main><h2>Events</h2><p>Some prose so the page has text to extract.</p>"
+        f'<div class="mw-highlight mw-highlight-lang-lua"><pre>{code}\n</pre></div>'
+        "</main></body></html>")})
+    for extra in ((), ("--context-header",)):
+        result = _pack("docs", "-o", "out", "--layout", "page", "--format", "txt", *extra)
+        assert result.exit_code == 0, result.output
+        text = _read("out/pages/Events.txt")
+        assert code in text, text
+        assert "```" not in text
+    body = text.split("\n-->\n\n", 1)[1]
+    assert _header("out/pages/Events.txt")["word_count"] == len(body.split())
+    assert f"), {len(body.split())} words" in _read("out/INDEX.md")
+    result = _pack("docs", "-o", "out-md", "--layout", "page")
+    assert "```lua\n" + code + "\n```" in _read("out-md/pages/Events.md")
 
 
 def test_page_over_the_word_cap_is_neither_split_nor_warned(tmp_path):
@@ -402,8 +423,9 @@ def test_cross_refs_point_at_page_paths(tmp_path):
     })
     result = _pack("docs", "-o", "out", "--layout", "page", "--cross-refs")
     assert result.exit_code == 0, result.output
-    assert "Beta page [-> pages/sub/b.md]" in _read("out/pages/a.md")
-    assert "Alpha [-> pages/a.md]" in _read("out/pages/sub/b.md")
+    # md keeps the link as written (#87); the marker names the page file.
+    assert "[Beta page](sub/b.html) [-> pages/sub/b.md]" in _read("out/pages/a.md")
+    assert "[Alpha](../a.html) [-> pages/a.md]" in _read("out/pages/sub/b.md")
     refs = json.loads(_read("out/cross_refs.json"))
     assert refs["pages/a.md"]["references_to"] == ["pages/sub/b.md"]
     assert "[->" not in _read("out/INDEX.md")
@@ -479,7 +501,7 @@ def test_context_header_is_written_once_at_the_top_of_each_page(tmp_path):
                              "schema_version"}, data
         assert f"), {data['word_count']} words" in index
         body = text.split("\n-->\n\n", 1)[1]
-        assert data["word_count"] == len(body.split())
+        assert data["word_count"] == count_words(body, markdown=True)
     data = _header("out/pages/Help_Style_guide.md")
     assert data["title"] == "Help:Style guide"  # " - PZwiki" suffix stripped
     assert data["source"] == "Help_Style_guide.html"

@@ -167,3 +167,30 @@ def test_sync_download_and_pack_share_the_manifest_in_output(tmp_path, monkeypat
             records[rec["source"]] = rec
     assert records["h.example/wiki/A.html"]["url"] == "https://h.example/wiki/A"
     assert "url" not in records["h.example/b.html"]
+
+
+def test_sync_default_chunks_dir_is_not_repacked(tmp_path):
+    """#112: <output>/chunks sits inside the mirror pack reads; run 2 is a no-op."""
+    from dograpper.lib.wget_mirror import WgetResult
+
+    docs = tmp_path / "docs"
+    page = docs / "h.example" / "a.html"
+    page.parent.mkdir(parents=True)
+    body = "<html><body><main><h1>A</h1><p>" + "word " * 60 + "</p></main></body></html>"
+    page.write_text(body)
+    page2 = docs / "h.example" / "b.html"  # one HTML file would trigger the SPA fallback
+    page2.write_text(body)
+
+    def _sync():
+        with patch('dograpper.commands.download.run_wget_mirror',
+                   return_value=WgetResult(True, str(docs), [str(page), str(page2)], [], 0, [], {})), \
+                patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+                patch('dograpper.commands.download.is_spa', return_value=False):
+            return CliRunner().invoke(cli, ['sync', 'https://h.example/', '-o', str(docs)])
+
+    first = _sync()
+    assert first.exit_code == 0, first.output
+    assert "Files processed: 2" in first.output
+    second = _sync()
+    assert second.exit_code == 0, second.output
+    assert "no files changed" in second.output

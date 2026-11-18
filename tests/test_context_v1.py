@@ -119,3 +119,17 @@ class TestContextV1Header:
         data = json.loads(json_str)
         assert data["context_breadcrumb"] == ["a --> b", "x > y"]
         assert data["source"] == "odd-->name.html"
+
+    def test_page_metadata_fields_follow_the_url(self):
+        """Flat, optional page metadata from a generator adapter (#88)."""
+        header = format_context_header(
+            active_headings=[],
+            source_path="p.html",
+            url="https://example.com/p",
+            word_count=12,
+            metadata={"version": "42.10.0", "version_status": "outdated"},
+        )
+        data = json.loads(header.split("<!-- dograpper-context-v1\n")[1].split("\n-->")[0])
+        assert list(data) == ["source", "url", "version", "version_status", "word_count",
+                              "schema_version"]
+        assert data["version"] == "42.10.0" and data["version_status"] == "outdated"

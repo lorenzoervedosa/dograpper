@@ -6,9 +6,10 @@ import logging
 from datetime import datetime, timezone
 
 from ..lib.config_loader import is_explicit, load_config
-from ..lib.ignore_parser import filter_files, normalize_extensions, split_by_extension
+from ..lib.ignore_parser import exclude_subtree, filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
-from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, read_source_text
+from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, is_html, read_source_text
+from ..utils.word_counter import count_words
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +21,19 @@ PACK_STATE_FILENAME = "pack_state.json"
 
 
 def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
-                    is_dry_run, is_score):
+                    is_dry_run, is_score, api_records, bundle_preset):
     """Reject unusable flag combinations before any file is read.
 
     Returns the loaded query list (``None`` when --for-queries was not used)
     and the effective score flag, since --report implies --score.
     """
+    if api_records and fmt != 'jsonl':
+        raise click.UsageError(
+            f"--api-records writes JSONL records; it needs --format jsonl, not --format {fmt}")
+    if api_records and bundle_preset == 'notebooklm':
+        raise click.UsageError(
+            "--api-records cannot be combined with --bundle notebooklm, which shapes "
+            "whole pages into NotebookLM sources")
     if fmt == 'xml':
         raise click.ClickException(
             "XML format is deprecated since v1.x. Use 'md' (default) or 'jsonl'."
@@ -182,8 +190,11 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--report/--no-report', default=False, show_default=True,
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
+@click.option('--api-records', is_flag=True, default=False,
+              help="Split API reference pages (Javadoc) into one container record "
+                   "and one record per member. Requires --format jsonl.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, layout: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, layout: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool, api_records: bool):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -240,6 +251,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'score': score,
         'for_queries': for_queries,
         'report': report,
+        'api_records': api_records,
     }
     
     merged_params = load_config(config_path, 'pack', cli_params, ctx)
@@ -270,6 +282,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     is_score = merged_params.get('score', score)
     for_queries_path = merged_params.get('for_queries', for_queries)
     is_report = merged_params.get('report', report)
+    is_api_records = merged_params.get('api_records', api_records)
 
     # 2a. Page layout (ADR-0010): reject chunk-only settings, never touch a pages/ we did not write
     if page_layout:
@@ -287,9 +300,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     # 2c-2e. Flag validation, fail fast and with no silent fallback
     query_list, is_score = _validate_flags(
-        ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score)
+        ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score,
+        is_api_records, bundle_preset)
     # 2f. Manifest for --context-header (and INDEX.md) URLs, loaded before any page is read
     manifest_data = _load_url_manifest(ctx, manifest_name, input_dir) if ctx_header or page_layout else None
+
+    if os.path.realpath(output_dir) == os.path.realpath(input_dir):
+        raise click.UsageError(
+            "--output is the same directory as INPUT_DIR; pack would read its own output. "
+            "Use a subdirectory or another path.")
 
     # 3. List all files
     # The queries file drives the ordering; it is never corpus content,
@@ -302,7 +321,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             if queries_realpath and os.path.realpath(fpath) == queries_realpath:
                 continue
             all_files.append(fpath)
-            
+    all_files, own_output_files = exclude_subtree(all_files, output_dir)
+    if own_output_files:
+        click.echo(f"Excluded own output directory: {own_output_files} file(s) under {output_dir}")
+
     # 4. Check empty
     if not all_files:
         raise click.ClickException(f"No files found in {input_dir}. Did you run `download` first?")
@@ -331,6 +353,18 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         filtered_paths = [p for p in filtered_paths if p not in challenge_set]
         if not filtered_paths:
             raise click.ClickException("Every input file is a bot-challenge page; nothing to pack.")
+
+    # 6a-2. MediaWiki redirect aliases: the content of a page that is packed too, under another name (#88)
+    from ..utils.mediawiki import find_redirect_aliases
+    alias_paths = find_redirect_aliases(filtered_paths)
+    if alias_paths:
+        # Listed like the challenge pages above.
+        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
+                           for p in alias_paths)
+        click.echo(f"Note: {len(alias_paths)} redirect alias page(s) skipped "
+                   f"(the page they redirect to is packed):\n{listed}", err=True)
+        alias_set = set(alias_paths)
+        filtered_paths = [p for p in filtered_paths if p not in alias_set]
 
     # 6b. Delta gate (opt-in, after filter, before dedup)
     #
@@ -362,6 +396,17 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             click.echo("Delta: no files changed since last pack. Nothing to do.")
             return
 
+    # 6c. API reference records (opt-in, ADR-0009): split the recognised pages, report the rest
+    api_split = None
+    if is_api_records:
+        from ..utils.api_reference import format_kept_whole, split_api_pages
+
+        api_split = split_api_pages(filtered_paths, input_dir)
+        for line in format_kept_whole(api_split, bool(ctx.obj.get('VERBOSE'))):
+            click.echo(line, err=True)
+    # md renders HTML as Markdown (#87); every count below leaves its markup out.
+    markdown = fmt == 'md'
+
     # 7. Deduplication (opt-in, before chunking)
     dedup_stats = None
     dedup_word_counts = None
@@ -373,23 +418,37 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         processed_texts = {}
         for fpath in filtered_paths:
             rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
+            if api_split is not None and rel in api_split.records:
+                continue  # split pages bypass dedup (ADR-0009, #68)
             try:
-                processed_texts[rel] = read_source_text(fpath, no_extract=no_ext)
+                processed_texts[rel] = read_source_text(fpath, no_extract=no_ext, markdown=markdown)
             except Exception:
                 continue
 
         dedup_result = deduplicate(processed_texts, mode=dedup_mode, hamming_threshold=dedup_thresh)
         dedup_stats = dedup_result.stats
-        dedup_word_counts = {rp: len(t.split()) for rp, t in dedup_result.texts.items()}
+        dedup_word_counts = {
+            rp: count_words(t, markdown and is_html(rp))
+            for rp, t in dedup_result.texts.items()}
         dedup_text_overrides = dedup_result.texts
 
-    # 7b. Extract headings for context-header or scoring (opt-in, before chunking)
+    # 7a. A split page's text is its records: it sizes the chunks and feeds ranking and scoring
+    if api_split is not None:
+        api_texts = api_split.texts
+        dedup_text_overrides = {**(dedup_text_overrides or {}), **api_texts}
+        dedup_word_counts = {**(dedup_word_counts or {}),
+                             **{rel: len(t.split()) for rel, t in api_texts.items()}}
+
+    # 7b. Extract headings (and page metadata, #88) for context-header or scoring (opt-in, before chunking)
     heading_map = None
+    page_meta = None
     if ctx_header or is_score:
         from ..utils.heading_extractor import extract_with_headings
         from ..utils.content_extractor import extract_content as _extract_ctx
+        from ..utils.mediawiki import page_metadata
 
         heading_map = {}
+        page_meta = {}
         # Initialize text_overrides if not already set by dedup, so the writer
         # uses the same text from which heading offsets were calculated.
         if dedup_text_overrides is None:
@@ -401,9 +460,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                 try:
                     with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
                         raw = fh.read()
+                    page_meta[rel] = page_metadata(raw)
                     if not no_ext:
                         raw = _extract_ctx(raw)
-                    doc = extract_with_headings(raw, source_path=rel)
+                    doc = extract_with_headings(raw, source_path=rel, markdown=markdown)
                     heading_map[rel] = doc.headings
                     # Use doc.text for consistent offsets (only if dedup didn't override)
                     if rel not in dedup_text_overrides:
@@ -581,6 +641,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             heading_map=heading_map,
             text_overrides=dedup_text_overrides,
             with_report=is_report,
+            markdown=markdown,
         )
         readiness_scores = scoring.scores
         report_pages = scoring.report_pages
@@ -611,9 +672,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             chunks, input_dir=input_dir, output_dir=output_dir, no_extract=no_ext,
             text_overrides=dedup_text_overrides,
             url_map=url_resolution.urls if url_resolution else None,
-            readiness_map=readiness_map, annotate=annotate, with_header=ctx_header)
+            readiness_map=readiness_map, annotate=annotate, with_header=ctx_header,
+            markdown=markdown, page_meta=page_meta)
     else:
-        write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate)
+        write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate, api_records=api_split.records if api_split else None, page_meta=page_meta)
 
     # 10b. Delta report (opt-in, after write)
     if is_delta and diff is not None:
@@ -659,7 +721,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     if is_delta and current_state is not None:
         from ..lib.manifest import save_manifest
 
-        save_manifest(current_state, os.path.join(output_dir, PACK_STATE_FILENAME))
+        try:
+            save_manifest(current_state, state_path)
+        except OSError as e:
+            raise click.ClickException(f"Failed to save pack state to {state_path}: {e}")
 
     # 11. Summary footprint calculation
     files_processed = sum(len(c.files) for c in chunks)
@@ -679,6 +744,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     click.echo(f"  Files excluded:  {files_excluded}")
     if challenge_paths:
         click.echo(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
+    if alias_paths:
+        click.echo(f"  Redirect aliases: {len(alias_paths)} (skipped, counted in Files excluded)")
     if page_layout:
         click.echo(f"  Pages written:   {generated_chunk_count}")
         click.echo(f"  Index:           {index_path}")
@@ -707,6 +774,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     if query_pack_result is not None:
         click.echo(_query_packing_summary(query_list, query_pack_result))
+
+    if api_split is not None:
+        from ..utils.api_reference import format_summary
+        click.echo(f"  {format_summary(api_split)}")
 
     if is_delta and diff is not None:
         click.echo(f"  Delta:           {len(diff.added)} added, {len(diff.modified)} modified, {len(diff.removed)} removed")

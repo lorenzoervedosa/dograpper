@@ -98,6 +98,33 @@ and fixes alone are a PATCH bump.
   A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
   filtered. Refused URLs are counted as `Filtered by --filter: N` in the
   summary ([#96](https://github.com/lorenzoervedosa/dograpper/issues/96)).
+- `pack --api-records` (config key `api_records`, `--format jsonl` only)
+  writes each javadoc 25 type page as one container record (qualified name and
+  kind, inheritance, signature, description, declared member names,
+  "inherited from" lists; no summary tables) plus one member record per
+  member (qualified name, full signature with type parameters, doc comment,
+  notes), with ids `NN_path` and `NN_path#anchor`, `breadcrumb`
+  `[container, member]`, `url` ending with the member anchor, and new optional
+  JSONL fields `symbol`, `kind`, `symbol_kind`, `container` and `generator`.
+  Split pages skip extraction and `--dedup`; every other page keeps one
+  record, is listed in a warning with the reason and is counted in the
+  summary's `API records:` line. With `--format md`/`txt`, `--bundle
+  notebooklm` or `--layout page` it exits 2.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#76](https://github.com/lorenzoervedosa/dograpper/issues/76))
+- `pack` cleans MediaWiki pages (detected by their `<meta name="generator">`)
+  before extraction: navigation boxes (`navbox`), section edit links
+  (`mw-editsection`) and maintenance boxes (stub, outdated, "help update"
+  boxes with their `Edit (Create account)` links) leave the text; note boxes
+  stay. The version banner leaves the text too: the context header (both
+  layouts) and the JSONL records gain the optional page metadata fields
+  `version` and `version_status` (`current`, `outdated`, `older-build`),
+  read from the banner, else from the first hidden `Version X` category. A
+  redirect alias (a page saved through a redirect, with its target's
+  content) is skipped when its target page is packed too, listed on stderr
+  and counted as `Redirect aliases: N` in the summary. Pages from any other
+  generator are extracted exactly as before. ([schema](docs/schema-v1.md),
+  [#88])
 
 ### Changed
 
@@ -125,9 +152,29 @@ and fixes alone are a PATCH bump.
   in a note. The GitHub Action's manifest moves into `input-dir` and is left
   out of the source-file drift list; a repo-root one from earlier runs is no
   longer read. ([#95])
+- `pack --format md` (the default) writes each HTML page's structure as
+  Markdown: `#`–`######` headings, `[text](target)` links with the `href` as
+  the page wrote it, `-` / `N.` list items with nesting, and pipe tables with
+  one line per row. A link to the same page, or with a scheme other than
+  `http`, `https` or `mailto`, keeps only its text; a list item holding a
+  block is written as its blocks. Counts leave the markup out (context
+  headers, `INDEX.md`, `llm-readiness.json`), and `--max-words-per-chunk`
+  measures each page's plain text, as for `txt`. `--dedup` compares a table
+  or a list as one block. `txt` and `jsonl` output is unchanged. ([#87])
 
 ### Fixed
 
+- `download` and `pack --delta` exit 1 with the path in the message when the
+  manifest (`.dograpper-manifest.json`) or `pack_state.json` cannot be written,
+  instead of logging an error and exiting 0; both files are now written
+  atomically, so an interrupted run keeps the previous one.
+  ([#113](https://github.com/lorenzoervedosa/dograpper/issues/113))
+- `pack` never reads its own output: when `-o` lies inside `INPUT_DIR` (the
+  default for `sync`, `<output>/chunks`), that subtree is left out of the input
+  and reported once as `Excluded own output directory: N file(s) under ...`,
+  so a second run no longer re-packs the first one's chunks and the delta gate
+  reports "no files changed". `-o` equal to `INPUT_DIR` is a usage error
+  (exit 2). ([#112](https://github.com/lorenzoervedosa/dograpper/issues/112))
 - `pack` zero-pads chunk file names, JSONL ids, `Chunk N of M` headers and sidecar
   chunk ids to one width per run (`max(2, digits of the chunk count)`), so
   100 or more chunks sort numerically; packs under 100 chunks keep their names
@@ -172,6 +219,11 @@ and fixes alone are a PATCH bump.
   summary and the `--dry-run` report gain a `Matches kept` line counting the
   blocks each rule kept. A block identical on several pages, an identical
   version banner included, is still kept only on the first. ([#89])
+- `pack --dedup` no longer deletes the version banner of a MediaWiki page
+  because an earlier page carries the same one (as text, 137 banners became
+  29 under `exact` on a 167-page wiki): the version is now page metadata in
+  the context header, out of the text dedup reads, so with `--context-header`
+  every page keeps its `version`. ([#88], [#89])
 - `pack --cross-refs` annotates each page's own content, for the links that
   page holds, as the chunk is written, instead of the first occurrence of the
   link text anywhere in the written chunk file. Markers no longer rewrite
@@ -204,6 +256,12 @@ and fixes alone are a PATCH bump.
   ([#86])
 - `download`'s Playwright layer follows the links of a page it skips as
   cached on an incremental run, instead of ending the crawl there. ([#94])
+- `pack --cross-refs` writes its marker after a Markdown link whose text it
+  matched (`[Item](Item.html) [-> docs_chunk_02]`) instead of inside the
+  brackets, and never inside a link's target, where it broke the link. ([#87])
+- `pack --layout page --format txt` writes `<pre>` code without its fence
+  lines, as txt chunks do, and leaves them out of the page's `INDEX.md` and
+  header word counts. ([#86])
 
 ### Security
 
@@ -298,3 +356,5 @@ and fixes alone are a PATCH bump.
 [#93]: https://github.com/lorenzoervedosa/dograpper/issues/93
 [#86]: https://github.com/lorenzoervedosa/dograpper/issues/86
 [#95]: https://github.com/lorenzoervedosa/dograpper/issues/95
+[#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
+[#88]: https://github.com/lorenzoervedosa/dograpper/issues/88

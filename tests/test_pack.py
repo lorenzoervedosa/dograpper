@@ -7,6 +7,7 @@ from dograpper.utils.word_counter import count_words, count_words_file
 from dograpper.lib.ignore_parser import filter_files
 from dograpper.lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, Chunk, ChunkFile
 from dograpper.commands.pack import pack
+from dograpper.cli import cli
 
 # --- Word Counter ---
 
@@ -747,3 +748,67 @@ def test_pack_all_files_skipped_keeps_exclusion_error():
         result = runner.invoke(pack, ['in', '-o', 'out'])
         assert result.exit_code != 0
         assert "All files were excluded by ignore rules" in result.output
+
+
+# --- #112: pack never reads its own output ---
+
+def _own_output_corpus(tmp_path):
+    mirror = tmp_path / "m"
+    (mirror / "example.com").mkdir(parents=True)
+    (mirror / "example.com" / "page.html").write_text(
+        "<html><body><main><h1>Page</h1><p>" + "word " * 60 + "</p></main></body></html>")
+    return mirror
+
+
+def test_pack_output_inside_input_is_not_repacked(tmp_path):
+    mirror = _own_output_corpus(tmp_path)
+    args = ['pack', str(mirror), '-o', str(mirror / "chunks"), '--delta']
+    first = CliRunner().invoke(cli, args)
+    assert first.exit_code == 0, first.output
+    assert "Files processed: 1" in first.output
+    assert "Excluded own output directory" not in first.output  # nothing there yet
+
+    second = CliRunner().invoke(cli, args)
+    assert second.exit_code == 0, second.output
+    assert "no files changed" in second.output
+    assert second.output.count("Excluded own output directory") == 1
+    chunk_text = "".join(p.read_text() for p in (mirror / "chunks").glob("*.md"))
+    assert "<!-- SOURCE: chunks/" not in chunk_text
+
+
+def test_pack_output_inside_input_without_delta_processes_one_file(tmp_path):
+    mirror = _own_output_corpus(tmp_path)
+    args = ['pack', str(mirror), '-o', str(mirror / "chunks")]
+    CliRunner().invoke(cli, args)
+    second = CliRunner().invoke(cli, args)
+    assert second.exit_code == 0, second.output
+    assert "Files processed: 1" in second.output
+
+
+def test_pack_page_layout_output_inside_input_is_not_repacked(tmp_path):
+    mirror = _own_output_corpus(tmp_path)
+    args = ['pack', str(mirror), '-o', str(mirror / "out"), '--layout', 'page', '--delta']
+    assert CliRunner().invoke(cli, args).exit_code == 0
+    assert (mirror / "out" / "INDEX.md").is_file()
+    second = CliRunner().invoke(cli, args)
+    assert second.exit_code == 0, second.output
+    assert "no files changed" in second.output
+    assert "Excluded own output directory" in second.output
+
+
+def test_pack_output_inside_input_through_symlink_is_excluded(tmp_path):
+    mirror = _own_output_corpus(tmp_path)
+    link = tmp_path / "link"
+    link.symlink_to(mirror)
+    args = ['pack', str(mirror), '-o', str(link / "chunks")]
+    CliRunner().invoke(cli, args)
+    second = CliRunner().invoke(cli, args)
+    assert "Files processed: 1" in second.output
+
+
+def test_pack_output_equal_to_input_is_a_usage_error(tmp_path):
+    mirror = _own_output_corpus(tmp_path)
+    result = CliRunner().invoke(cli, ['pack', str(mirror), '-o', str(mirror)])
+    assert result.exit_code == 2
+    assert "inside" in result.output or "same" in result.output
+    assert not (mirror / "docs_chunk_01.md").exists()

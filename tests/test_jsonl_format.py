@@ -102,6 +102,42 @@ class TestJsonlFormat:
                 data = json.loads(f.readline())
             assert data["breadcrumb"] == ["Title"]
 
+    def test_jsonl_api_records_replace_the_page_record(self):
+        """With api_records, a page is written as its records, never read from disk (ADR-0009)."""
+        from dograpper.utils.api_reference import ApiRecord
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "out")
+            files = create_mock_files(d, [("api/Box.html", 3), ("guide.txt", 4)])
+            os.remove(files[0])  # the writer must not read a split page
+            chunk = Chunk(index=1, files=[ChunkFile("api/Box.html", 9), ChunkFile("guide.txt", 4)],
+                          total_words=13)
+            records = [
+                ApiRecord(text="p.Box (class)\npublic class Box", symbol="p.Box", kind="container",
+                          symbol_kind="class", breadcrumb=["p.Box"], generator="javadoc"),
+                ApiRecord(text="p.Box#Box(int)\npublic Box(int n)", symbol="p.Box#Box(int)",
+                          kind="member", symbol_kind="constructor", breadcrumb=["p.Box", "Box(int)"],
+                          generator="javadoc", anchor="<init>(int)", container="p.Box"),
+            ]
+            write_chunks([chunk], d, out, "ck_", "jsonl", True, 1,
+                         url_map={"api/Box.html": "https://x.test/api/Box.html"},
+                         readiness_map={"ck_01": {"grade": "B"}},
+                         annotate=lambda rel, text: text + " [-> ck_01]",
+                         api_records={"api/Box.html": records})
+            with open(os.path.join(out, "ck_01.jsonl")) as f:
+                lines = [json.loads(l) for l in f if l.strip()]
+            assert lines[0] == {
+                "id": "01_api/Box.html", "source": "api/Box.html", "words": 5,
+                "content": "p.Box (class)\npublic class Box [-> ck_01]", "schema_version": "v1",
+                "breadcrumb": ["p.Box"], "url": "https://x.test/api/Box.html",
+                "readiness_grade": "B", "symbol": "p.Box", "kind": "container",
+                "symbol_kind": "class", "generator": "javadoc",
+            }
+            assert lines[1]["id"] == "01_api/Box.html#<init>(int)"
+            assert lines[1]["url"] == "https://x.test/api/Box.html#%3Cinit%3E(int)"
+            assert (lines[1]["kind"], lines[1]["container"]) == ("member", "p.Box")
+            assert lines[1]["breadcrumb"] == ["p.Box", "Box(int)"]
+            assert lines[2]["id"] == "01_guide.txt" and "symbol" not in lines[2]
+
 
 class TestJsonlCLI:
 

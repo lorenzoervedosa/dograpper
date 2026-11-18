@@ -14,12 +14,13 @@ import shutil
 from collections import Counter
 from html.parser import HTMLParser
 
-from .chunker import Chunk, ChunkFile, read_source_text
+from .chunker import Chunk, ChunkFile, _plain_text, is_html, read_source_text
 from ..utils.atomic_write import atomic_write_bytes
 from ..utils.heading_extractor import format_context_header
+from ..utils.html_stripper import escape_link_text
 from ..utils.portable_names import FORBIDDEN, claim_unique, resolve_under
 from ..utils.redact import neutralize_controls
-from ..utils.word_counter import count_words_file
+from ..utils.word_counter import count_words, count_words_file
 
 PAGES_DIR = "pages"
 INDEX_FILENAME = "INDEX.md"
@@ -140,7 +141,7 @@ def page_titles(rel_paths, input_dir: str) -> dict:
 
 def _index_line(title: str, path: str, words: int, url: str) -> str:
     # Title is page content: one line, no control characters, no link-text breakout.
-    title = " ".join(title.split()).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+    title = escape_link_text(" ".join(title.split()))
     line = f"- [{neutralize_controls(title)}](<{path}>), {words} words"
     return f"{line}, {url}" if url else line
 
@@ -177,11 +178,13 @@ def _swap_in(new: str, dest: str) -> None:
 
 def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = False,
                 text_overrides=None, url_map=None, readiness_map=None, annotate=None,
-                with_header: bool = False) -> str:
+                with_header: bool = False, markdown: bool = False, page_meta=None) -> str:
     """Write ``pages/`` and ``INDEX.md`` for ``page_chunks`` output. Returns the index path.
 
-    The caller checks ``owns_pages`` first. Raises OSError on any failed write,
-    leaving the previous ``pages/`` in place.
+    ``markdown`` writes HTML pages as Markdown (md) and counts their words
+    without its markup; otherwise (txt) code blocks lose their fence, as in
+    txt chunks. The caller checks ``owns_pages`` first. Raises OSError
+    on any failed write, leaving the previous ``pages/`` in place.
     """
     chunks = sorted(chunks, key=lambda c: c.page_path)
     titles = page_titles([c.files[0].relative_path for c in chunks], input_dir)
@@ -196,14 +199,18 @@ def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = Fals
             rel = chunk.files[0].relative_path
             content = (text_overrides or {}).get(rel)
             if content is None:
-                content = read_source_text(os.path.join(input_dir, rel), no_extract=no_extract)
-            words = len(content.split())
+                content = read_source_text(os.path.join(input_dir, rel), no_extract=no_extract,
+                                           markdown=markdown)
+            if not markdown:
+                content = _plain_text(chunk.files[0], content)
+            words = count_words(content, markdown and is_html(rel))
             url = (url_map or {}).get(rel, "")
             text = annotate(rel, content) if annotate else content
             if with_header:
                 text = format_context_header(
                     [], title=titles[rel], source_path=rel, word_count=words, url=url,
-                    readiness=(readiness_map or {}).get(chunk.page_path)) + text
+                    readiness=(readiness_map or {}).get(chunk.page_path),
+                    metadata=(page_meta or {}).get(rel)) + text
             dest = resolve_under(tmp, *chunk.page_path.split("/")[1:])
             if dest is None:
                 raise OSError(f"page path leaves {PAGES_DIR}/: {chunk.page_path}")

@@ -257,6 +257,22 @@ def test_regex_special_chars_in_link_text_escaped():
     assert "C++ (advanced) [-> docs_chunk_01]" in result
 
 
+def _annotate_one(text, link_text, target):
+    link = LinkRef(source_path="a.html", target_path=target, anchor="", link_text=link_text)
+    return annotate_cross_refs(text, [link], {target: "c1"})
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("see [Item](Item.html) now", "see [Item](Item.html) [-> c1] now"),
+    ("see [Item](<Item_(x).html>) now", "see [Item](<Item_(x).html>) [-> c1] now"),
+    ("[docs](https://x.org/wiki/Item) and [Item](Item.html)",
+     "[docs](https://x.org/wiki/Item) and [Item](Item.html) [-> c1]"),
+    ("plain Item text", "plain Item [-> c1] text"),
+])
+def test_marker_follows_a_markdown_link_and_never_enters_its_destination(text, expected):
+    assert _annotate_one(text, "Item", "Item.html") == expected
+
+
 # ---------------------------------------------------------------------------
 # CLI integration tests
 # ---------------------------------------------------------------------------
@@ -411,7 +427,9 @@ def test_cross_refs_text_formats_annotate_only_the_linking_page(fmt, extra):
         text = _pack_repro(d, fmt, *extra)
 
     assert "- Item.html (15 words)" in text
-    assert "call the getter on Item [-> docs_chunk_01] and check" in text
+    # md writes the link (#87); the marker follows it instead of entering its label.
+    link = {"md": "[Item](Item.html)", "txt": "Item"}[fmt]
+    assert f"call the getter on {link} [-> docs_chunk_01] and check" in text
     assert text.count("[-> ") == 1
 
 

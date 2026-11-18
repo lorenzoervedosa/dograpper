@@ -469,7 +469,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--include-extensions` | — | `html,htm,md,txt` | Extensions packed as documentation (csv). Other files are skipped and counted by extension in the summary. `robots.txt` and dograpper's own manifests are always skipped |
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
-| `--format` | — | `md` | Output format: `txt`, `md`, `jsonl`, `xml` (deprecated — errors, use `md`) |
+| `--format` | — | `md` | Output format: `md` (Markdown: `#` headings, `[text](target)` links, `-` / `N.` lists, pipe tables, fenced code; see [Markdown structure](#markdown-structure-md)), `txt` (plain text), `jsonl` (plain text records), `xml` (deprecated — errors, use `md`) |
 | `--layout` | — | `chunk` | `chunk`: numbered chunk files. `page`: one file per page under `pages/` plus `INDEX.md` (see [Page layout](#page-layout---layout-page)) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
@@ -485,6 +485,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
+| `--api-records` | — | `false` | Splits API reference pages (Javadoc) into one container record and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
 
 #### Pack internal pipeline
 
@@ -492,6 +493,9 @@ Operation order (each stage reads the output of the previous one):
 
 ```
 list files → apply .docsignore → skip bot-challenge pages
+           → skip MediaWiki redirect aliases of packed pages
+           → --api-records? split API reference pages into records
+             (those pages skip extraction and dedup)
            → --no-extract? yes: full HTML / no: extract
            → --dedup → --bundle? cap max-chunks/max-words-per-chunk
            → --strategy (size|semantic) → boundary-aware chunking
@@ -518,6 +522,26 @@ contents, "copy to clipboard" buttons, version banners, cookie and
 announcement banners, feedback widgets, edit-on-github links. Use
 `--no-extract` to keep the full HTML.
 
+MediaWiki pages (`<meta name="generator" content="MediaWiki ...">`) lose
+their wiki chrome first: navigation boxes (`navbox`), section edit links
+(`mw-editsection`) and maintenance boxes (an `mbox` with a
+`mw-customtoggle-mbox-*` toggle: stub, outdated, "help update") are cut from
+the page before the steps above. Note boxes, which have no toggle, stay.
+The version banner (`This page was last updated for an older version of the
+current build (42.10.0).`) leaves the text too and becomes page metadata,
+`version` and `version_status`, in the context header; without a banner, the
+first hidden `Version X` category gives `version`. A version box whose
+wording is not one of the three known ones stays in the text. Pages from any
+other generator are not touched. Measured on MediaWiki 1.43 (Citizen skin).
+
+A MediaWiki redirect alias is a page saved through a redirect ("Redirected
+from ..."): MediaWiki serves it with its target's content and page name
+(`wgPageName`). When the target page is packed too, the alias is skipped
+before extraction, listed once on stderr and counted as `Redirect aliases: N`
+(in `Files excluded`). An alias whose target is not in the input is that
+page's only copy and is packed; of several such aliases of one target, the
+first in path order is packed.
+
 Code blocks (`<pre>`) keep their line breaks and indentation, with or
 without extraction. `md` writes each one as a fenced block whose language
 comes from a `mw-highlight-lang-*`, `language-*`, `lang-*` or Sphinx
@@ -527,6 +551,37 @@ none is declared or the class is a placeholder (`highlight-default`,
 `highlight-none`, `language-none`). The fence grows past any backtick run in
 the code. `txt` and `jsonl` carry the code without the fence. Dedup and
 chunking treat a code block as one unit, blank lines included.
+
+#### Markdown structure (`md`)
+
+`md` writes the structure of each HTML page as Markdown. `txt` and `jsonl`
+keep plain text, unchanged.
+
+- `h1`–`h6` become `#`–`######` lines.
+- A link becomes `[text](target)`, with the `href` as the page wrote it: a
+  relative target names a file of the mirror (`Lua_(API).html`), an absolute
+  one is kept. A target holding parentheses is written as `<...>`; spaces,
+  `<`, `>`, `\` and control characters are percent-encoded. A link to the same
+  page (`#anchor`, or `page.html#anchor` as mirrors rewrite it), with no
+  target, or with a scheme other than `http`, `https` or `mailto`
+  (`javascript:`, `data:`...) keeps only its text.
+- `ul` / `ol` items become `-` / `N.` lines (an `ol`'s `start` is kept), with
+  nested lists indented under their item. An item that holds a block (a
+  heading, a `div`, a table or code, as Javadoc's member sections do) is
+  written as its blocks, without a marker.
+- A table becomes a pipe table with one line per row. Its first row is the
+  header, and `|` inside a cell is escaped. A one-line `<pre>` in a cell
+  becomes a code span, and a list in a cell is written inline. A table whose
+  cell holds multi-line code, a heading or another table is written one cell
+  per paragraph instead, so the code block keeps its lines.
+- Word counts leave the markup out: heading and list markers, table pipes and
+  the delimiter row are not words (context headers, `INDEX.md`,
+  `llm-readiness.json`). `--max-words-per-chunk` measures each page's plain
+  text, as for `txt`, so both formats put pages in the same chunks.
+- Dedup and chunking treat a list or a table as one block, so `--dedup`
+  removes a table repeated on several pages as a whole.
+- `--cross-refs` writes its marker after the link it labels:
+  `[Item](Item.html) [-> docs_chunk_02]`.
 
 #### Deduplication (`--dedup`)
 
@@ -558,8 +613,17 @@ A match never removes a block when:
 
 The summary's `Matches kept` line counts the blocks each rule kept. A
 block identical on several pages is still kept only on the first, even
-when it is per-page metadata such as a version banner with the same
-version.
+when it is per-page metadata. A MediaWiki version banner never reaches
+dedup: it is header metadata (see Smart extraction), so with
+`--context-header` every page keeps its `version`.
+
+On API reference corpora (Javadoc, TypeDoc, rustdoc, Doxygen) `--dedup`
+can remove real members: a signature and doc comment that several types
+declare, such as an override, is kept on the first page only, so the other
+pages lose a member they declare, with no trace
+([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). Pages split
+by [`--api-records`](#api-reference-records---api-records) bypass dedup;
+for any other API reference page, run without `--dedup`.
 
 #### Context header (`--context-header`)
 
@@ -581,9 +645,10 @@ Injects structured metadata in the `dograpper-context-v1` format
 -->
 ```
 
-Optional fields (`url`, `llm_readiness`) are omitted when not available
-(they never appear as `null`). A `>` in a value is written as `\u003e`, so a
-value holding `-->` cannot close the comment. Full spec:
+Optional fields (`url`, `llm_readiness`, and the MediaWiki page metadata
+`version` and `version_status`, written after `url`) are omitted when not
+available (they never appear as `null`). A `>` in a value is written as
+`\u003e`, so a value holding `-->` cannot close the comment. Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
 
 In the page layout (`--layout page`) each page file gets exactly one header,
@@ -653,10 +718,52 @@ Schema (required fields in **bold**, optional in italics):
   `url` or the page's HTTrack / saved-from marker — `--score` alone never
   populates it)
 - *`readiness_grade`* (with `--score`)
+- *`symbol`, `kind`, `symbol_kind`, `container`, `generator`* (with
+  `--api-records`, on API records only; see below)
+- *`version`, `version_status`* (with `--context-header` or `--score`, for a
+  MediaWiki page that states its version; see Smart extraction)
 
 Field names diverge from the header format for word count, breadcrumb and
 readiness — see the full field-by-field spec, including the JSONL/header
 mapping table, in [docs/schema-v1.md](docs/schema-v1.md).
+
+#### API reference records (`--api-records`)
+
+An API reference page holds many symbols, and one record per page buries a
+member's signature in a class-sized record. With `--api-records` (config key
+`api_records`), each page that a generator adapter recognises is written as
+one **container record** plus one **member record** per documented member
+([ADR-0009](docs/adr/0009-api-reference-symbol-records.md)):
+
+```bash
+dograpper pack ./javadoc-mirror -o ./pack --format jsonl --api-records --context-header
+dograpper serve ./pack   # search_chunks now ranks member records
+```
+
+- **Javadoc** (javadoc 25 type pages, `<meta name="generator"
+  content="javadoc/ClassWriter">`) is the only adapter so far.
+- **Container record** (`id` `NN_path`): qualified name and kind, inheritance,
+  implemented interfaces and known subclasses, signature, description, the
+  declared member names, and the "inherited from" lists. Summary tables are
+  dropped.
+- **Member record** (`id` `NN_path#anchor`): the qualified name
+  (`zombie.characters.IsoGameCharacter#getInventory()`), the full signature
+  with its type parameters, the doc comment and the notes (Overrides,
+  Specified by, Parameters, Returns, Throws). `url` ends with the member's
+  anchor; `breadcrumb` is `[container, member]`.
+- **Other pages** (prose, package summaries, other generators, or a type page
+  whose markup differs from the measured one) keep one record each. They are
+  listed in a warning with the reason (the first 10; all with `--verbose`) and
+  counted in the summary's `API records:` line.
+- Split pages skip content extraction and `--dedup`, so a member is never
+  removed for repeating on another page. `--for-queries` and `--delta` work
+  per page, and all records of a page land in that page's chunk.
+  `--cross-refs` markers go into each record's content; `--score` grades the
+  chunk as before.
+- Usage error (exit 2) with `--format md` or `txt`, with `--bundle notebooklm`
+  and with `--layout page`.
+
+Field list: [docs/schema-v1.md](docs/schema-v1.md#api-records---api-records).
 
 #### LLM Readiness Score (`--score`)
 
@@ -831,9 +938,9 @@ out/
 | Flag | With `--layout page` |
 |---|---|
 | `--max-words-per-chunk`, `--max-chunks`, `--strategy`, `--prefix`, `--with-index`/`--no-index` | usage error (exit 2) when set on the CLI or in `.dograpper.json`, even to the default value |
-| `--bundle`, `--for-queries`, `--format jsonl`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
+| `--bundle`, `--for-queries`, `--format jsonl`, `--api-records`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
 | `--delta` | the [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md) gate is unchanged; a run that passes it rebuilds `pages/` in full |
-| `--context-header` | one header at line 1 of each page file: `title`, `source`, `url`, `word_count`, `llm_readiness`; no breadcrumb or outline |
+| `--context-header` | one header at line 1 of each page file: `title`, `source`, `url`, `version`, `version_status`, `word_count`, `llm_readiness`; no breadcrumb or outline |
 | `--cross-refs` | markers name the page from the output root, `[-> pages/Target.md]`; `cross_refs.json` is keyed by page path |
 | `--score`, `--report` | one score per page; `chunk_id` in `llm-readiness.json` is the page path, stable across runs |
 | `--dry-run` | projects the page count; never needs or touches `pages/` |
@@ -1142,6 +1249,9 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
+| 1 | download | the manifest cannot be written | fix permissions or free space in `--output`; the mirror itself is complete |
+| 1 | pack --delta | `pack_state.json` cannot be written | fix permissions or free space in `--output`; the chunks are complete, the next `--delta` run packs in full |
+| 2 | pack | `--output` is the same directory as `INPUT_DIR` | use a subdirectory or another path |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
@@ -1242,7 +1352,7 @@ longer read and can be deleted once `input-dir` holds the new one.
 
 | Artifact | Flag | Description |
 |----------|------|-----------|
-| `docs_chunk_*.md` | (default) | Markdown chunks |
+| `docs_chunk_*.md` | (default) | Markdown chunks (headings, links, lists, tables, code) |
 | `docs_chunk_*.jsonl` | `--format jsonl` | One JSON line per source file |
 | `pages/**/*.md` | `--layout page` | One file per page, mirroring the input tree (`.txt` with `--format txt`) |
 | `INDEX.md` | `--layout page` | One line per page: title, path, word count, URL |
@@ -1343,6 +1453,12 @@ Before the summary, when files outside `--include-extensions` were found, one
 line lists them: `Skipped non-documentation files: 15 (.css x1, .js x13, robots.txt x1)`.
 They are also counted in `Files excluded`.
 
+When `--output` lies inside `INPUT_DIR` (as with `sync`'s default
+`<output>/chunks`), `pack` never reads its own output: that subtree is left out
+of the input and one line reports it: `Excluded own output directory: 4
+file(s) under ./docs/chunks`. These files are not counted in `Files excluded`.
+`--output` equal to `INPUT_DIR` is a usage error.
+
 Conditional extra lines (per enabled flag):
 
 | Flag | Extra lines |
@@ -1354,6 +1470,7 @@ Conditional extra lines (per enabled flag):
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
 | bot-challenge pages found | `Challenge pages: N` |
+| MediaWiki redirect aliases of packed pages found | `Redirect aliases: N` |
 | `--for-queries` | `Query packing: ...` |
 | `--context-header` or `--layout page` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
 | `--layout page` | `Pages written: N` and `Index: <path>` replace `Chunks generated` and `Words per chunk`; no chunk-limit warnings |

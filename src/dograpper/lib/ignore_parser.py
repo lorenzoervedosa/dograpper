@@ -38,6 +38,18 @@ DOGRAPPER_STATE_NAMES = frozenset({
 NON_DOC_NAMES = DOGRAPPER_STATE_NAMES | {"robots.txt"}
 
 
+def exclude_subtree(paths: List[str], subtree: str) -> Tuple[List[str], int]:
+    """Drop the files under ``subtree`` (real paths, so symlinks compare equal).
+
+    ``pack`` uses it to keep its own output directory out of its input (#112).
+    Returns the kept paths and how many were dropped.
+    """
+    root = os.path.realpath(subtree)
+    kept = [p for p in paths
+            if os.path.commonpath([os.path.realpath(p), root]) != root]
+    return kept, len(paths) - len(kept)
+
+
 def normalize_extensions(value) -> str:
     if isinstance(value, (list, tuple)):
         return ",".join(str(x).strip().lstrip('.') for x in value if str(x).strip())

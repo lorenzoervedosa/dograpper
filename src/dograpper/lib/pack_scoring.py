@@ -11,9 +11,10 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .chunker import chunk_id
+from .chunker import chunk_id, is_html
 from ..utils.content_extractor import extract_content
 from ..utils.html_stripper import strip_html
+from ..utils.word_counter import count_words
 from ..utils.readiness_report import PageReadiness, find_removed_blocks
 from ..utils.scorer import (
     ChunkScore,
@@ -74,12 +75,14 @@ def score_chunks(
     heading_map: Optional[Dict[str, list]] = None,
     text_overrides: Optional[Dict[str, str]] = None,
     with_report: bool = False,
+    markdown: bool = False,
 ) -> ScoringResult:
     """Score every chunk, optionally collecting per-page report rows.
 
     ``text_overrides`` (post-dedup text keyed by relative path) wins over the
     freshly extracted text for the boundary check, so the score reflects what
-    is actually written to disk.
+    is actually written to disk. With ``markdown`` (md output) the overrides of
+    HTML pages are Markdown, counted without their markup.
     """
     result = ScoringResult()
 
@@ -91,6 +94,7 @@ def score_chunks(
         headings_count = 0
         max_heading_level = 0
         chunk_text_parts = []
+        chunk_words = 0
         chunk_pages = []
 
         for cf in chunk.files:
@@ -112,8 +116,10 @@ def score_chunks(
             # the text re-processed above.
             if text_overrides and cf.relative_path in text_overrides:
                 chunk_text_parts.append(text_overrides[cf.relative_path])
+                chunk_words += count_words(chunk_text_parts[-1], markdown and is_html(fpath))
             elif extracted_text is not None:
                 chunk_text_parts.append(extracted_text)
+                chunk_words += count_words(extracted_text)
 
             if with_report and raw_text is not None and extracted_text is not None:
                 page_raw = len(raw_text.split())
@@ -137,6 +143,7 @@ def score_chunks(
             extracted_words=extracted_total,
             headings_count=headings_count,
             max_heading_level=max_heading_level,
+            word_count=chunk_words,
         ))
 
         if with_report:

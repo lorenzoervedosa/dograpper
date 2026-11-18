@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from .code_fence import sub_closed_fences
 
@@ -168,8 +168,13 @@ def score_chunk(
     extracted_words: int,
     headings_count: int,
     max_heading_level: int,
+    word_count: Optional[int] = None,
 ) -> ChunkScore:
-    """Main function — calculate all metrics for a chunk."""
+    """Main function — calculate all metrics for a chunk.
+
+    ``word_count`` defaults to the words of ``text``; md passes its count
+    without Markdown markup.
+    """
     noise = calculate_noise_ratio(raw_words, extracted_words)
     boundary_ok = check_boundary_integrity(text)
     depth = calculate_context_depth(headings_count, max_heading_level)
@@ -181,7 +186,7 @@ def score_chunk(
 
     return ChunkScore(
         chunk_id=chunk_id,
-        word_count=len(text.split()),
+        word_count=len(text.split()) if word_count is None else word_count,
         noise_ratio=noise,
         boundary_integrity=boundary_ok,
         context_depth=depth,

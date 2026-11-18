@@ -27,14 +27,14 @@ src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
 │   ├── _httrack_profile.py # Modo `--downloader httrack` do download: resolve_profile() (opções do perfil, guarda sob wget, policy_kw), discovery_fetch() (robots antes do GET), run_httrack() (fetch semeado + relatório + fail-loud)
-│   ├── _page_layout.py     # Modo `pack --layout page` (ADR-0010): check_flags() (flags só-chunk na CLI ou no config, --bundle, --for-queries, --format jsonl, --dedup ≠ off → exit 2), check_ownership() (pages/ sem INDEX.md → exit 1), write() (falha de escrita → exit 1)
+│   ├── _page_layout.py     # Modo `pack --layout page` (ADR-0010): check_flags() (flags só-chunk na CLI ou no config, --bundle, --for-queries, --api-records, --format jsonl, --dedup ≠ off → exit 2), check_ownership() (pages/ sem INDEX.md → exit 1), write() (falha de escrita → exit 1)
 │   ├── doctor.py           # Detecta e instala deps pesadas (wget, chromium) em DOGRAPPER_HOME; --check-system-libs
 │   ├── download.py         # Opções click + despacho do --downloader; cascade 4-layer do wget: llms.txt → sitemap → wget --mirror → Playwright bounded (layers 1+2 compartilhadas com o perfil httrack)
 │   ├── drift.py            # Drift de contexto entre dois llm-readiness.json (+ delta_manifest.json opcional)
 │   ├── eval.py             # Hit-rate empírico do pack JSONL: golden Q&A offline → BM25 → hit-rate@k/MRR por grade
 │   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project/claude-code); claude-code também escreve um SKILL.md stub em --skill-dir (nunca sobrescreve; pack não toca nele)
-│   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary; --layout chunk|page (modo page em _page_layout.py)
+│   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary; --layout chunk|page (modo page em _page_layout.py); --api-records (só jsonl) chama utils/api_reference/
 │   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
 │   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader, as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py) e --layout
 ├── lib/
@@ -68,27 +68,33 @@ src/dograpper/
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth; UrlFilters/rule_regex() — regras `--filter` (sintaxe HTTrack +/-, última vence) como regex lida igual por Python re e pelo POSIX ERE do wget, para todos os caminhos
 │   └── wget_mirror.py      # run_wget_mirror() --mirror + run_wget_urls() -i; BROWSER_UA Chrome/120, --no-parent (url_filter_args(): --accept/--reject-regex quando há --filter), --timestamping sempre
 └── utils/
+    ├── api_reference/      # Registros de referência de API (ADR-0009), opt-in via `pack --api-records`
+    │   ├── __init__.py     # split_api_pages()/split_page(): detecção pelo gerador (utils/generator.py) e despacho ao adaptador; ApiRecord (url() com âncora percent-encoded), NotSplit, aviso das páginas mantidas inteiras e linha do resumo
+    │   └── javadoc.py      # records(): página de tipo javadoc 25 (javadoc/ClassWriter) → 1 registro contêiner + 1 por membro (section.detail); só a markup medida, senão NotSplit; HTMLParser linear (pilha com contagem por tag)
     ├── atomic_write.py     # atomic_write_bytes() — arquivo temporário no mesmo diretório + os.replace; modo padrão do umask
     ├── challenge.py        # is_challenge() / is_challenge_page() / find_challenge_files() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/); fonte única do fetcher httrack e do pack
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
-    ├── code_fence.py       # fence() / split_blocks() / unfence() — bloco de código cercado (CommonMark): fonte única para o stripper (escreve), dedup e chunker (nunca partem um bloco em linha em branco), scorer e writers txt/jsonl (tiram a cerca)
+    ├── code_fence.py       # fence() / code_span() / split_blocks() / unfence() — bloco de código cercado (CommonMark): fonte única para o stripper (escreve), dedup e chunker (nunca partem um bloco em linha em branco), scorer e writers txt/jsonl (tiram a cerca)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
     ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy)
     ├── dep_resolver.py     # resolve_wget()/resolve_browser_dir() — deps em DOGRAPPER_HOME (env lido no import)
     ├── dry_run_report.py   # generate_report() — relatório formatado para --dry-run
-    ├── heading_extractor.py # extract_with_headings(), get_active_headings(), format_context_header() — formato dograpper-context-v1 (`title` só no layout page; `>` escrito como \u003e)
-    ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML; <pre> verbatim em bloco cercado com a linguagem das classes mw-highlight-lang-*/language-*/lang-*/highlight-* do <pre>, <code> ou div mais próxima que declare (PreCapture, render_text() compartilhados com heading_extractor)
-    ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs()
+    ├── generator.py        # page_generator() — conteúdo do <meta name="generator"> (javadoc/…, MediaWiki …) nos primeiros 64 KiB; fonte única da detecção de gerador dos adaptadores (ADR-0009)
+    ├── heading_extractor.py # extract_with_headings(), get_active_headings(), format_context_header() — formato dograpper-context-v1 (`title` só no layout page; metadata da página, ex. `version`, após `url`; `>` escrito como \u003e)
+    ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML; <pre> verbatim em bloco cercado com a linguagem das classes mw-highlight-lang-*/language-*/lang-*/highlight-* do <pre>, <code> ou div mais próxima que declare (PreCapture, render_text() compartilhados com heading_extractor); markdown=True (md): MarkdownStripper/render_markdown() escrevem títulos #, links [texto](href) (sem âncora da própria página nem esquema fora de http/https/mailto), listas -/N. aninhadas (item com bloco sai sem marcador) e tabelas pipe uma linha por linha, em tempo linear; escape_link_text() compartilhado com o INDEX.md
+    ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs() (marcador depois de um link Markdown, nunca no destino)
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
+    ├── mediawiki.py        # is_mediawiki() (meta generator via generator.py), clean(), page_metadata() e find_redirect_aliases() — limpeza por página de MediaWiki antes do extrator genérico: corta do fonte navbox, mw-editsection e caixas de manutenção (mbox com toggle mw-customtoggle-mbox-*); o banner de versão vira version/version_status do header e do registro JSONL (senão a 1ª categoria oculta Version X); banner de redação desconhecida fica no texto; alias de redirect (wgRedirectedFrom) cujo alvo (mesmo wgPageName) está no run é pulado pelo pack; página não-MediaWiki volta intacta
     ├── portable_names.py   # FORBIDDEN (caracteres proibidos pelo HTTrack → _), claim_unique() (colisão casefold → -N), resolve_under() (caminho real contido na raiz) — regras de nome compartilhadas por lib/httrack/naming.py e o layout por página do pack (ADR-0010)
     ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
     ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
-    └── word_counter.py     # count_words() e count_words_file()
+    └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora) e count_words_file()
 tests/
 ├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl e test_download_cascade)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
+├── test_api_reference.py   # --api-records: detecção/despacho, registros contêiner e membro sobre a fixture javadoc 25 (tests/fixtures/javadoc), markup não suportada, linearidade, CLI (erros de uso, dedup, --for-queries, --delta, serve)
 ├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
@@ -113,6 +119,7 @@ tests/
 ├── test_eval_command.py    # Integração do `dograpper eval` sobre um pack JSONL (--json, erros de pré-requisito)
 ├── test_eval_harness.py    # evaluate(): hit-rate, MRR por rank, breakdown por grade, pares vazios
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
+├── test_generator.py      # page_generator: javadoc, MediaWiki após head longo, ordem/caixa de atributos, entidades, ausente, fora da janela
 ├── test_golden_qa.py       # generate_golden_qa: um par por chunk, heading mais profundo, determinismo
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
 ├── test_httrack_crawl.py   # fetch_url_list: só 2xx não-desafio escrito, robots, redirects, front_failed, max_links, filtro de extensão, conflito de escrita, format_report
@@ -121,10 +128,12 @@ tests/
 ├── test_httrack_policy.py  # Policy: clamps, headers vs fixture httrack_wire, Accept-Encoding, contexto TLS, ClientHello (OpenSSL >= 3.5)
 ├── test_httrack_robots.py  # parse_robots: grupos, longest-match, Allow vence empate, wildcard/$, Crawl-delay, Sitemap, caps, corpo HTML sem regras
 ├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo, stub SKILL.md do claude-code (nunca sobrescrito, sobrevive ao pack)
-├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, CLI
+├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, registros de API, CLI
 ├── test_link_extractor.py  # Link extraction, cross-ref index, annotation, CLI integration
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
+├── test_markdown_render.py # Markdown do md (#87): títulos, links, listas, tabelas, tempo linear, offsets de título, contagem sem marcação, pack md/txt/jsonl/page
 ├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
+├── test_mediawiki.py       # Limpeza MediaWiki: navbox (inclusive aninhado), mw-editsection, caixas de manutenção vs nota, markup fora do corte intacto, caixa sem fim mantida, página de outro gerador idêntica à extração de antes (sha256); versão como metadata (3 redações, categoria oculta, redação desconhecida), header nos dois layouts e registro JSONL (só MediaWiki), --dedup exact mantém a versão de cada página; aliases de redirect (alvo presente, ausente, dois aliases), pack pula e conta
 ├── test_page_layout.py     # Layout por página: nomes portáveis e colisões, títulos (sufixo, h1 fora do container, stem), INDEX.md literal, exit 2 de flags só-chunk (CLI e config), posse de pages/ (rebuild, exit 1, falha preserva), delta/cross-refs/score/tokens/dry-run, sync
 ├── test_pack.py            # word_counter, ignore_parser, chunker, write_chunks, CLI integration
 ├── test_pack_challenge.py  # Pack: páginas de challenge (Cloudflare) detectadas, avisadas e fora dos chunks; falso positivo em prosa
@@ -185,6 +194,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_sitemap_parser.py` | Antes de alterar `lib/sitemap_parser.py`, recursão `sitemapindex` ou same-netloc guard |
 | `tests/test_url_filter.py` | Antes de alterar `lib/url_filter.py` (canonicalização de path-prefix, semântica de `depth` ou das regras `--filter`) |
 | `tests/test_content_extractor.py` | Antes de alterar `utils/content_extractor.py` ou o tratamento de `<pre>` em `utils/html_stripper.py` |
+| `tests/test_mediawiki.py` | Antes de alterar `utils/mediawiki.py` ou o gancho MediaWiki de `extract_content()` em `utils/content_extractor.py` |
 | `tests/test_token_counter.py` | Antes de alterar `utils/token_counter.py` |
 | `tests/test_dedup.py` | Antes de alterar `utils/dedup.py` ou a integração de dedup em `commands/pack.py` |
 | `tests/test_dry_run.py` | Antes de alterar `utils/dry_run_report.py` ou a lógica de dry-run em `commands/pack.py` |
@@ -195,16 +205,19 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |
 | `tests/test_init_wizard.py` | Antes de alterar `commands/init.py` ou os presets `TARGETS` |
+| `tests/test_markdown_render.py` | Antes de alterar o modo `markdown` de `utils/html_stripper.py`, `count_words(markdown=True)` em `utils/word_counter.py` ou a escolha md/plain em `lib/chunker.py`, `lib/page_layout.py`, `lib/pack_scoring.py` e `commands/pack.py` |
 | `tests/test_link_extractor.py` | Antes de alterar `utils/link_extractor.py` ou a lógica de cross-refs em `commands/pack.py` |
 | `tests/test_scorer.py` | Antes de alterar `utils/scorer.py` ou a lógica de score em `commands/pack.py` |
 | `tests/test_readiness_report.py` | Antes de alterar `utils/readiness_report.py` ou a lógica de `--report` em `commands/pack.py` |
 | `tests/test_context_v1.py` | Antes de alterar o formato `dograpper-context-v1` em `utils/heading_extractor.py` |
 | `tests/test_jsonl_format.py` | Antes de alterar a escrita JSONL em `lib/chunker.py` |
+| `tests/test_api_reference.py` | Antes de alterar `utils/api_reference/` ou a integração `--api-records` em `commands/pack.py` e `lib/chunker.py`. A fixture sai de `tests/fixtures/javadoc/src` via `tests/fixtures/javadoc/regenerate.sh` (javadoc 25; nunca editar o HTML à mão) |
 | `tests/test_delta_manifest.py` | Antes de alterar `lib/manifest.py` ou lógica de `--delta` |
 | `tests/test_delta_artifacts.py` | Antes de alterar o portão de `--delta` em `commands/pack.py` ou `PACK_STATE_FILENAME` (semântica fixada na ADR-0008) |
 | `tests/test_redact.py` | Antes de alterar `utils/redact.py` (usado por todo log que imprime URL) |
 | `tests/test_retrieval.py` | Antes de alterar `lib/retrieval.py` (BM25, tokenização ou tie-break determinístico) |
 | `tests/test_pack_reader.py` | Antes de alterar `lib/pack_reader.py` ou o formato JSONL que ele consome |
+| `tests/test_generator.py` | Antes de alterar `utils/generator.py` (detecção de gerador usada pelos adaptadores) |
 | `tests/test_golden_qa.py` | Antes de alterar `lib/golden_qa.py` ou o template de perguntas |
 | `tests/test_eval_harness.py` | Antes de alterar `lib/eval_harness.py` (hit-rate, MRR, breakdown por grade) |
 | `tests/test_eval_command.py` | Antes de alterar `commands/eval.py` |
