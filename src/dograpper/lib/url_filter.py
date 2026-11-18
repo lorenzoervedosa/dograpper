@@ -130,7 +130,7 @@ def rule_regex(pattern: str) -> str:
     return "".join(out) + r"(\?.*)?$"
 
 
-def _match_form(url: str) -> str:
+def match_form(url: str) -> str:
     """The URL as rules see it: no fragment, and "/" for an empty path (as HTTrack and wget)."""
     url = url.split("#", 1)[0]
     try:
@@ -163,7 +163,7 @@ class UrlFilters:
 
     def decide(self, url: str) -> Optional[bool]:
         """True/False from the last rule matching `url`, None when no rule matches."""
-        form = _match_form(url)
+        form = match_form(url)
         verdict = next((accepts for accepts, rx in self._compiled if rx.match(form)), None)
         if verdict is False:
             self.excluded.add(form)

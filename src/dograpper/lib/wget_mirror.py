@@ -11,7 +11,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from dograpper.lib.url_filter import UrlFilters, _match_form, rule_regex
+from dograpper.lib.url_filter import UrlFilters, match_form, rule_regex
 from dograpper.utils.dep_resolver import resolve_wget
 from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import neutralize_controls, redact_url
@@ -223,7 +223,7 @@ class WgetLog:
 def _request_form(url: str) -> str:
     """A URL near enough to how wget prints it in a request line to match a list entry:
     no fragment, "/" for an empty path, percent-escapes undone."""
-    return unquote(_match_form(url))
+    return unquote(match_form(url))
 
 
 def parse_wget_log(stderr: str) -> Tuple[List[WgetFailure], Dict[str, str]]:
