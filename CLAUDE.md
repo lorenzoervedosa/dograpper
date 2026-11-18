@@ -71,7 +71,8 @@ src/dograpper/
 └── utils/
     ├── api_reference/      # Registros de referência de API (ADR-0009), opt-in via `pack --api-records`
     │   ├── __init__.py     # split_api_pages()/split_page(): detecção pelo gerador (utils/generator.py) e despacho ao adaptador; ApiRecord (url() com âncora percent-encoded), NotSplit, aviso das páginas mantidas inteiras e linha do resumo
-    │   └── javadoc.py      # records(): página de tipo javadoc 25 (javadoc/ClassWriter) → 1 registro contêiner + 1 por membro (section.detail); só a markup medida, senão NotSplit; HTMLParser linear (pilha com contagem por tag)
+    │   ├── _html.py        # Regions/Text — leitura linear de HTML dos adaptadores: texto por região em linhas, pilha com contagem por tag (tag de fechamento solta em O(1)); fonte única da garantia de tempo linear
+    │   └── javadoc.py      # records(): página de tipo javadoc 25 (javadoc/ClassWriter) → 1 registro contêiner + 1 por membro (section.detail); só a markup medida, senão NotSplit; leitura linear via _html.py
     ├── atomic_write.py     # atomic_write_bytes() — arquivo temporário no mesmo diretório + os.replace; modo padrão do umask
     ├── challenge.py        # is_challenge() / is_challenge_page() / find_challenge_files() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/); fonte única do fetcher httrack e do pack
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
