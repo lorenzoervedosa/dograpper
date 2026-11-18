@@ -245,6 +245,49 @@ def test_an_emptied_heading_stays_on_a_non_mediawiki_page():
 
 
 # ---------------------------------------------------------------------------
+# Red links
+# ---------------------------------------------------------------------------
+
+RED = 'https://wiki.example/w/index.php?title=Texturing&amp;action=edit&amp;redlink=1'
+
+
+def test_a_red_link_becomes_plain_text():
+    cleaned = clean(_page('<p>See <a href="' + RED + '" class="new" title="Texturing (page does not '
+                          'exist)">Texturing</a> and <a href="Axe.html">Axe</a>.</p>'))
+    assert "<p>See Texturing and <a href=\"Axe.html\">Axe</a>.</p>" in cleaned
+    assert "redlink" not in cleaned.split("<body>")[1]
+
+
+@pytest.mark.parametrize("attrs", [
+    'href="' + RED + '"',
+    'class="new" href="Texturing.html"',
+    'href="https://wiki.example/w/index.php?title=Texturing&amp;action=edit"',
+])
+def test_each_red_link_form_is_unlinked(attrs):
+    cleaned = clean(_page(f"<p><a {attrs}>Texturing</a></p>"))
+    assert "<p>Texturing</p>" in cleaned
+
+
+def test_a_red_link_in_a_non_mediawiki_page_stays():
+    page = _page(f'<p><a href="{RED}" class="new">Texturing</a></p>', generator="")
+    assert clean(page) is page
+
+
+def test_pack_leaves_no_red_link_destination_and_no_empty_heading(tmp_path):
+    src = tmp_path / "wiki"
+    src.mkdir()
+    body = (_heading("Usage", "Usage") + f'<p>See <a href="{RED}" class="new">Texturing</a>.</p>'
+            + _heading("Navigation", "Navigation") + NAVBOX)
+    (src / "Sample_page.html").write_text(_page(body), encoding="utf-8")
+    out = tmp_path / "out"
+    result = CliRunner().invoke(cli, ["pack", str(src), "-o", str(out), "--layout", "page"],
+                                catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    wiki = (out / "pages" / "Sample_page.md").read_text(encoding="utf-8")
+    assert "redlink" not in wiki and "Navigation" not in wiki and "See Texturing." in wiki
+
+
+# ---------------------------------------------------------------------------
 # Page version as metadata
 # ---------------------------------------------------------------------------
 

@@ -18,6 +18,8 @@ generator meta says so (``utils/generator.py``). Measured on MediaWiki 1.43
   target's content under another file name. ``find_redirect_aliases`` names
   the ones whose target is in the run too, for ``pack`` to skip.
 
+- a red link (``a.new``, or a ``redlink=1`` / ``action=edit`` target) becomes
+  its plain text: the anchor tags are cut, the link text stays;
 - a heading whose section a cut left without content is dropped with it (the
   "Navigation" heading of a navbox-only section), up to the next heading of
   the same or a higher level.
@@ -44,6 +46,7 @@ _VERSION_CATEGORY = re.compile(rf"Category:Version {_VERSION}")
 _CONFIG = re.compile(r'"(wgPageName|wgRedirectedFrom)"\s*:\s*"((?:[^"\\]|\\.){1,500})"')
 # Only these carry the classes above, so a void element never opens a region.
 _REGION_TAGS = frozenset({"div", "span", "table"})
+_RED_HREF = re.compile(r"[?&](?:redlink=1|action=edit)(?:&|$)")
 _HEADINGS = {f"h{n}": n for n in range(1, 7)}
 _VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
                    "source", "track", "wbr"})
@@ -272,6 +275,11 @@ class _Scan(HTMLParser):
                 region = _Region(self._offset(), "box")
             elif "mw-hidden-catlinks" in classes:
                 region = _Region(self._offset(), "categories")
+        if tag == "a" and not self._dropping and ("new" in classes
+                                                  or _RED_HREF.search(attrs.get("href") or "")):
+            start = self._offset()
+            region = _Region(start, "redlink")
+            region.tag_end = start + len(self.get_starttag_text())
         self._stack.append((tag, region))
 
     def handle_data(self, data):
@@ -299,6 +307,12 @@ class _Scan(HTMLParser):
         for i in range(len(self._stack) - 1, at - 1, -1):
             region = self._stack[i][1]
             if region is None:
+                continue
+            if region.kind == "redlink":    # only the tags go; an unclosed anchor has no end tag to cut
+                if not self._dropping:
+                    self.dropped.append((region.start, region.tag_end))
+                    if i == at:
+                        self.dropped.append((start, end))
                 continue
             if region.drop:
                 self._dropping -= 1

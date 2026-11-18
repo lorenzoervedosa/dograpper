@@ -175,6 +175,10 @@ and fixes alone are a PATCH bump.
 - `<br>` separates its neighbours instead of gluing them (`-debuglog=All-debuglog=Network,Sound`):
   a line break in body text (md and txt), and `; ` inside an md pipe-table cell, so the row stays
   on one line. Word counts are unchanged.
+- `pack` renders MediaWiki red links (`a.new`, `redlink=1` or `action=edit`
+  targets) as plain text, so no `index.php?...&action=edit&redlink=1`
+  destination reaches the output.
+  ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
 - `pack` drops the heading a MediaWiki page is left with once a navbox or
   maintenance box is removed from its section (the empty `## Navigation` that
   ended most wiki pages). A heading whose section still has content stays.
