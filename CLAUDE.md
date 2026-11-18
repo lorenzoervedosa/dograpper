@@ -191,6 +191,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `README.md` | **Sempre.** Comportamento de cada subcomando, flags, formato de config e exemplos de uso. É a fonte de verdade do contrato observável. |
 | `docs/adr/` | Antes de reverter ou contornar uma decisão arquitetural (repomix, contagem por palavras, deps opcionais, query-oriented packing, delta na Action, registros de referência de API, layout por página) |
 | `docs/superpowers/specs/2026-11-13-httrack-downloader-profile-design.md` | Antes de alterar `lib/httrack/` ou `commands/_httrack_profile.py`: desvios aprovados em relação ao HTTrack e roteiro dos próximos PRs do perfil. Evidência por comportamento (com citações do código do HTTrack) em `docs/discovery/httrack-mirroring-requirements.md` |
+| `docs/discovery/pack-performance-profile.md` | Antes de otimizar desempenho de `pack` ou `download` (cache de extração #21, worker pool #24): onde o tempo vai por etapa e por corpus, quantas vezes cada página é extraída, e os protótipos medidos |
 | `GLOSSARY.md` | Ao nomear conceitos de entrada/saída (página, registro, chunk, símbolo, contêiner, membro, target) em código, docs, issues ou PRs |
 | `tests/test_claude_hooks.py` | Antes de alterar `.claude/hooks/` ou o wiring em `.claude/settings.json` (decisões de bloqueio, mapa de contratos dos lembretes) |
 | `.dograpper.json.example` | Ao mexer em `config_loader.py` ou no merge de configuração |
