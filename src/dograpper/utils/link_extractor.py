@@ -165,13 +165,15 @@ def _link_text_pattern(link_text: str) -> re.Pattern:
     the same link texts across thousands of records, past ``re``'s own cache.
 
     The text matches only when not adjacent to a word character on either
-    side (a plain \\b fails here because link text often starts/ends in
-    punctuation, e.g. "C++"). The left check is a lookbehind placed *after*
-    the literal, so the pattern starts with the literal and the regex engine
-    scans for it as a prefix instead of testing every position.
+    side, nor joined to one by a dot, so a marker never lands inside a word
+    ("Installation") or a dotted identifier ("pkg.Items.Items"); a plain \\b
+    fails here because link text often starts/ends in punctuation, e.g.
+    "C++". The left checks are lookbehinds placed *after* the literal, so the
+    pattern starts with the literal and the regex engine scans for it as a
+    prefix instead of testing every position.
     """
     lt = re.escape(link_text)
-    return re.compile(lt + r"(?<!\w" + lt + r")(?!\w)")
+    return re.compile(lt + r"(?<!\w" + lt + r")(?<!\w\." + lt + r")(?!\w)(?!\.\w)")
 
 
 def annotate_cross_refs(
@@ -187,9 +189,10 @@ def annotate_cross_refs(
     avoid false positives.  Unresolved links are skipped.
 
     The match is word-boundary-aware: ``link_text`` is only annotated
-    when it is not adjacent to a word character, so short link text
-    (e.g. "Install") does not corrupt an unrelated word that merely
-    contains it as a substring (e.g. "Installation").
+    when it is not adjacent to a word character, nor joined to one by a
+    dot, so short link text (e.g. "Install") does not corrupt an unrelated
+    word that merely contains it as a substring (e.g. "Installation") or
+    a dotted identifier (e.g. "pkg.AttachedItems.AttachedItems").
     """
     annotated = set()  # link_text values already processed
 
