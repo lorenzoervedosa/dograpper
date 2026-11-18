@@ -5,6 +5,7 @@ The fixtures are javadoc 25 output for the sources in tests/fixtures/javadoc/src
 for tests/fixtures/sphinx/src (tests/fixtures/sphinx/regenerate.sh).
 """
 
+import gc
 import json
 import os
 import shutil
@@ -84,9 +85,14 @@ def _assert_linear(build, run, n=10000):
     def best(size):
         page, times = build(size), []
         for _ in range(3):
-            start = time.process_time()
-            run(page)
-            times.append(time.process_time() - start)
+            gc.collect()
+            gc.disable()  # as timeit does: a collection landing in one run skews the ratio
+            try:
+                start = time.process_time()
+                run(page)
+                times.append(time.process_time() - start)
+            finally:
+                gc.enable()
         return min(times)
     small, large = best(n), best(4 * n)
     assert large < 7 * max(small, 0.01), f"4x input took {large / max(small, 0.01):.1f}x CPU time"
@@ -676,7 +682,7 @@ def test_sphinx_parsing_stays_linear_on_hostile_markup():
     def run_chain(page):
         with pytest.raises(NotSplit, match="a qualified name over 1000 characters"):
             split_page(page)
-    _assert_linear(chain, run_chain, n=1000)
+    _assert_linear(chain, run_chain, n=4000)  # ~0.1 s at n: big enough to dwarf CI jitter
 
 
 def _sphinx_corpus(tmp_path):
