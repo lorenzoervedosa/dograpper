@@ -480,8 +480,13 @@ Injects structured metadata in the `dograpper-context-v1` format
 ```
 
 Optional fields (`url`, `llm_readiness`) are omitted when not available
-(they never appear as `null`). Full spec:
+(they never appear as `null`). A `>` in a value is written as `\u003e`, so a
+value holding `-->` cannot close the comment. Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
+
+In the page layout (`--layout page`) each page file gets exactly one header,
+at line 1, with the page `title` as its first field (the same title as in
+`INDEX.md`) and no `chunk_index`, `total_chunks` or `context_breadcrumb`.
 
 `url` comes from the file's entry in the download manifest (`--manifest`),
 matched on the file's path in the mirror (`local_path`). This also works when
@@ -726,7 +731,7 @@ out/
 | `--max-words-per-chunk`, `--max-chunks`, `--strategy`, `--prefix`, `--with-index`/`--no-index` | usage error (exit 2) when set on the CLI or in `.dograpper.json`, even to the default value |
 | `--bundle`, `--for-queries`, `--format jsonl`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
 | `--delta` | the [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md) gate is unchanged; a run that passes it rebuilds `pages/` in full |
-| `--context-header` | one header at the top of each page file |
+| `--context-header` | one header at line 1 of each page file: `title`, `source`, `url`, `word_count`, `llm_readiness`; no breadcrumb or outline |
 | `--cross-refs` | markers name the page from the output root, `[-> pages/Target.md]`; `cross_refs.json` is keyed by page path |
 | `--score`, `--report` | one score per page; `chunk_id` in `llm-readiness.json` is the page path, stable across runs |
 | `--dry-run` | projects the page count; never needs or touches `pages/` |

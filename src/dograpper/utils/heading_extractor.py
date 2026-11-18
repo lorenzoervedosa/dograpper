@@ -147,8 +147,11 @@ def format_context_header(
     word_count: int = 0,
     url: str = "",
     readiness: dict = None,
+    title: str = "",
 ) -> str:
     """Format a dograpper-context-v1 header for injection into chunks.
+
+    ``title`` is written only by the page layout (ADR-0010), as the first field.
 
     Returns formatted header string ending with \\n\\n, or empty string
     if no context is available.
@@ -157,6 +160,8 @@ def format_context_header(
 
     payload = {}
 
+    if title:
+        payload["title"] = title
     if source_path:
         payload["source"] = source_path
     if url:

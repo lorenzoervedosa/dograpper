@@ -76,6 +76,13 @@ and fixes alone are a PATCH bump.
   by path. Chunk-only settings, `--bundle`, `--for-queries`, `--format jsonl`
   and `--dedup` other than `off` exit 2; a `pages/` without `INDEX.md` exits
   1. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md), [#84])
+- `pack --layout page --context-header` writes exactly one
+  `dograpper-context-v1` header per page file, at line 1, with a new
+  optional `title` field first: the `<title>` minus the site suffix shared by
+  more than half of the pages, else the raw page's first `h1`, else the file
+  stem. The page header holds no `chunk_index`, `total_chunks` or
+  `context_breadcrumb`. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md),
+  [#85])
 
 ### Changed
 
@@ -236,3 +243,4 @@ and fixes alone are a PATCH bump.
 [#94]: https://github.com/lorenzoervedosa/dograpper/issues/94
 [#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
 [#84]: https://github.com/lorenzoervedosa/dograpper/issues/84
+[#85]: https://github.com/lorenzoervedosa/dograpper/issues/85

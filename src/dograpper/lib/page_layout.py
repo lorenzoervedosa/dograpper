@@ -202,7 +202,7 @@ def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = Fals
             text = annotate(rel, content) if annotate else content
             if with_header:
                 text = format_context_header(
-                    [], source_path=rel, word_count=words, url=url,
+                    [], title=titles[rel], source_path=rel, word_count=words, url=url,
                     readiness=(readiness_map or {}).get(chunk.page_path)) + text
             dest = resolve_under(tmp, *chunk.page_path.split("/")[1:])
             if dest is None:

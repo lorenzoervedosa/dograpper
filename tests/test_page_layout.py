@@ -454,3 +454,92 @@ def test_sync_forwards_layout(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert os.path.isfile("out/INDEX.md")
     assert os.path.isfile("out/pages/Modding/vi.md")
+
+
+# ---------------------------------------------------------------------------
+# One context header per page (ADR-0010 point 4, #85)
+# ---------------------------------------------------------------------------
+
+def _header(path):
+    text = _read(path)
+    assert text.startswith("<!-- dograpper-context-v1\n"), text[:80]
+    return json.loads(text.split("<!-- dograpper-context-v1\n", 1)[1].split("\n-->", 1)[0])
+
+
+def test_context_header_is_written_once_at_the_top_of_each_page(tmp_path):
+    _corpus("docs")
+    result = _pack("docs", "-o", "out", "--layout", "page", "--context-header", "--score")
+    assert result.exit_code == 0, result.output
+    index = _read("out/INDEX.md")
+    for rel in _tree("out/pages"):
+        text = _read(f"out/pages/{rel}")
+        assert text.count("dograpper-context-v1") == 1, rel
+        data = _header(f"out/pages/{rel}")
+        assert set(data) <= {"title", "source", "url", "word_count", "llm_readiness",
+                             "schema_version"}, data
+        assert f"), {data['word_count']} words" in index
+        body = text.split("\n-->\n\n", 1)[1]
+        assert data["word_count"] == len(body.split())
+    data = _header("out/pages/Help_Style_guide.md")
+    assert data["title"] == "Help:Style guide"  # " - PZwiki" suffix stripped
+    assert data["source"] == "Help_Style_guide.html"
+    assert "url" not in data
+    assert data["llm_readiness"]["grade"] in "ABC"
+    assert data["schema_version"] == "v1"
+    assert list(data)[0] == "title"
+
+
+def test_header_title_comes_from_an_h1_outside_the_extracted_container(tmp_path):
+    _write("docs", {"Item_tag.html": (
+        "<html><head></head><body><h1 id=\"firstHeading\">Item tag</h1>"
+        "<main><p>Tags group items for recipes and more words.</p></main></body></html>")})
+    result = _pack("docs", "-o", "out", "--layout", "page", "--context-header")
+    assert result.exit_code == 0, result.output
+    assert "Item tag" not in _read("out/pages/Item_tag.md").split("-->", 1)[1]
+    assert _header("out/pages/Item_tag.md")["title"] == "Item tag"
+
+
+def test_header_url_comes_from_the_manifest_or_the_page_marker(tmp_path):
+    _corpus("docs")
+    with open("docs/.dograpper-manifest.json", "w", encoding="utf-8") as f:
+        json.dump({"base_url": "https://pzwiki.net/", "files": {"Modding.html": {
+            "url": "https://pzwiki.net/wiki/Modding", "local_path": "Modding.html",
+            "size_bytes": 1, "etag": None, "last_modified": None, "mtime": 0}}}, f)
+    result = _pack("docs", "-o", "out", "--layout", "page", "--context-header",
+                   "--manifest", "docs/.dograpper-manifest.json")
+    assert result.exit_code == 0, result.output
+    assert _header("out/pages/Modding.md")["url"] == "https://pzwiki.net/wiki/Modding"
+    assert _header("out/pages/ActionGroup.md")["url"] == "http://pzwiki.net/wiki/ActionGroup"
+    assert "url" not in _header("out/pages/Modding/vi.md")
+    assert "https://pzwiki.net/wiki/Modding\n" in _read("out/INDEX.md")
+
+
+def test_a_title_holding_the_comment_end_cannot_close_the_header(tmp_path):
+    _write("docs", {"x.html": "<html><head><title>a --> b</title></head>"
+                    "<body><main><p>body words</p></main></body></html>"})
+    result = _pack("docs", "-o", "out", "--layout", "page", "--context-header")
+    assert result.exit_code == 0, result.output
+    text = _read("out/pages/x.md")
+    assert text.count("-->") == 1
+    assert _header("out/pages/x.md")["title"] == "a --> b"
+    assert "- [a --> b](<pages/x.md>)" in _read("out/INDEX.md")
+
+
+def test_headers_add_at_most_five_percent_to_the_page_files(tmp_path):
+    sections = "".join(
+        f"<h2>Section {s}</h2><h3>Detail {s}</h3><p>" + " ".join(
+            f"word{s}x{w}" for w in range(120)) + "</p>" for s in range(8))
+    _write("docs", {
+        f"Area{i // 10}/Page_{i}.html": (
+            f"<!-- Mirrored from pzwiki.net/wiki/Page_{i} by HTTrack Website Copier/3.x "
+            f"[XR&CO'2014], Mon, 01 Jan 2024 00:00:00 GMT -->\n<html><head><title>Page {i}"
+            f" - PZwiki</title></head><body><h1 id=\"firstHeading\">Page {i}</h1>"
+            f"<main>{sections}</main></body></html>")
+        for i in range(30)})
+
+    def size(out):
+        return sum(os.path.getsize(os.path.join(out, "pages", p)) for p in _tree(f"{out}/pages"))
+
+    assert _pack("docs", "-o", "plain", "--layout", "page").exit_code == 0
+    assert _pack("docs", "-o", "hdr", "--layout", "page", "--context-header").exit_code == 0
+    assert size("hdr") <= size("plain") * 1.05, (size("plain"), size("hdr"))
