@@ -276,6 +276,47 @@ def test_httrack_crawl_of_one_page_fails_loud_playwright(crawl):
     assert "Playwright fallback is not implemented yet" in res.output
 
 
+def _updated(out, written=(), kept=("index.html", "a.html")):
+    """An update crawl: `kept` left as they were (304), `written` saved again."""
+    res = _crawled(out, names=(*written, *kept))
+    res.files_downloaded = [f for f in res.files_downloaded
+                            if os.path.basename(f) in written]
+    res.kept = sorted(set(res.urls) - set(res.files_downloaded))
+    res.files_skipped, res.success = len(res.kept), True
+    res.records = {f: {"status": 200, "content_type": "text/html", "etag": '"e"',
+                       "last_modified": None, "redirected": False} for f in res.urls}
+    return res
+
+
+def test_httrack_second_run_is_an_update_of_the_first(crawl):
+    """The manifest a run saves is what the next one revalidates (HTTrack -C2)."""
+    out, ms = crawl
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    assert ms.call_args.kwargs["previous"] is None
+    ms.side_effect = lambda u, o, *a, **k: _updated(o)
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output  # two kept pages are no one-page crawl
+    previous = ms.call_args.kwargs["previous"]
+    assert sorted(e.local_path for e in previous.files.values()) == ["a.html", "index.html"]
+    assert "Files downloaded: 0" in res.output and "Files skipped:    2 (cached)" in res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: (e["status"], e["etag"]) for e in manifest["files"].values()} == {
+        "index.html": (200, '"e"'), "a.html": (200, '"e"')}
+
+
+def test_httrack_update_lists_the_files_it_did_not_reach(crawl):
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: _crawled(o, names=("index.html", "a.html", "b.html"))
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    ms.side_effect = lambda u, o, *a, **k: _updated(o, written=("index.html",), kept=("a.html",))
+    res = CliRunner().invoke(cli, ["-v", "download", "http://example.com", "-o", out,
+                                   "--manifest", out + ".manifest.json", "--downloader", "httrack"])
+    assert res.exit_code == 0, res.output
+    assert "Not reached this run, kept on disk: 1" in res.output
+    assert "    http://example.com/b.html" in res.output
+    assert os.path.exists(os.path.join(out, "b.html"))  # never purged
+
+
 def test_httrack_headless_fails_loud_playwright(ht):
     out, fu, _ = ht
     res = run(out, "--downloader", "httrack", "--headless")

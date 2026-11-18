@@ -41,6 +41,62 @@ Entry format:
   grep over txt/jsonl needs it).
 - **Pending:** whether txt/jsonl should also get one line per Javadoc grid row.
 
+## 2026-11-18 — httrack profile update mode (#78, PR 3)
+
+- **Decision:** a challenged start URL still exits 1 on an update (its previous
+  copy kept, the manifest not rewritten), while a start URL answering 404/5xx
+  is kept and the run goes on, as HTTrack does for both.
+- **Why:** spec §5.4 makes a challenged start URL exit 1 with the
+  `--browser-login` hint; a corpus refreshed on a schedule should fail loud
+  when the site starts refusing dograpper rather than go stale with exit 0.
+- **Rejected:** exit 0 with `Challenged: N`, as HTTrack masks the 403.
+- **Pending:** the maintainer may prefer HTTrack's behavior; one condition in
+  `crawl.fetch_url_list.keep` and `mirror.keep` decides it.
+
+- **Decision:** the manifest gains `redirected`; the validators of a file
+  reached through a redirect go to the hop whose file name is exactly that
+  file's (`crawl.sends`), and that hop alone gets the name back.
+- **Why:** HTTrack sends the redirecting URL plain and the target its
+  validators; the manifest never records the target (it can carry a secret).
+  Without the flag every redirected start URL would be refetched in full. The
+  name check (added after review) stops a redirect that now leads to another
+  page from getting a 304 for the old one.
+- **Rejected:** validators on every hop after the first (a changed redirect
+  got the old page kept as the new one's); recording the target URL (breaks
+  the README's "requested URL only" rule).
+- **Pending:** none.
+
+- **Decision:** a kept page's links are read back from its saved copy and
+  mapped to URLs through the previous manifest; no cache of original bodies.
+- **Why:** HTTrack re-parses a 304 page from `hts-cache/`; a dograpper cache
+  would be a new state directory that `pack` and `build_manifest` must skip,
+  and would double the disk use. The cost is recorded in spec §5.6: a file
+  with `"url": null` is not reached from a kept page.
+- **Rejected:** a body cache under `-o`; refetching a 304 page to read it.
+- **Pending:** none.
+
+- **Decision:** `NameRegistry.reserve()` keeps the names of the files an update
+  may keep: only the URL a file was saved from gets it back (`assign(prefer=)`,
+  matched through `url_key`, so userinfo or spelling never matter), and none is
+  renamed. A previous entry whose file is not named as its URL would be is
+  ignored, so an edited manifest cannot direct a write.
+- **Why:** names come in queue order; on a changed site a new page could take
+  a kept file's name and overwrite it, and the kept pages' links (never
+  rewritten) point at those names.
+- **Rejected:** HTTrack's rename of a file whose name changed (breaks the
+  links of kept pages).
+- **Pending:** none.
+
+- **Decision:** HTTrack's other cache options (`-C0`, `-C1`/`--continue`,
+  `-%s`, `-%n`, `--changes`) and file times from `Last-Modified` are left as
+  known gaps (spec), not ported in PR 3.
+- **Why:** the epic scopes PR 3 to manifest records and conditional
+  revalidation, and PR 2 set the precedent for listing an HTTrack feature not
+  ported yet (#122). File times interact with the mtime fast path of
+  `pack --delta` (ADR-0008).
+- **Rejected:** porting them in the same PR (doubles its spread).
+- **Pending:** an issue for the follow-up PR under #78.
+
 ## 2026-11-18 — Harness patterns mirrored from open-notes (#35)
 
 - **Decision:** Phases 2–5 of the epic ship as one commit each in a single

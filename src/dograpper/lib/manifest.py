@@ -41,6 +41,13 @@ class ManifestEntry:
     # None, and diff_manifests falls back to the old size+mtime comparison
     # for those specifically.
     content_hash: Optional[str] = None
+    # The httrack profile's record of the response the file was saved from, which its
+    # update mode revalidates (etag and last_modified above too); None from the other
+    # downloaders and in manifests written before. `redirected`: `url` reached the file
+    # through a redirect, whose target is never recorded.
+    status: Optional[int] = None
+    content_type: Optional[str] = None
+    redirected: Optional[bool] = None
 
 @dataclass
 class Manifest:
@@ -49,6 +56,8 @@ class Manifest:
     files: Dict[str, ManifestEntry]
 
 _ENTRY_FIELDS = {f.name for f in fields(ManifestEntry)}
+# What a downloader records per file (build_manifest's `records`).
+RECORD_FIELDS = ('status', 'content_type', 'etag', 'last_modified', 'redirected')
 
 
 def read_manifest(path: str) -> Manifest:
@@ -116,7 +125,8 @@ def save_manifest(manifest: Manifest, path: str) -> None:
 def build_manifest(base_url: str, output_dir: str,
                    fetched: Optional[Dict[str, str]] = None,
                    previous: Optional[Manifest] = None,
-                   manifest_path: Optional[str] = None) -> Manifest:
+                   manifest_path: Optional[str] = None,
+                   records: Optional[Dict[str, dict]] = None) -> Manifest:
     """Build a manifest based on the output directory contents.
 
     Keys are URL-relative paths (the path component the file would have on the
@@ -134,6 +144,10 @@ def build_manifest(base_url: str, output_dir: str,
     dropped or decoded query and httrack's renaming all make one saved name
     stand for several URLs.
 
+    ``records`` (saved file path -> RECORD_FIELDS values) is what the httrack
+    profile recorded for the files of this run; a file the run neither fetched
+    nor recorded keeps the fields ``previous`` has for it, as it keeps its URL.
+
     The manifest at ``manifest_path`` and dograpper's state files are left out.
     """
     files = {}
@@ -144,7 +158,9 @@ def build_manifest(base_url: str, output_dir: str,
     real_output = os.path.realpath(output_dir)
     urls = {os.path.relpath(os.path.realpath(path), real_output).replace(os.sep, '/'):
             recordable_url(url) for path, url in (fetched or {}).items()}
-    recorded = {(e.local_path or k): e.url for k, e in previous.files.items()} if previous else {}
+    recs = {os.path.relpath(os.path.realpath(path), real_output).replace(os.sep, '/'): rec
+            for path, rec in (records or {}).items()}
+    recorded = {(e.local_path or k): e for k, e in previous.files.items()} if previous else {}
     own = os.path.realpath(manifest_path) if manifest_path else None
 
     for root, _, filenames in os.walk(output_dir):
@@ -168,15 +184,21 @@ def build_manifest(base_url: str, output_dir: str,
             key = url_rel or fs_rel
 
             mtime = os.path.getmtime(full_path)
+            prev = recorded.get(fs_rel)
+            if fs_rel in recs:
+                rec = recs[fs_rel]
+            elif fs_rel not in urls and prev is not None:
+                rec = {f: getattr(prev, f) for f in RECORD_FIELDS}
+            else:
+                rec = {}
 
             files[key] = ManifestEntry(
-                url=urls[fs_rel] if fs_rel in urls else recorded.get(fs_rel),
+                url=urls[fs_rel] if fs_rel in urls else (prev.url if prev else None),
                 size_bytes=size,
-                etag=None,
-                last_modified=None,
                 local_path=fs_rel,
                 mtime=mtime,
                 content_hash=content_hash,
+                **{f: rec.get(f) for f in RECORD_FIELDS},
             )
 
     return Manifest(
@@ -194,8 +216,9 @@ def merge_manifests(old: Optional[Manifest], new: Manifest) -> Manifest:
     for key, new_entry in new.files.items():
         if key in old.files:
             old_entry = old.files[key]
-            # Keep old etag if size didn't change
-            if old_entry.size_bytes == new_entry.size_bytes:
+            # Keep old etag if size didn't change, unless a downloader recorded this
+            # file's response (httrack): its validators are the current ones
+            if old_entry.size_bytes == new_entry.size_bytes and new_entry.status is None:
                 new_entry.etag = old_entry.etag
                 new_entry.last_modified = old_entry.last_modified
         merged_files[key] = new_entry

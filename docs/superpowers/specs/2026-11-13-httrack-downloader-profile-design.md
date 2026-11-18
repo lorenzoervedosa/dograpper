@@ -312,14 +312,68 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   magic bytes prove it (`src/htsname.c:289-321`, `src/htssniff.c`): a real PDF
   at `/doc.pdf` served as `text/html` stays `doc.pdf`. dograpper does not sniff
   and names it `doc.html`.
-- **Manifest:** written from the engine's own per-URL records (real URL, final
-  URL, status, content-type, ETag, Last-Modified), not derived from disk
-  paths. `ManifestEntry` gains the missing fields in a backward-compatible
-  way: old manifests still load.
-- **Updates:** revalidate with `If-None-Match` / `If-Modified-Since`. A 304
-  keeps the file.
+- **Manifest:** written from the engine's own per-file records, not derived
+  from disk paths: the URL requested, the status, `Content-Type`, `ETag` and
+  `Last-Modified` of the response the file was saved from, and whether that URL
+  reached the file through a redirect. ETag and Last-Modified are kept as HTTrack
+  keeps them: under 64 characters, with the response's `Date` standing for a
+  missing `Last-Modified` (`src/htslib.c:1632-1653`). `ManifestEntry` gains
+  `status`, `content_type` and `redirected` in a backward-compatible way: old
+  manifests still load.
+  - **Deviation:** the final URL of a redirect is not recorded, where HTTrack's
+    cache keeps every hop. It can carry a secret, and the manifest is meant to
+    be shared (README "Incremental"); `redirected` says a chain was taken.
+- **Updates (HTTrack `-C2`).** A run whose `-o` already holds a manifest is an
+  update, as HTTrack switches to `-C2` on a folder with a finished mirror
+  (`src/htscoremain.c:1283-1285`; dograpper saves the manifest only at the end
+  of a run). Each file recorded from a 200 with a validator, still on disk and
+  not empty, is revalidated (`src/htsback.c:2557-2607`, `2414-2492`). A record
+  whose file is not named as its URL would be (an edited manifest) is ignored,
+  so the manifest never chooses where a page is written.
+  - the request starts with `If-None-Match` then `If-Modified-Since`, or the
+    one whose validator exists, right after the request line; every other
+    header, `Accept-Encoding` included, is unchanged (`src/htslib.c:1113-1115`);
+  - **304:** the file stays byte-identical and keeps its record; a page's
+    links are followed from it (`src/htsback.c:4437-4494`);
+  - **any other answer but a 2xx or a redirect** (4xx, 5xx, a challenge): the
+    file is kept the same way, the URL is listed as kept after an error, and
+    the answer is not retried (`src/htsback.c:4266-4280`, masked as a 304
+    before `htsmirror.c`'s retry switch); a kept start URL is no front error;
+  - **a failed transfer** (timeout, connection, decoding): retried, reported as
+    an error, and the file and its record are kept, its links not followed
+    (`src/htsback.c:1307-1321`, `src/htscache.c:200-232`);
+  - **a 2xx** replaces the file and its record;
+  - a file erased or emptied since, or one whose record has no validator, is
+    fetched in full.
+  - **Deviations**, each because dograpper keeps no cache beside the mirror
+    (HTTrack's `hts-cache/`) or to protect the corpus:
+    - A `Retry-After` on a revalidation still holds the whole queue
+      (politeness). HTTrack masks the answer as a 304 first and never sets
+      its gate (`src/htsmirror.c:536-540`).
+    - A challenged start URL still ends the run with exit 1 (§5.4), its copy
+      kept and the crawl stopped there. HTTrack masks the challenge's 403 like
+      any error and goes on.
+    - The target of a redirect is not recorded, so the validators of a file
+      reached through one go to the hop whose file name is that file's (the
+      redirecting URL itself is sent plain, as in HTTrack). HTTrack finds the
+      target by the URL its cache recorded; a redirect that now leads to
+      another URL is fetched in full by both.
+    - A kept page's links are read back from the saved copy, whose links to
+      saved files `-K0` made relative: each is mapped back to the URL the
+      previous manifest recorded for that file, any other link read as
+      written. HTTrack parses the original page from its cache. A file whose URL the manifest withholds (a query
+      off the allowlist) is therefore not reached from a kept page, and is
+      never revalidated. The kept page is not relinked either, where HTTrack
+      writes it again from its cache.
+    - A file an update may keep keeps its name: no other URL takes it, and
+      it is never moved. HTTrack computes names again and renames a file
+      whose name changed (`src/htsback.c:2425-2456`); moving one would break
+      the links of the kept pages.
+    - robots.txt is fetched in full on every run. HTTrack caches and
+      revalidates it too (`src/htsback.c:2396-2400`).
 - **No purge (deviation from HTTrack `-X`, user decision):** local files no
-  longer reachable are listed in the report, not deleted.
+  longer reachable are listed in the report ("Not reached this run, kept on
+  disk"), not deleted.
 
 ### 5.7 Opt-in session features (DL-19 and HTTrack §2.10)
 
@@ -381,6 +435,18 @@ yet and will get; none is approved as a difference from HTTrack.
     own tokenizer in `lib/httrack/links.py`. Both scanners will be ported onto
     it, so parsing stays linear on hostile pages.
 
+- **HTTrack's other cache modes and update options** are not in PR 3:
+  - `-C0` (no cache) and `-C1`/`--continue` (trust the cache: no request for a
+    cached file, `src/htsback.c:2497-2556`); with a manifest the profile always
+    acts as `-C2`/`--update`;
+  - `-%s` update hacks (off by default, `src/htsback.c:4281-4395`), `-%n`
+    do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and `-%d`
+    `--changes` (off, writes `hts-changes.json`);
+  - a saved file's modification time set to its `Last-Modified`
+    (`src/htscore.c:451-452`, `src/htsback.c:2121-2127`); porting it needs a
+    look at the mtime fast path of `pack --delta` (ADR-0008) first.
+  - Pending a follow-up PR under #78. Evidence: discovery note §2.9.
+
 ## 6. Code layout (proposal; the plan may refine)
 
 | File | Change |
@@ -414,6 +480,8 @@ README and CHANGELOG.
    `wget --mirror` under the profile.
 3. **Incremental.** Manifest records and conditional revalidation, with the
    previous copy kept on failure.
+   - **Status: implemented (wave 5).** Behavior and deviations in §5.6; the
+     opt-in cache options left are under "Known gaps".
 4. **Playwright under the profile.**
    - Navigations go through `page.route` + `route.fetch()`.
    - A response carrying `cf-mitigated` or challenge markup is aborted

@@ -216,10 +216,37 @@ def site_of(page: str | None, url: str) -> str:
     return _fetch_site(_referer_value(page), parts.scheme, parts.netloc)
 
 
+VALIDATOR_MAX = 64  # htslib.c treathead_opt keeps an ETag or a date only under 64 characters
+
+
+def response_validators(headers: dict[str, str]) -> tuple[str | None, str | None]:
+    """(ETag, Last-Modified) of a response as HTTrack records them for its update mode
+    (htslib.c:1632-1653): each only under 64 characters, and the Date standing for a
+    missing or oversized Last-Modified. `headers` has lowercased names."""
+    def kept(name: str) -> str | None:
+        value = (headers.get(name) or "").strip()
+        return value if value and len(value) < VALIDATOR_MAX else None
+    return kept("etag"), kept("last-modified") or kept("date")
+
+
+def conditional_headers(etag, last_modified) -> tuple[tuple[str, str], ...]:
+    """Revalidation headers for a file recorded with these validators (htsback.c:2575-2601):
+    If-None-Match and If-Modified-Since, or the one whose validator exists. A value that is
+    not printable ASCII under 64 characters (an edited manifest) is never sent."""
+    def ok(value) -> bool:
+        return (isinstance(value, str) and 0 < len(value) < VALIDATOR_MAX and value.isascii()
+                and value.isprintable())
+    return tuple((name, value) for name, value in (("If-None-Match", etag),
+                                                  ("If-Modified-Since", last_modified))
+                 if ok(value))
+
+
 def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str | None,
-                    scheme: str, meta: FetchMeta = NAVIGATION) -> list[tuple[str, str]]:
+                    scheme: str, meta: FetchMeta = NAVIGATION,
+                    validators: tuple[tuple[str, str], ...] = ()) -> list[tuple[str, str]]:
     """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked;
-    `meta` is the link's fetch metadata (robots requests send none)."""
+    `meta` is the link's fetch metadata (robots requests send none); `validators`
+    (conditional_headers) go first, where http_sendhead writes its xsend lines."""
     if kind not in ("robots", "navigate", "linked"):
         raise ValueError(f"unknown request kind: {kind!r}")
     secure = scheme == "https"
@@ -227,7 +254,7 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
     sent = (kind != "robots" and bool(meta.dest) and _trustworthy(scheme, host)
             and policy.user_agent.startswith("Mozilla/5.0 "))
     referer = _referer_value(referer)
-    h: list[tuple[str, str]] = []
+    h: list[tuple[str, str]] = list(validators)
     if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
         h.append(("Referer", referer))  # never an https referer to an http URL
     h += [("Connection", "keep-alive"), ("Host", host)]

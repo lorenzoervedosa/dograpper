@@ -404,9 +404,39 @@ HTTrack's mirror loop:
 - **Progress:** `[progress] httrack crawl: 142 files · 8.3 MB · 1m12s ·
   queued 41 · last: https://example.com/guide/`.
 - **Exit 1** when the start URL (or the redirect chain it starts) is refused,
-  challenged, blocked by robots.txt or leaves the host. A crawl that saves at
-  most one HTML page, or an SPA shell, would fall back to Playwright, which the
-  profile does not have yet (see below).
+  challenged, blocked by robots.txt or leaves the host; on an update, a start
+  URL whose previous copy was kept after an error is no failure (below). A
+  crawl that saves at most one HTML page, or an SPA shell, would fall back to
+  Playwright, which the profile does not have yet (see below).
+
+**Updates (`httrack`).** A run on an `-o` that already holds a manifest is an
+update, as HTTrack's `-C2` on a finished mirror: on both paths, each file the
+previous run recorded from a `200` with an `ETag` or a date, still on disk and
+not empty, is revalidated.
+
+- The request starts with `If-None-Match: <etag>` and `If-Modified-Since:
+  <date>` (or the one recorded), as HTTrack sends them. The date is the
+  response's `Last-Modified`, else its `Date`.
+- **304 Not Modified:** the file is left byte-identical (its links are not
+  rewritten again) and keeps its manifest record; the crawl follows the links
+  of a kept page from that copy.
+- **Any other answer but a 2xx or a redirect** (404, 500, 429, a challenge):
+  the previous copy is kept and the answer is not retried, as HTTrack does on
+  an update. The URL is listed as `Kept the previous copy after an error` (a
+  challenge under `Challenged`). A challenged start URL still exits 1.
+- **A failed transfer** (timeout, connection or decoding error) is retried,
+  reported as an error, and the previous copy and its record are kept (its
+  links are not followed).
+- **A 2xx** replaces the file and its record. A file erased or emptied since
+  is fetched again in full.
+- The summary counts the kept files as `Files skipped: N (cached)`, the 304s
+  as `Not modified (304): N`, and the files of the previous run this one did
+  not reach as `Not reached this run, kept on disk: N` (`--verbose` lists
+  them; nothing is deleted).
+- A file the update may keep keeps its name: a page added to the site never
+  takes it over. A manifest entry whose file is not named as its URL would be
+  (an edited manifest) is ignored, so the manifest never decides where a page
+  is written.
 
 `[httrack]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
@@ -442,6 +472,17 @@ protect the corpus:
 - A `--filter` rule never widens the crawl to another host.
 - No asset mirroring: the crawl does not request links whose extension is a
   known non-page type left out of `--include-extensions`.
+- Updates keep no cache beside the mirror (HTTrack's `hts-cache/`), so:
+  - the manifest never records a redirect target: the validators of a file
+    reached through a redirect go to the hop whose file name is that file's;
+  - the links of a kept page are read from the saved copy and mapped back
+    through the manifest: a file recorded with `"url": null` is not reached
+    from a kept page and never revalidated;
+  - a kept file is never renamed, and a kept page never rewritten;
+  - robots.txt is fetched in full on every run.
+- A `Retry-After` on a revalidation still pauses the whole queue, and a
+  challenged start URL still exits 1 on an update (HTTrack treats both as a
+  304).
 
 **OpenSSL >= 3.5.** The TLS handshake only matches HTTrack's on OpenSSL 3.5
 or newer; on older builds `dograpper` warns and some CDNs may reject the
@@ -460,14 +501,24 @@ those sites. Until a follow-up PR under #78 ports them
 ([#122](https://github.com/lorenzoervedosa/dograpper/issues/122)), the crawl
 does not scan JavaScript (HTTrack `-j`) or guess URLs in other attributes and
 script strings (HTTrack `-%P`), so a page that only a script links to is not
-fetched. Neither is a deviation from HTTrack.
+fetched. With a manifest an update always revalidates (HTTrack `-C2`): the
+other cache modes (`-C0`, `-C1`/`--continue`), the `-%s`, `-%n` and
+`--changes` options and file times from `Last-Modified` are not ported yet.
+None of these is a deviation from HTTrack.
 
 #### Incremental
 
 A `.dograpper-manifest.json` manifest is generated after each download,
 recording mirrored files with MD5 content hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
-changed on the server.
+changed on the server; under `--downloader httrack` they revalidate each
+file with the validators the manifest recorded (see "Updates" under
+[Downloader profiles](#downloader-profiles)). For the files it saves, the
+httrack profile also records the response's `status`, `content_type`, `etag`
+and `last_modified` (the `Date` when the server sent no `Last-Modified`), and
+`redirected` when the requested URL reached the file through a redirect; the
+other downloaders leave these `null`. A file a run did not touch keeps what
+an earlier run recorded.
 
 The manifest lives in the output directory: a relative `--manifest`
 resolves against `-o`, an absolute one is used as is, so a re-run from any

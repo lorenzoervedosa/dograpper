@@ -14,17 +14,20 @@ suffixes), the files and the report never depend on which request finished first
 
 import logging
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
+from dograpper.lib.manifest import Manifest
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
-from .crawl import MAX_REDIRECTS, HttrackResult, fetch_page, relink
+from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, previous_files, record_of,
+                    relink, reserve_names, sends)
 from .fetcher import Fetcher, same_host
 from .links import css_links, page_links, url_key
 from .naming import KNOWN_EXTS, PAGE_EXTS, NameRegistry
@@ -42,6 +45,45 @@ class _Entry:
     front: bool = False            # the start URL or a redirect target it led to
     redirects: int = 0
     initiator: str | None = None   # page whose link began the chain (Sec-Fetch-Site)
+    prev: Previous | None = None   # update: the previous run's file this request revalidates
+    carry: Previous | None = None  # update: the file a redirect of this URL leads to
+
+
+def _revalidates(own: Previous | None, carried: Previous | None, mine: bool) -> tuple:
+    """(prev, carry) of an _Entry: its own record, whose validators go on the hop after the
+    redirect it was recorded through, else the record its redirect chain carried, when
+    this hop is the one whose name is that file's (`mine`, crawl.sends)."""
+    if own is not None:
+        return own, (own if own.redirected else None)
+    return (carried._replace(redirected=False) if carried and mine else None), carried
+
+
+_KEPT_ROOT = "http://kept.invalid/"  # output_dir as a URL, to resolve a kept page's own links
+
+
+def _kept_links(body: bytes, url: str, path: str, root: str, url_of: dict[str, str], *,
+                frame: str, robots: bool) -> list:
+    """Links of the page `url` kept from the previous run at `path`, which HTTrack
+    re-parses from its cache (htsback.c:4437-4494). relink() made its links to saved files
+    relative paths: one that resolves, against the page's own path under `root`, to a file
+    there maps back through the previous manifest (`url_of`: local path -> URL recorded),
+    and is not followed when no URL was recorded. Any other link (absolute, or one relink
+    leaves as written, such as CSS in <style>) resolves against `url`. Both readings come
+    from the same scan of `body`, so they pair up one to one."""
+    def local(p: str) -> str:  # as links._local_ref writes a saved file's name
+        return p.replace("%", "%25").replace("#", "%23")
+    base = _KEPT_ROOT + local(os.path.relpath(path, root).replace(os.sep, "/"))
+    links = []
+    for real, link in zip(page_links(body, url, frame=frame, robots=robots),
+                          page_links(body, base, frame=frame, robots=robots), strict=True):
+        name = re.sub("%(25|23)", lambda m: "%" if m[1] == "25" else "#",
+                      urlsplit(link.url).path[1:]) if link.url.startswith(_KEPT_ROOT) else None
+        if name is not None and os.path.isfile(os.path.join(root, name)):
+            if name in url_of:
+                links.append(real._replace(url=url_of[name]))
+        else:
+            links.append(real)
+    return links
 
 
 def _start_rule(url: str) -> UrlFilters:
@@ -88,18 +130,28 @@ def _moved_request(entry: _Entry, target: str) -> tuple[str | None, FetchMeta]:
 
 def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extensions: str, *,
                 depth: int = 0, fetcher: Fetcher | None = None,
-                filters: UrlFilters | None = None) -> HttrackResult:
+                filters: UrlFilters | None = None,
+                previous: Manifest | None = None) -> HttrackResult:
     """Crawl from `url` into `output_dir`; `depth` caps link hops (0: unlimited) and
     policy.max_links the URLs queued (the report then says partial). The result maps each
     written file to the URL requested for it (preferring one that needed no redirect, then
     the smallest), and front_failed is set when the start URL, or the redirect chain it
-    starts, ends without a page."""
+    starts, ends without a page. With the `previous` run's manifest its files are
+    revalidated (crawl.fetch_page); a kept page is left byte-identical and its links are
+    followed from that copy (_kept_links)."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
+    prev = previous_files(previous, names, output_dir)
+    reserve_names(names, prev)
+    url_of = {e.local_path or k: e.url for k, e in (previous.files if previous else {}).items()
+              if e.url}
+    kept: set[str] = set()
+    fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
     report, lock = RunReport(), threading.Lock()
     scope = [_start_rule(url)]
-    queue = [_Entry(url, 0, front=True)]
+    own, carry = _revalidates(prev.get(url_key(url)), None, False)
+    queue = [_Entry(url, 0, front=True, prev=own, carry=carry)]
     entry_of = {url_key(url): url}       # url_key -> URL queued for it
     requested = {url_key(url): {url}}    # url_key -> URLs links asked for (not redirects)
     moved: dict[str, str] = {}           # url_key -> url_key of its redirect target
@@ -120,8 +172,10 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         return "directory" if verdict is None and not scope[0].decide(u) else None
 
     def enqueue(u: str, *, hop: int, referer: str | None, meta: FetchMeta,
-                front: bool = False, redirects: int = 0, initiator: str | None = None) -> str:
-        """Queue `u` unless known or out of scope: "queued", "known" or "refused"."""
+                front: bool = False, redirects: int = 0, initiator: str | None = None,
+                carried: Previous | None = None) -> str:
+        """Queue `u` unless known or out of scope: "queued", "known" or "refused".
+        `carried`: the previous file the redirect leading here was recorded to reach."""
         k = url_key(u)
         if k in entry_of:
             return "known"
@@ -144,13 +198,15 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         if len(queue) >= policy.max_links:
             report.partial = True
             return "refused"
-        queue.append(_Entry(u, hop, referer, meta, front, redirects, initiator))
+        mine = carried is not None and sends(carried, u, True, names)
+        queue.append(_Entry(u, hop, referer, meta, front, redirects, initiator,
+                            *_revalidates(prev.get(k), carried, mine)))
         return "queued"
 
     def work(entry: _Entry):
         return fetch_page(entry.url, fetcher, report, lock, None,
                           kind="linked" if entry.referer else "navigate",
-                          referer=entry.referer, meta=entry.meta)
+                          referer=entry.referer, meta=entry.meta, prev=entry.prev)
 
     def handle(entry: _Entry, outcome: str, final: str, res) -> None:
         safe, via = redact_url(entry.url), redact_url(entry.referer) if entry.referer else None
@@ -163,8 +219,17 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                 return
             referer, meta = _moved_request(entry, final)
             got = enqueue(final, hop=entry.hop, referer=referer, meta=meta, front=entry.front,
-                          redirects=entry.redirects + 1, initiator=entry.initiator)
+                          redirects=entry.redirects + 1, initiator=entry.initiator,
+                          carried=entry.carry)
             state["front_failed"] |= entry.front and got != "queued"
+            return
+        if outcome == "kept":
+            for link in keep(entry, res, safe, via):
+                # second copy of the loop at the end of handle()
+                got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta,
+                              initiator=entry.url)
+                if got != "refused":
+                    requested.setdefault(url_key(link.url), set()).add(entry_of[url_key(link.url)])
             return
         if outcome != "ok":
             state["front_failed"] |= entry.front
@@ -180,7 +245,8 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         else:
             links = []
         # second copy of crawl.fetch_url_list's write(): name, --include-extensions, write
-        path = names.assign(entry.url, ctype)
+        mine = entry.prev.path if entry.prev and not entry.prev.redirected else None
+        path = names.assign(entry.url, ctype, prefer=mine)
         if path is None:
             report.errors.append((safe, "unsafe local path", via))
         elif exts and os.path.splitext(path)[1].lower() not in exts:
@@ -192,6 +258,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                 report.errors.append((safe, f"write failed: {exc}", via))
             else:
                 saved[url_key(entry.url)] = path
+                fields[path] = record_of(res)
                 state["bytes"] += len(res.body)
                 if mime == "text/html":
                     pages[path] = entry.url
@@ -201,6 +268,33 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             if got != "refused":
                 requested.setdefault(url_key(link.url), set()).add(entry_of[url_key(link.url)])
 
+    def keep(entry: _Entry, res, safe: str, via: str | None) -> list:
+        """Account for the previous copy a revalidation kept; return its links. A failed
+        transfer follows none (HTTrack never parses it); a challenged or failed start URL
+        still fails the front (spec 5.4, 5.8), and the crawl stops there."""
+        p = entry.prev
+        failed = res.challenged or res.error is not None
+        state["front_failed" if failed else "front_ok"] |= entry.front
+        names.assign(entry.url, p.record["content_type"], prefer=p.path)
+        saved[url_key(entry.url)] = p.path
+        kept.add(p.path)
+        fields[p.path] = p.record
+        mime = (p.record["content_type"] or "").split(";")[0].strip().lower()
+        if mime not in ("text/html", "text/css") or res.error is not None or (
+                failed and entry.front):
+            return []
+        try:
+            with open(p.path, "rb") as f:
+                body = f.read()
+        except OSError as exc:
+            report.errors.append((safe, f"kept copy unreadable: {exc}", via))
+            return []
+        if mime == "text/css":
+            return css_links(body, entry.url)
+        return _kept_links(body, entry.url, p.path, root, url_of, frame=entry.meta.dest,
+                           robots=policy.obey_robots)
+
+    root = os.path.realpath(output_dir)
     window = 2 * policy.connections  # responses held at once stay bounded
     with ThreadPoolExecutor(max_workers=policy.connections) as pool:
         futures: dict[int, object] = {}
@@ -240,8 +334,10 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     report.robots_blocked.sort()
     report.out_of_scope.sort()
     report.filtered.sort()
+    report.kept.sort()
     report.errors.sort(key=lambda e: (e[0], e[1]))
-    files = sorted(saved.values())
+    files = sorted(set(saved.values()) - kept)
     front_failed = state["front_failed"] and not state["front_ok"]
-    return HttrackResult(bool(files), files, 0, report, front_failed,
-                         {f: u for f, (_, u) in sorted(chosen.items())})
+    return HttrackResult(bool(files or kept), files, len(kept), report, front_failed,
+                         {f: u for f, (_, u) in sorted(chosen.items())}, sorted(kept),
+                         {f: {**fields[f], "redirected": r} for f, (r, _) in sorted(chosen.items())})

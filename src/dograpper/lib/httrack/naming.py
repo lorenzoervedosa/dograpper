@@ -49,17 +49,34 @@ class NameRegistry:
         self._lock = threading.Lock()
         self._by_url: dict[str, str | None] = {}
         self._used: set[str] = set()
+        self._spare: set[str] = set()  # reserved names not given back yet
 
-    def assign(self, url: str, content_type: str | None) -> str | None:
-        """Return the absolute local path for ``url``, or None if unsafe."""
+    def reserve(self, path: str) -> None:
+        """Keep `path` (absolute, real), a file an earlier run saved and this one may keep
+        unchanged, from every URL that does not ask for it (assign's `prefer`)."""
+        with self._lock:
+            self._used.add(path.casefold())
+            self._spare.add(path)
+
+    def name_of(self, url: str, content_type: str | None) -> str | None:
+        """The name ``url`` would get with no other name taken; claims nothing."""
+        return self._compute(urlsplit(url), content_type)
+
+    def assign(self, url: str, content_type: str | None, prefer: str | None = None) -> str | None:
+        """Return the absolute local path for ``url``, or None if unsafe. ``prefer``, a
+        reserved name not given back yet, is the file ``url`` was saved to last time."""
         parts = urlsplit(url)
         key = parts._replace(fragment="").geturl()
         with self._lock:
             if key in self._by_url:
                 return self._by_url[key]
-            path = self._compute(parts, content_type)
-            if path is not None:
-                path = claim_unique(path, self._used)
+            if prefer in self._spare:
+                self._spare.discard(prefer)
+                path = prefer
+            else:
+                path = self._compute(parts, content_type)
+                if path is not None:
+                    path = claim_unique(path, self._used)
             self._by_url[key] = path
             return path
 

@@ -379,10 +379,12 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
                    err=True)
     manifest_data = load_manifest(manifest_path)
 
+    records = None
     if downloader == 'httrack':
-        files_downloaded, files_skipped, report_lines, fetched = run_httrack(
+        files_downloaded, files_skipped, report_lines, fetched, records = run_httrack(
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
+            previous=manifest_data,
         )
     else:
         files_downloaded, files_skipped, fetched = _run_download_cascade(
@@ -391,7 +393,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         )
 
     new_manifest = build_manifest(url, output, fetched, previous=manifest_data,
-                                  manifest_path=manifest_path)
+                                  manifest_path=manifest_path, records=records)
     final_manifest = merge_manifests(manifest_data, new_manifest)
     try:
         save_manifest(final_manifest, manifest_path)

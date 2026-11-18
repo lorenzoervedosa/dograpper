@@ -68,8 +68,14 @@ and fixes alone are a PATCH bump.
   targets queued as links; a deterministic output whatever the request order;
   `[progress] httrack crawl:` lines. On both paths, links between saved pages
   are rewritten to relative paths (HTTrack `-K0`), so the mirror browses
-  offline and `pack --cross-refs` resolves them. The Playwright fallback fails loud under this
-  profile for now.
+  offline and `pack --cross-refs` resolves them. A run over an earlier one is
+  an update, as HTTrack `-C2`: each saved file is revalidated with
+  `If-None-Match` / `If-Modified-Since` from its manifest record (new manifest
+  fields `status`, `content_type`, `redirected`; `etag` and `last_modified`
+  filled in), a 304 or an error leaves the previous copy byte-identical, and
+  the summary adds `Not modified (304)`, `Kept the previous copy after an
+  error` and `Not reached this run, kept on disk`. The Playwright fallback
+  fails loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
