@@ -1,7 +1,6 @@
 """lib/httrack/links.py: HTTrack's link extraction, dedup key and link rewriting."""
 
 import logging
-import time
 
 import pytest
 
@@ -204,18 +203,18 @@ def test_rewritten_names_escape_percent_and_hash():
     assert _rewrite(html, local) == '<a href="100%25.html">a</a><a href="C%23.html">b</a>'
 
 
-@pytest.mark.parametrize("body", [
-    b"<a href=" * 40000,
-    b"<meta name=robots content=" + b"x" * 400000,
-    b"<style>" + b"url(" * 100000,
-    b"<style>" + b"@import '" * 100000,
-    b"<img srcset='" + b"a " * 200000 + b"'>",
+@pytest.mark.parametrize("build, n", [
+    (lambda k: b"<a href=" * k, 10000),
+    (lambda k: b"<meta name=robots content=" + b"x" * k, 1000000),
+    (lambda k: b"<style>" + b"url(" * k, 12000),
+    (lambda k: b"<style>" + b"@import '" * k, 12000),
+    (lambda k: b"<img srcset='" + b"a " * k + b"'>", 50000),
 ], ids=["unclosed-tags", "meta-robots", "css-url", "css-import", "srcset"])
-def test_parsing_is_linear_on_hostile_pages(body):
-    t0 = time.perf_counter()
-    page_links(body, PAGE)
-    rewrite_links(body, PAGE, "/o/p.html", {})
-    assert time.perf_counter() - t0 < 2.0
+def test_parsing_is_linear_on_hostile_pages(build, n):
+    def parse(body):
+        page_links(body, PAGE)
+        rewrite_links(body, PAGE, "/o/p.html", {})
+    assert_linear(build, parse, n)
 
 
 def test_rewrite_relative_path_uses_forward_slashes(tmp_path):
