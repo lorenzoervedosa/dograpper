@@ -314,6 +314,9 @@ def test_real_get_goes_through_the_proxy_with_its_credentials(server):
     assert log[0]["Proxy-Authorization"] == "Basic " + base64.b64encode(b"user:pw").decode()
 
 
+FAST = ["--disable-security-limits", "--max-conn-rate", "1000"]  # local server: no pacing wait
+
+
 def _docs_site(script):
     words = " ".join(["documentation"] * 40)
     script["/robots.txt"] = (404, {}, b"")
@@ -330,7 +333,7 @@ def test_real_download_mirrors_the_site(server, tmp_path):
     out = tmp_path / "mirror"
 
     result = CliRunner().invoke(
-        cli, ["download", f"{base}/docs/", "-o", str(out), "--downloader", "fire-engine"])
+        cli, ["download", f"{base}/docs/", "-o", str(out), "--downloader", "fire-engine", *FAST])
 
     assert result.exit_code == 0, result.output
     assert "Files downloaded: 2" in result.output
@@ -356,7 +359,7 @@ def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server
             return 200, {**hdrs, "ETag": etag, "Last-Modified": LM}, body
         script[path] = reply
     out = tmp_path / "mirror"
-    args = ["download", f"{base}/docs/", "-o", str(out), "--downloader", "fire-engine"]
+    args = ["download", f"{base}/docs/", "-o", str(out), "--downloader", "fire-engine", *FAST]
     first = CliRunner().invoke(cli, args)
     assert first.exit_code == 0, first.output
     manifest = out / ".dograpper-manifest.json"
