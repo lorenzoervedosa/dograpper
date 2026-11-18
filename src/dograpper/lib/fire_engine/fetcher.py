@@ -60,6 +60,10 @@ class CurlCffiFetcher(Fetcher):
                    if self._proxy else None)
         # Stream and bound the decoded body: curl decompresses on the fly, so a tiny
         # gzip bomb must be stopped mid-read, not after resp.content loads it whole.
+        # shortcut: this cap is consumer-side, so curl_cffi can still buffer decoded
+        # bytes ahead of the bandwidth-throttled drain (docs/DEBT.md). Move the bound
+        # to curl's writer (disable its auto-decode and reuse httrack _decode, or a
+        # WRITEFUNCTION) when curl_cffi is installed for the smoke-test slice.
         resp = None
         try:
             resp = self._session().request(
