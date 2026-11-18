@@ -10,7 +10,7 @@ imported lazily, only when a session is first created.
 """
 from urllib.parse import urlunsplit
 
-from ..httrack.fetcher import MAX_BODY_BYTES, Fetcher
+from ..httrack.fetcher import CHUNK, MAX_BODY_BYTES, Fetcher, _wire_host
 
 _MISSING = (
     "curl_cffi is required for --downloader fire-engine. "
@@ -49,22 +49,41 @@ class CurlCffiFetcher(Fetcher):
 
     def _request(self, key, parts, target, headers):
         self._acquire(conn=True)  # connection-rate pacing, as the stdlib path does
-        url = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
+        # Rebuild the URL from the IDNA host (no userinfo), as the stdlib path puts on the
+        # wire, so curl targets exactly what the scope/robots checks validated.
+        host = _wire_host(parts)  # raises ValueError on a host http.client/the checks reject
+        netloc = host if parts.port is None else f"{host}:{parts.port}"
+        url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
         referer = next((v for k, v in headers if k.lower() == "referer"), None)
         req_headers = {"Referer": referer} if referer else {}
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
+        # Stream and bound the decoded body: curl decompresses on the fly, so a tiny
+        # gzip bomb must be stopped mid-read, not after resp.content loads it whole.
+        resp = None
         try:
             resp = self._session().request(
                 "GET", url, headers=req_headers, proxies=proxies,
-                timeout=self.policy.timeout, allow_redirects=False,
+                timeout=self.policy.timeout, allow_redirects=False, stream=True,
             )
+            chunks, total = [], 0
+            for chunk in resp.iter_content(chunk_size=CHUNK):
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > MAX_BODY_BYTES:
+                    raise ValueError("body too large")
+                self._charge_bandwidth(len(chunk))
+            hdrs = {k.lower(): v for k, v in resp.headers.items()}
+            status = resp.status_code
+        except ValueError:
+            if resp is not None:
+                resp.close()
+            raise
         except Exception as exc:  # curl transport error -> inherited retry path
+            if resp is not None:
+                resp.close()
             raise OSError(f"curl_cffi: {type(exc).__name__}: {exc}") from exc
-        content = resp.content
-        if len(content) > MAX_BODY_BYTES:
-            raise ValueError("body too large")
-        self._charge_bandwidth(len(content))
-        hdrs = {k.lower(): v for k, v in resp.headers.items()}
-        hdrs.pop("content-encoding", None)  # curl_cffi already decoded the body
-        return resp.status_code, hdrs, content
+        else:
+            resp.close()
+        hdrs.pop("content-encoding", None)  # curl_cffi decoded the body while streaming
+        return status, hdrs, b"".join(chunks)

@@ -16,10 +16,17 @@ from dograpper.lib.httrack.policy import build_policy
 
 
 class FakeResp:
-    def __init__(self, status=200, headers=None, content=b"<html>ok</html>"):
+    def __init__(self, status=200, headers=None, content=b"<html>ok</html>", chunks=None):
         self.status_code = status
         self.headers = headers or {}
-        self.content = content
+        self._chunks = chunks if chunks is not None else [content]
+        self.closed = False
+
+    def iter_content(self, chunk_size=65536):
+        yield from self._chunks
+
+    def close(self):
+        self.closed = True
 
 
 class FakeSession:
@@ -100,6 +107,29 @@ def test_content_encoding_header_is_dropped_so_body_is_not_double_decoded():
     res = fetcher.get("https://example.com/", kind="navigate")
 
     assert res.body == b"plain text"
+
+
+def test_body_over_the_cap_is_rejected_mid_stream(monkeypatch):
+    # curl decompresses on the fly; a bomb must be stopped while streaming, not
+    # after the whole thing is in memory.
+    monkeypatch.setattr("dograpper.lib.fire_engine.fetcher.MAX_BODY_BYTES", 10)
+    resp = FakeResp(chunks=[b"x" * 8, b"y" * 8])  # 16 bytes > cap of 10
+    fetcher, _session, _ = make_fetcher(resp)
+
+    res = fetcher.get("https://example.com/", kind="navigate")
+
+    assert res.status is None
+    assert res.error == "body too large"
+    assert resp.closed is True
+
+
+def test_userinfo_is_stripped_from_the_url_sent_to_curl():
+    fetcher, session, _ = make_fetcher(FakeResp())
+
+    fetcher.get("https://user:pass@example.com/docs?q=1", kind="navigate")
+
+    _m, url, _kw = session.calls[0]
+    assert url == "https://example.com/docs?q=1"
 
 
 def test_default_factory_without_curl_cffi_raises_friendly_error(monkeypatch):
