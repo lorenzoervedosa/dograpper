@@ -4,7 +4,6 @@
 """
 
 import json
-import time
 from pathlib import Path
 
 import pytest
@@ -16,6 +15,7 @@ from dograpper.utils.dedup import _leading_token
 from dograpper.utils.heading_extractor import extract_with_headings
 from dograpper.utils.html_stripper import MAX_LIST_DEPTH, strip_html
 from dograpper.utils.word_counter import count_words
+from tests.linearity import assert_linear
 
 
 def md(html):
@@ -255,24 +255,32 @@ def test_code_fences_are_the_same_in_markdown(html):
 # ---------------------------------------------------------------------------
 
 def test_deep_nesting_and_huge_tables_render_in_linear_time():
-    n = 20000
-    start = time.perf_counter()
-    lines = md("<ul><li>x" * n + "</li></ul>" * n).split("\n")
+    n = 2500
+
+    def nested(k):
+        return "<ul><li>x" * k + "</li></ul>" * k
+
+    def table(k):
+        return "<table>" + "<tr><td>k</td><td>v</td></tr>" * k + "</table>"
+
+    lines = md(nested(n)).split("\n")
     assert len(lines) == n
     assert max(len(line) - len(line.lstrip()) for line in lines) <= 2 * MAX_LIST_DEPTH
     assert md("<ul><li><div>x" * n).count("x") == n
-    table = md("<table>" + "<tr><td>k</td><td>v</td></tr>" * n + "</table>")
-    assert len(table.split("\n")) == n + 1
-    assert time.perf_counter() - start < 10
+    assert len(md(table(n)).split("\n")) == n + 1
+    assert_linear(nested, md, n)
+    assert_linear(lambda k: "<ul><li><div>x" * k, md, n)
+    assert_linear(table, md, n)
 
 
 def test_many_links_render_in_linear_time():
-    n = 20000
-    start = time.perf_counter()
-    out = md("<p>" + "".join(f'<a href="u{i % 1000}">x{i}</a> ' for i in range(n)) + "</p>"
-             + "<table>" + '<tr><td><a href="v">k</a></td></tr>' * n + "</table>")
-    assert len(out.rsplit("\n\n", 1)[1].split("\n")) == 1001
-    assert time.perf_counter() - start < 10
+    def page(n):
+        return ("<p>" + "".join(f'<a href="u{i % 1000}">x{i}</a> ' for i in range(n)) + "</p>"
+                + "<table>" + '<tr><td><a href="v">k</a></td></tr>' * n + "</table>")
+
+    n = 2500
+    assert len(md(page(n)).rsplit("\n\n", 1)[1].split("\n")) == 1001
+    assert_linear(page, md, n)
 
 
 # ---------------------------------------------------------------------------
@@ -551,10 +559,15 @@ def test_javadoc_summary_grid_row_is_one_line_in_a_pack(tmp_path):
 
 
 def test_unclosed_javadoc_grids_render_in_linear_time():
-    n = 20000
-    start = time.perf_counter()
-    out = md('<div class="summary-table two-column-summary"><div>k<div>v' * n)
-    assert out.count("k") == n
-    grid = md('<div class="summary-table three-column-summary">' + "<div>a</div>" * 3 * n + "</div>")
-    assert len(grid.split("\n")) == n + 1
-    assert time.perf_counter() - start < 10
+    n = 2500
+
+    def unclosed(k):
+        return '<div class="summary-table two-column-summary"><div>k<div>v' * k
+
+    def grid(k):
+        return '<div class="summary-table three-column-summary">' + "<div>a</div>" * 3 * k + "</div>"
+
+    assert md(unclosed(n)).count("k") == n
+    assert len(md(grid(n)).split("\n")) == n + 1
+    assert_linear(unclosed, md, n)
+    assert_linear(grid, md, n)
