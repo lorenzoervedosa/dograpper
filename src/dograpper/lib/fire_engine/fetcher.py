@@ -64,9 +64,10 @@ class CurlCffiFetcher(Fetcher):
         # bytes ahead of the bandwidth-throttled drain (docs/DEBT.md). Move the bound
         # to curl's writer (disable its auto-decode and reuse httrack _decode, or a
         # WRITEFUNCTION) when curl_cffi is installed for the smoke-test slice.
+        session = self._session()  # outside the try: a missing curl_cffi is no transport error
         resp = None
         try:
-            resp = self._session().request(
+            resp = session.request(
                 "GET", url, headers=req_headers, proxies=proxies,
                 timeout=self.policy.timeout, allow_redirects=False, stream=True,
             )

@@ -140,6 +140,17 @@ def test_default_factory_without_curl_cffi_raises_friendly_error(monkeypatch):
     assert str(exc.value) == _MISSING
 
 
+def test_missing_curl_cffi_surfaces_before_any_request():
+    """The first GET (robots.txt, in run_fire_engine) must raise the friendly error,
+    not have it wrapped as a transport OSError that the run retries and reports."""
+    def factory(_imp):
+        raise RuntimeError(_MISSING)
+
+    fetcher = CurlCffiFetcher(build_policy(), session_factory=factory, sleep=lambda _s: None)
+    with pytest.raises(RuntimeError, match="uv sync --extra fire-engine"):
+        fetcher.robots_for("https://example.com")
+
+
 # -- CLI wiring (no network: run_fire_engine is stubbed) --------------------
 
 def test_proxy_without_fire_engine_is_a_usage_error(tmp_path):
