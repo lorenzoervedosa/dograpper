@@ -76,6 +76,8 @@ and fixes alone are a PATCH bump.
   chunk ids to one width per run (`max(2, digits of the chunk count)`), so
   100 or more chunks sort numerically; packs under 100 chunks keep their names
   ([#92](https://github.com/lorenzoervedosa/dograpper/issues/92)).
+- `pack --score` no longer grades a chunk with empty extracted content as `A`;
+  it is graded `C` with score 0. ([#69])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
@@ -172,3 +174,4 @@ and fixes alone are a PATCH bump.
 [#66]: https://github.com/lorenzoervedosa/dograpper/issues/66
 [#77]: https://github.com/lorenzoervedosa/dograpper/issues/77
 [#91]: https://github.com/lorenzoervedosa/dograpper/issues/91
+[#69]: https://github.com/lorenzoervedosa/dograpper/issues/69

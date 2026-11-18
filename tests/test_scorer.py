@@ -188,6 +188,21 @@ class TestScoreChunk:
         )
         assert cs.boundary_integrity is False
 
+    def test_empty_content_is_never_graded_a(self):
+        # Everything extracted away (raw is empty too, so noise alone is 0.0):
+        # nothing is ready for an LLM, however clean the metrics look.
+        for raw in (0, 40):
+            cs = score_chunk(
+                chunk_id="docs_chunk_04",
+                text="",
+                raw_words=raw,
+                extracted_words=0,
+                headings_count=3,
+                max_heading_level=2,
+            )
+            assert cs.grade == "C"
+            assert cs.score < 0.5
+
 
 def _make_test_dir(tmpdir, files_dict):
     for rel, content in files_dict.items():
