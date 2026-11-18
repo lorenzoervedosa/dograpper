@@ -268,6 +268,30 @@ INFO: [cascade] layer-2 sitemap: WIN (>=3)
 INFO: [cascade] layer-3 wget -i: fetching 120 URLs from sitemap.xml
 ```
 
+While pages are fetched (by `download`, and so by `sync`), each fetch step
+prints a `[progress]` line at most every 5 seconds and only when something
+changed, plus a final line when the step ends. These are INFO lines, so
+`--quiet` hides them, and their URLs are redacted like every logged URL.
+
+A fixed URL list (`wget -i` over the llms.txt or sitemap URLs, and the httrack
+profile's seeded list, shown as `httrack:`) counts URLs of the list, not saved
+files: wget also fetches robots.txt, redirect targets and page requisites. The
+ETA appears once 10 URLs are done:
+
+```
+INFO: [progress] wget -i: 37/120 URLs (31%) · 2.1 MB · 1m12s · ETA ~3m
+```
+
+A crawl whose total grows as it goes (`wget --mirror`, and Playwright, whose
+queue keeps growing even when seeded) has no percentage and no ETA:
+
+```
+INFO: [progress] wget --mirror: 142 files · 8.3 MB · 1m12s · last: https://example.com/guide/
+INFO: [progress] playwright: 23 files · 1m05s · queued 41 · last: https://example.com/api/
+```
+
+The Playwright crawl's per-page `Downloading: <url>` line needs `--verbose`.
+
 #### URL filters (`--filter`)
 
 `--filter RULE` scopes a crawl with HTTrack's scan rules. It is repeatable, is

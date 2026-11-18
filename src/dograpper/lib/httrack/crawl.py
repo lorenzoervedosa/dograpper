@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlsplit
 
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.atomic_write import atomic_write_bytes
+from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .escape import request_target
@@ -48,6 +49,8 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     if len(seeds) > policy.max_links:
         seeds, report.partial = seeds[:policy.max_links], True
     refused = [0]  # seeds that ended challenged, refused, errored or robots-blocked
+    finished, size = [0], [0]  # seeds done, bytes written
+    progress = ProgressReporter("httrack", total=len(seeds))
 
     def count(status: int | None, error: bool) -> None:
         key = "error" if error or status is None else f"{status // 100}xx"
@@ -137,15 +140,21 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 del requested[path]
                 report.errors.append((safe, f"write failed: {exc}", None))
             return "refused"
+        with lock:
+            size[0] += len(res.body)
         return "written"
 
     def run(seed: str) -> None:
         if fetch_one(seed) == "refused":
             with lock:
                 refused[0] += 1
+        with lock:
+            finished[0] += 1
+            progress.update(done=finished[0], size_bytes=size[0])
 
     with ThreadPoolExecutor(max_workers=max(policy.connections, 1)) as pool:
         list(pool.map(run, seeds))  # list() re-raises any worker exception
+    progress.finish()
 
     report.challenged.sort()
     report.robots_blocked.sort()

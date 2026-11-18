@@ -1166,3 +1166,162 @@ def test_download_exits_nonzero_when_manifest_is_unwritable(tmp_path):
 
     assert result.exit_code == 1, result.output
     assert str(out / ".dograpper-manifest.json") in result.output
+
+
+# --- [progress] lines while pages are fetched (issue #98) ---
+
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def _timed(stderr, clock):
+    """wget's stderr as a stream whose every line arrives one second after the last."""
+    for line in io.StringIO(stderr):
+        clock.t += 1
+        yield line
+
+
+def _wget_progress(fn, arg, stderr):
+    """(time, line) of each [progress] line `fn` prints on a fake wget and a fake clock."""
+    from functools import partial
+    from dograpper.utils.progress import ProgressReporter
+    clock, lines = _Clock(), []
+    reporter = partial(ProgressReporter, clock=clock, emit=lambda l: lines.append((clock.t, l)))
+    with patch('dograpper.lib.wget_mirror.ProgressReporter', reporter), \
+            _fake_wget(_timed(stderr, clock)), tempfile.TemporaryDirectory() as d:
+        fn(arg, d)
+    return lines
+
+
+def _assert_throttled(lines):
+    """At most one line per 5 s, only on change, plus the final one when the step ends."""
+    times = [t for t, _ in lines]
+    assert all(b - a >= 5 for a, b in zip(times, times[1:-1])), times
+    texts = [l for _, l in lines]
+    assert all(a != b for a, b in zip(texts, texts[1:])), texts
+
+
+def _listed_log(n, size=100_000):
+    """wget -i stderr, in wget 1.21.4's line formats, for `n` listed pages of `size` bytes."""
+    out = []
+    for i in range(n):
+        out += [f"--2026-11-17 22:52:54--  {H}/p{i}",
+                "HTTP request sent, awaiting response... 200 OK",
+                f"Saving to: ‘{O}/p{i}.html’", "",
+                f"2026-11-17 22:52:54 (29.6 MB/s) - ‘{O}/p{i}.html’ saved [{size}/{size}]", ""]
+    return "\n".join(out) + "\n"
+
+
+def test_wget_i_progress_counts_urls_of_the_list_not_files():
+    """robots.txt and the redirect target /new are requested too, and four files are
+    saved: the count is the five URLs of the list, as wget prints them."""
+    import re
+    from dograpper.lib.wget_mirror import run_wget_urls
+    listed = [f"{H}/wiki/Category:En", f"{H}/w/index.php?title=Category:Lua&pagefrom=On%26Off",
+              f"{H}/old#top", f"{H}/notes.txt", f"{H}/missing.html"]
+    lines = _wget_progress(run_wget_urls, listed, _fixture("wget_urls_stderr.txt"))
+    _assert_throttled(lines)
+    shape = re.compile(r"\[progress\] wget -i: (\d)/5 URLs \(\d+%\) · 0\.0 MB · \d+s$")
+    done = [int(shape.match(l).group(1)) for _, l in lines]
+    assert done == sorted(done) and len(done) > 2
+    assert lines[-1][1] == "[progress] wget -i: 5/5 URLs (100%) · 0.0 MB · 46s"
+
+
+def test_wget_i_progress_shows_eta_only_after_ten_urls():
+    import re
+    from dograpper.lib.wget_mirror import run_wget_urls
+    lines = _wget_progress(run_wget_urls, [f"{H}/p{i}" for i in range(12)], _listed_log(12))
+    _assert_throttled(lines)
+    for _, line in lines:
+        done = int(re.match(r"\[progress\] wget -i: (\d+)/12 URLs", line).group(1))
+        assert ("ETA" in line) is (10 <= done < 12), line
+    assert any("ETA" in l for _, l in lines)
+    assert lines[-1][1] == "[progress] wget -i: 12/12 URLs (100%) · 1.1 MB · 1m12s"
+
+
+def test_wget_mirror_progress_shows_files_size_and_the_last_url():
+    import re
+    from dograpper.lib.wget_mirror import WgetLog
+    stderr = _fixture("wget_mirror_stderr.txt")
+    lines = _wget_progress(run_wget_mirror, H + "/", stderr)
+    _assert_throttled(lines)
+    shape = re.compile(r"\[progress\] wget --mirror: \d files · 0\.0 MB · (\d+m)?\d+s · "
+                       r"last: http://127\.0\.0\.1:8766/\S*$")
+    assert all(shape.match(l) for _, l in lines), lines
+    assert lines[-1][1] == ("[progress] wget --mirror: 9 files · 0.0 MB · 1m40s · "
+                            "last: http://127.0.0.1:8766/it's")
+    log = WgetLog()
+    for line in stderr.splitlines():
+        log.feed(line)
+    assert log.size == 754  # wget's own tally: "Downloaded: 9 files, 754 in 0s"
+
+
+def test_wget_mirror_progress_names_the_url_requested_redacted():
+    """A redirect target can carry a signed token: the last URL is the one requested,
+    with its credential-like parameters masked."""
+    stderr = "\n".join([
+        "--2026-11-17 22:52:54--  https://u:pw@h.example/doc?title=Doc&token=typed",
+        "HTTP request sent, awaiting response... 302 Found",
+        "Location: https://bucket.s3.example/doc?X-Amz-Signature=secret [following]",
+        "--2026-11-17 22:52:54--  https://bucket.s3.example/doc?X-Amz-Signature=secret",
+        "HTTP request sent, awaiting response... 200 OK",
+        "Saving to: ‘out/h.example/doc.html’",
+    ]) + "\n"
+    lines = _wget_progress(run_wget_mirror, "https://h.example/", stderr)
+    assert lines[-1][1].endswith("last: https://h.example/doc?title=Doc&token=REDACTED")
+    assert not any("secret" in l or "pw" in l or "typed" in l for _, l in lines)
+
+
+def test_download_progress_lines_are_info_so_quiet_hides_them(tmp_path):
+    import logging
+    out = tmp_path / "m"
+    for name in ("a.html", "b.html"):
+        (out / "127.0.0.1:8766").mkdir(parents=True, exist_ok=True)
+        (out / "127.0.0.1:8766" / name).write_text("<html><body><p>x</p></body></html>")
+    stderr = _fixture("wget_mirror_stderr.txt")
+    logger = logging.getLogger("dograpper")
+    level = logger.level
+    try:
+        for flags, shown in (([], True), (['--quiet'], False)):
+            with _fake_wget(stderr), \
+                    patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+                    patch('dograpper.commands.download.is_spa', return_value=False):
+                res = CliRunner().invoke(cli, [*flags, 'download', H + "/", '-o', str(out)])
+            assert res.exit_code == 0, res.output
+            assert "Download complete:" in res.output
+            assert ("INFO: [progress] wget --mirror: 9 files · 0.0 MB · " in res.output) is shown, res.output
+    finally:
+        logger.setLevel(level)  # --quiet leaves ERROR, which would hide later tests' log records
+
+
+def test_playwright_progress_counts_files_and_the_queue(caplog):
+    import logging
+    import re
+    import sys
+
+    mock_sync_api = MagicMock()
+    mock_p = mock_sync_api.sync_playwright.return_value.__enter__.return_value
+    mock_page = mock_p.chromium.launch.return_value.new_context.return_value.new_page.return_value
+    mock_page.content.return_value = "<html></html>"
+    mock_page.evaluate.side_effect = [["http://target.com/api", "http://target.com/guide?token=t0"], [], []]
+
+    sys.modules['playwright'] = MagicMock()
+    sys.modules['playwright.sync_api'] = mock_sync_api
+    try:
+        with tempfile.TemporaryDirectory() as d, caplog.at_level(logging.DEBUG, logger="dograpper"):
+            from dograpper.lib.playwright_crawl import run_playwright_crawl
+            run_playwright_crawl("http://target.com/", d)
+    finally:
+        del sys.modules['playwright']
+        del sys.modules['playwright.sync_api']
+    fetched = [r for r in caplog.records if r.getMessage().startswith("Downloading: ")]
+    assert len(fetched) == 3 and all(r.levelno == logging.DEBUG for r in fetched)
+    progress = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[progress]")]
+    assert all(r.levelno == logging.INFO for r in caplog.records if r.getMessage().startswith("[progress]"))
+    assert re.fullmatch(r"\[progress\] playwright: 3 files · \d+s · queued 0 · "
+                        r"last: http://target\.com/guide\?token=REDACTED", progress[-1])
+    assert not any("t0" in l for l in progress)

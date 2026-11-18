@@ -276,3 +276,20 @@ def test_robots_allows_other_encoded_path(server, tmp_path):
     script["/c%20d"] = (200, HTML, b"x")
     res = run([f"{base}/c d"], tmp_path)
     assert "/c%20d" in seen and res.report.robots_blocked == []
+
+
+def test_progress_counts_the_seeds_of_the_list(server, tmp_path, caplog):
+    """[progress] in the fixed-list shape of wget -i: seeds done of the list and the
+    bytes written; a redirect onto a file another seed wrote adds no bytes."""
+    import logging
+    import re
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/big"] = (200, HTML, b"x" * 1_200_000)
+    script["/gone"] = (404, HTML, b"<p>gone</p>")
+    script["/old"] = (301, {"location": "/big"}, b"")
+    with caplog.at_level(logging.INFO, logger="dograpper"):
+        run([f"{base}/big", f"{base}/gone", f"{base}/old"], tmp_path)
+    progress = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[progress]")]
+    assert progress and re.fullmatch(r"\[progress\] httrack: 3/3 URLs \(100%\) · 1\.1 MB · \d+s",
+                                     progress[-1]), progress

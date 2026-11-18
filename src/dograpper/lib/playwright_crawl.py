@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 from pathlib import Path
 
 from dograpper.lib.url_filter import UrlFilters
+from dograpper.utils.progress import ProgressReporter
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,8 @@ def run_playwright_crawl(
     files_skipped = 0
     
     extensions = [ext.strip().lower() for ext in include_extensions.split(',') if ext.strip()]
+    # the queue keeps growing, even when seeded: no total, so no percentage going backwards
+    progress = ProgressReporter("playwright")
 
     def follow(links, current_url, current_depth):
         for link in links:
@@ -142,9 +145,10 @@ def run_playwright_crawl(
                         break
                         
             if skip_download:
+                progress.update(done=len(files_downloaded), queued=len(to_visit), last_url=current_url)
                 continue
                 
-            logger.info(f"Downloading: {current_url}")
+            logger.debug(f"Downloading: {current_url}")
             
             try:
                 # Bounded hydration: 10s DOM + 5s selector wait + 500ms grace
@@ -188,8 +192,10 @@ def run_playwright_crawl(
             except Exception as e:
                 logger.error(f"Error crawling {current_url}: {e}")
                 errors.append(f"Error crawling {current_url}: {e}")
+            progress.update(done=len(files_downloaded), queued=len(to_visit), last_url=current_url)
                 
         browser.close()
+    progress.finish()
         
     return CrawlResult(
         success=True,

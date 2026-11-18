@@ -142,6 +142,14 @@ and fixes alone are a PATCH bump.
   and counted as `Redirect aliases: N` in the summary. Pages from any other
   generator are extracted exactly as before. ([schema](docs/schema-v1.md),
   [#88])
+- `download` (and so `sync`) prints `[progress]` lines while pages are
+  fetched: at most one every 5 s per fetch step, only on change, plus a final
+  one. A fixed URL list (`wget -i`, the httrack profile's seeded list) shows
+  `37/120 URLs (31%) · 2.1 MB · 1m12s`, with an ETA once 10 URLs are done;
+  `wget --mirror` shows files, size, elapsed time and the last URL, and
+  Playwright files, elapsed time, queue size and the last URL. They are INFO
+  lines, so `--quiet` hides them. The Playwright crawl's per-page
+  `Downloading: <url>` line moves to `--verbose`. ([#98])
 
 ### Changed
 
@@ -413,3 +421,4 @@ and fixes alone are a PATCH bump.
 [#88]: https://github.com/lorenzoervedosa/dograpper/issues/88
 [#110]: https://github.com/lorenzoervedosa/dograpper/issues/110
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
+[#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
