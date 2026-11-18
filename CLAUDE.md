@@ -26,6 +26,7 @@ subcomandos: `download` (espelha site via wget/playwright, ou perfil httrack), `
 src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
+│   ├── _fire_engine_profile.py # Modo `--downloader fire-engine` do download (ADR-0011): run_fire_engine() — mesma cascata discovery→fetch_url_list/mirror_site do httrack, mas com CurlCffiFetcher (--proxy, --impersonate); fail-loud (desafio persistente → sugere --proxy/wget; SPA → wget --headless). Cópia tolerada de run_httrack (comentário aponta a 1ª)
 │   ├── _httrack_profile.py # Modo `--downloader httrack` do download: resolve_profile() (opções do perfil, guarda sob wget, policy_kw), discovery_fetch() (robots antes do GET), run_httrack() (fetch semeado, ou crawl recursivo quando a descoberta não acha lista; relatório; fail-loud do start URL e do fallback Playwright); com o manifest anterior a execução é atualização (previous=), e _unreached() lista os arquivos dele não alcançados
 │   ├── _page_layout.py     # Modo `pack --layout page` (ADR-0010): check_flags() (flags só-chunk na CLI ou no config, --bundle, --for-queries, --api-records, --format jsonl, --dedup ≠ off → exit 2), check_ownership() (pages/ sem INDEX.md → exit 1), write() (falha de escrita → exit 1)
 │   ├── docs.py             # `dograpper docs`: build_page() (HTML puro, autocontido, gerado da árvore click) + make_server() (http.server em 127.0.0.1; porta ocupada falha, nunca troca de porta)
@@ -37,12 +38,14 @@ src/dograpper/
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project/claude-code); claude-code também escreve um SKILL.md stub em --skill-dir (nunca sobrescreve; pack não toca nele)
 │   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary; --layout chunk|page (modo page em _page_layout.py); --api-records (só jsonl) chama utils/api_reference/
 │   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
-│   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader, as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py) e --layout
+│   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader, as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py), as flags do fire-engine (--proxy, --impersonate) e --layout
 ├── lib/
 │   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile (Chunk.page_path no layout page), chunk_id() (id único de chunk nos sidecars), write_chunks() (md, txt, jsonl; no md cada seção de context header termina com as definições de link que usa)
 │   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source); read_config_section() — seção do JSON (quais chaves o config define)
 │   ├── eval_harness.py     # evaluate() — hit-rate@k e MRR sobre pares golden, com breakdown por readiness grade
 │   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
+│   ├── fire_engine/
+│   │   └── fetcher.py      # CurlCffiFetcher(Fetcher) (ADR-0011): sobrescreve só _request (curl_cffi impersonate + proxy, allow_redirects=False, content-encoding tirado pois curl já decodou); reúsa pacing/retry/challenge/robots do Fetcher. curl_cffi é dep opcional (import lazy no _default_session_factory, mensagem amigável se ausente)
 │   ├── httrack/
 │   │   ├── crawl.py        # fetch_page() — GET compartilhado pelos dois caminhos (robots antes de cada hop, /cdn-cgi/ fora, redirect seguido via callback de escopo ou devolvido como "moved", só 2xx não-desafio é "ok"); moved_request() — Referer e Sec-Fetch-* do alvo de um redirect como hts_mirror_check_moved (fonte única da lista semeada e do crawl); fetch_url_list() — lista semeada: cada URL é start URL (navigate), redirects same-host (até 5) pedidos via moved_request(), escrita atômica, front_failed, links das páginas salvas reescritos no fim; ThreadPool com Fetcher e NameRegistry compartilhados; relink() — reescrita -K0 das páginas salvas (lista semeada e crawl); atualização (HTTrack -C2): previous_files() (arquivos que o manifest anterior gravou de um 200 com validador, com o nome que a URL teria), reserve_names(), sends() (o hop de onde o arquivo veio, inclusive após redirect), record_of() (registro do manifest), fetch_page(prev=) manda If-None-Match/If-Modified-Since e devolve "kept" em 304, erro respondido ou falha de transferência (cópia anterior intacta)
 │   │   ├── escape.py       # escape_unsafe()/request_target() — percent-escape do HTTrack (htslib.c escape_check_url); fonte única para o alvo no fio (fetcher), o Referer (policy) e as regras do robots.txt
@@ -127,6 +130,7 @@ tests/
 ├── test_drift.py           # Drift: compare_readiness, renders markdown/text (literais), CLI (first run, fail-on-drift, --output)
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
+├── test_fire_engine.py     # Perfil `--downloader fire-engine` (ADR-0011): CurlCffiFetcher com curl_cffi mockado (body, proxy, challenge, content-encoding, lib ausente), guards de --proxy/--impersonate e despacho na CLI
 ├── test_eval_command.py    # Integração do `dograpper eval` sobre um pack JSONL (--json, erros de pré-requisito)
 ├── test_eval_harness.py    # evaluate(): hit-rate, MRR por rank, breakdown por grade, pares vazios
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
@@ -209,6 +213,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_download.py` | Antes de alterar qualquer coisa em `lib/wget_mirror.py`, `lib/spa_detector.py`, `lib/playwright_crawl.py` ou `commands/download.py` |
 | `tests/test_download_cascade.py` | Antes de alterar a orquestração de `commands/download.py` ou o threshold `MIN_URLS_TO_CONSIDER_DISCOVERED` |
 | `tests/test_download_httrack_profile.py` | Antes de alterar `commands/_httrack_profile.py` ou o despacho `--downloader` de `commands/download.py` (flags `[httrack]`, mensagens fail-loud, injeção do `Fetcher` na descoberta) |
+| `tests/test_fire_engine.py` | Antes de alterar `lib/fire_engine/fetcher.py`, `commands/_fire_engine_profile.py` ou o despacho `fire-engine`/guards de `--proxy`/`--impersonate` em `commands/download.py` |
 | `tests/test_llms_txt_parser.py` | Antes de alterar `lib/llms_txt_parser.py` ou o parser de `llms.txt` / `llms-full.txt` |
 | `tests/test_sitemap_parser.py` | Antes de alterar `lib/sitemap_parser.py`, recursão `sitemapindex` ou same-netloc guard |
 | `tests/test_url_filter.py` | Antes de alterar `lib/url_filter.py` (canonicalização de path-prefix, semântica de `depth` ou das regras `--filter`) |

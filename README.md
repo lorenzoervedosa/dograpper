@@ -215,7 +215,9 @@ dograpper download <url> -o <directory> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions (csv) |
 | `--manifest` | — | `.dograpper-manifest.json` | Manifest file for incremental downloads. A relative path resolves against `-o` (so the default lives in the output directory); an absolute path is used as is |
 | `--filter` | — | *(none)* | URL rule, repeatable: `+pattern` accepts, `-pattern` refuses, the last match wins (see [URL filters](#url-filters---filter)) |
-| `--downloader` | — | `wget` | Download backend: `wget` or `httrack` (see [Downloader profiles](#downloader-profiles)) |
+| `--downloader` | — | `wget` | Download backend: `wget`, `httrack` or `fire-engine` (see [Downloader profiles](#downloader-profiles)) |
+| `--proxy` | — | — | `[fire-engine]` proxy URL for every request (`http://user:pass@host:port`) |
+| `--impersonate` | — | `chrome` | `[fire-engine]` curl_cffi browser profile to impersonate (e.g. `chrome124`) |
 
 #### Discovery cascade (4 layers)
 
@@ -365,6 +367,13 @@ Precedence is unchanged: defaults < JSON < explicit CLI.
   URL's (the seed as `Referer` for a page target, `Sec-Fetch-Site: none`). When neither layer finds a list, the
   engine crawls the site from the start URL instead of `wget --mirror`
   (below).
+- **`fire-engine`** — the `httrack` crawl over a `curl_cffi` transport that
+  sends a browser TLS/HTTP-2 fingerprint, for documentation behind a WAF that
+  rejects the stdlib handshake even though the content is public. Same
+  discovery, scope, pacing, robots.txt and link rewriting as `httrack`; only
+  the wire client differs. Adds `--proxy` (one proxy for every request) and
+  `--impersonate` (the `curl_cffi` browser profile, default `chrome`). Needs
+  the `fire-engine` extra (below). See [ADR-0011](docs/adr/0011-fire-engine-downloader.md).
 
 **Recursive crawl (`httrack`).** Breadth-first from the start URL, as
 HTTrack's mirror loop:
@@ -520,6 +529,28 @@ With a manifest an update always revalidates (HTTrack `-C2`): the
 other cache modes (`-C0`, `-C1`/`--continue`), the `-%s`, `-%n` and
 `--changes` options and file times from `Last-Modified` are not ported yet.
 None of these is a deviation from HTTrack.
+
+##### fire-engine
+
+`--downloader fire-engine` runs the `httrack` crawl with its wire client
+replaced by `curl_cffi`, which sends a real browser's TLS/HTTP-2 fingerprint so
+a WAF that checks the handshake (common in front of public docs) accepts the
+request. All `[httrack]` flags above apply, plus:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--proxy` | — | One proxy URL for every request (`http://user:pass@host:port`) |
+| `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`) |
+
+Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
+'dograpper[fire-engine]'`), which installs `curl_cffi`. Without it, the
+profile fails loud with an install hint. `--headless` is rejected (the profile
+has its own transport). If the site still challenges the request after the
+browser fingerprint, the run exits 1 and suggests `--proxy` with a different
+IP or `--downloader wget`; a manual-login browser solver is planned
+([ADR-0011](docs/adr/0011-fire-engine-downloader.md)). Automatic challenge or
+CAPTCHA solving is a non-goal. robots.txt and the pacing flags apply exactly
+as under `httrack`.
 
 #### Incremental
 
@@ -1208,8 +1239,9 @@ dograpper sync <url> -o <dir> [options]
 | `--delay` | — | `0` | Rate limiting in ms (passed to `download`) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
-| `--downloader` | — | `wget` | `wget` \| `httrack` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
+| `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
 | `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing` (passed to `download`) |
+| `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
 | `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |

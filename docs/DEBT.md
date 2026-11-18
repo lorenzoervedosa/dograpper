@@ -29,3 +29,16 @@ Entry format, grouped under one heading per issue or PR:
   whose session sits on `main` is blocked by mistake. ⏸ **accepted: the
   message says to give the refspec, and agents here push with an explicit
   branch; fix if it blocks a real flow.**
+
+## fire-engine body-size cap (ADR-0011, 2026-11-18)
+
+- **The body cap is enforced in the consumer loop, not at curl's writer.**
+  `src/dograpper/lib/fire_engine/fetcher.py` streams with `iter_content` and
+  raises once `total > MAX_BODY_BYTES`, but curl_cffi can decode and buffer
+  bytes ahead of the bandwidth-throttled drain, so peak allocation from a
+  decompression bomb can pass the cap before the check fires. ⏸ **accepted: the
+  consumer cap bounds the non-adversarial case, and the correct producer-side
+  bound — disable curl's auto-decode and route the raw stream through
+  `httrack.fetcher._decode` (already bounded), or a WRITEFUNCTION that aborts
+  past the cap — must be verified against the real curl_cffi, which slice 1 does
+  not install; fix it in the curl_cffi smoke-test slice.**
