@@ -62,6 +62,8 @@ and fixes alone are a PATCH bump.
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
+- `download` llms.txt discovery no longer crashes on a truncated or corrupt
+  gzip body; the candidate is logged and skipped. ([#77])
 - `pack --cross-refs` no longer corrupts words where a link's text is a
   substring of an unrelated word in the chunk (e.g. link text "Install"
   inside the word "Installation"). `annotate_cross_refs` now matches on
@@ -151,3 +153,4 @@ and fixes alone are a PATCH bump.
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
 [#66]: https://github.com/lorenzoervedosa/dograpper/issues/66
+[#77]: https://github.com/lorenzoervedosa/dograpper/issues/77
