@@ -4,6 +4,7 @@ import os
 import tempfile
 
 from click.testing import CliRunner
+import pytest
 
 from dograpper.utils.dedup import (
     _split_blocks,
@@ -11,6 +12,7 @@ from dograpper.utils.dedup import (
     _simhash,
     _hamming_distance,
     deduplicate,
+    DEFAULT_HAMMING_THRESHOLD,
     MIN_BLOCK_WORDS,
 )
 from dograpper.commands.pack import pack
@@ -264,6 +266,94 @@ class TestDeduplicateBoth:
 
 
 # ---------------------------------------------------------------------------
+# deduplicate — keep rules (issue #89)
+# ---------------------------------------------------------------------------
+
+def _distance(a: str, b: str) -> int:
+    return _hamming_distance(_simhash(_normalize(a)), _simhash(_normalize(b)))
+
+
+BOOKS = "Book, " * 40
+# Item_tag shape: long, near-identical item lists keyed by different tags.
+TAG_HARDCOVER = "base:hardcover " + BOOKS + "Journal, Notebook"
+TAG_HOLLOWBOOK = "base:hollowbook " + BOOKS + "Hollow Book"
+
+# Map.info shape: sibling parameter descriptions; zoomX and zoomY share one.
+CAMERA_DESC = ("parameter used to set where the camera starts on the world map "
+               "when the player picks a spawn point on the map.")
+POSITION_DESC = "Position " + CAMERA_DESC
+ZOOM_DESC = "Zoom " + CAMERA_DESC
+MAP_INFO_PAGE = (f"zoomX\n\n{POSITION_DESC}\n\nzoomY\n\n{POSITION_DESC}"
+                 f"\n\nzoomS\n\n{ZOOM_DESC}")
+
+HORIZONTAL = ("Camera parameter that sets the horizontal position of the camera on the "
+              "world map when the player picks a spawn point to start a new game.")
+VERTICAL = HORIZONTAL.replace("horizontal", "vertical")
+
+NAVBOX = ("Site navigation: Getting started, Scripting, Items, Recipes, Vehicles, Maps, "
+          "Tiles, Sounds, Translations, Tools, Community, Mods, Servers, Modelling, "
+          "Animation, Debugging, Lua events, Java API, Script blocks, Sandbox options")
+
+
+class TestDeduplicateSamePage:
+
+    def test_fuzzy_keeps_same_page_near_duplicate(self):
+        assert _distance(HORIZONTAL, VERTICAL) <= 10
+        result = deduplicate({"page.txt": f"{HORIZONTAL}\n\n{VERTICAL}"},
+                             mode="fuzzy", hamming_threshold=10)
+        assert VERTICAL in result.texts["page.txt"]
+        assert result.stats.blocks_removed == 0
+        assert result.stats.blocks_kept_same_page == 1
+
+    def test_fuzzy_still_removes_the_same_pair_across_pages(self):
+        result = deduplicate({"a.txt": HORIZONTAL, "b.txt": VERTICAL},
+                             mode="fuzzy", hamming_threshold=10)
+        assert result.stats.blocks_removed_fuzzy == 1
+        assert result.stats.blocks_kept_same_page == 0
+
+    @pytest.mark.parametrize("mode", ["exact", "fuzzy", "both"])
+    def test_keeps_sibling_descriptions_on_one_page(self, mode):
+        # zoomY repeats zoomX's description; zoomS differs by its first word.
+        assert _distance(POSITION_DESC, ZOOM_DESC) <= 10
+        result = deduplicate({"Map.info.html": MAP_INFO_PAGE}, mode=mode, hamming_threshold=10)
+        assert result.texts["Map.info.html"] == MAP_INFO_PAGE
+        assert result.stats.blocks_removed == 0
+        assert result.stats.blocks_kept_same_page == (1 if mode == "exact" else 2)
+
+    def test_item_tag_page_keeps_every_tag_under_both(self):
+        page = f"{TAG_HARDCOVER}\n\n{TAG_HOLLOWBOOK}"
+        assert _distance(TAG_HARDCOVER, TAG_HOLLOWBOOK) <= DEFAULT_HAMMING_THRESHOLD
+        result = deduplicate({"Item_tag.html": page}, mode="both")
+        assert "base:hollowbook" in result.texts["Item_tag.html"]
+        assert "base:hardcover" in result.texts["Item_tag.html"]
+        assert result.stats.blocks_kept_same_page == 1
+
+
+class TestDeduplicateCrossPageBoilerplate:
+
+    @pytest.mark.parametrize("mode", ["exact", "fuzzy", "both"])
+    def test_identical_boilerplate_removed_after_first_page(self, mode):
+        texts = {
+            "a.txt": f"Intro to scripting with enough words to be a real block here.\n\n{NAVBOX}",
+            "b.txt": f"Items reference with enough words to be a real block here.\n\n{NAVBOX}",
+            "c.txt": f"Recipes reference with enough words to be a real block here.\n\n{NAVBOX}",
+        }
+        result = deduplicate(texts, mode=mode)
+        assert NAVBOX in result.texts["a.txt"]
+        assert NAVBOX not in result.texts["b.txt"]
+        assert NAVBOX not in result.texts["c.txt"]
+        assert result.stats.blocks_removed == 2
+
+    @pytest.mark.parametrize("mode", ["fuzzy", "both"])
+    def test_near_identical_boilerplate_removed(self, mode):
+        variant = NAVBOX + ", Credits"
+        assert _distance(NAVBOX, variant) <= DEFAULT_HAMMING_THRESHOLD
+        result = deduplicate({"a.txt": NAVBOX, "b.txt": variant}, mode=mode)
+        assert result.texts["b.txt"] == ""
+        assert result.stats.blocks_removed_fuzzy == 1
+
+
+# ---------------------------------------------------------------------------
 # deduplicate — edge cases
 # ---------------------------------------------------------------------------
 
@@ -274,12 +364,16 @@ class TestDeduplicateEdgeCases:
         assert result.texts == {}
         assert result.stats.blocks_removed == 0
 
-    def test_single_file_internal_dedup(self):
+    def test_single_file_repeat_is_kept(self):
+        # Dedup is cross-file: a block repeated inside one page is page content
+        # (e.g. two parameters sharing a description), not boilerplate (#89).
         texts = {
             "only.txt": "Block one with enough words to pass the minimum threshold for dedup.\n\nBlock one with enough words to pass the minimum threshold for dedup.",
         }
         result = deduplicate(texts, mode="exact")
-        assert result.stats.blocks_removed_exact == 1
+        assert result.stats.blocks_removed_exact == 0
+        assert result.stats.blocks_kept_same_page == 1
+        assert result.texts["only.txt"] == texts["only.txt"]
 
     def test_all_blocks_identical(self):
         block = "Repeated content across all files with enough words for dedup."
