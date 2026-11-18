@@ -337,10 +337,14 @@ this repository.
 
 ### Non-goals
 
+These next three are non-goals **of the `httrack` profile only**, which stays
+behaviourally identical to HTTrack. They are no longer dograpper-wide non-goals
+since 2026-11-18 (`docs/DECISIONS.md`); a separate downloader may adopt them.
+
 - **Header-level browser impersonation** (§2.10 F1): client hints, `Sec-Fetch-*` synthesized to look like a browser, browser `Accept` tables, browser header order. DL-01 deliberately goes the other way.
 - **UA spoofing as a WAF workaround** (§2.10 F2). This includes the current README claim (`README.md:264-265`), which DL-01 replaces.
 - **Clearance transplant:** embedded-browser cookie/UA harvesting, and documenting cookies.txt as a way past challenges (§2.10 F3). DL-19 is limited to sessions the user is entitled to.
-- **Evasion HTTrack does not have either:** TLS or HTTP/2 fingerprint impersonation, challenge or CAPTCHA solving, proxy rotation.
+- **Evasion HTTrack does not have either:** TLS or HTTP/2 fingerprint impersonation, challenge or CAPTCHA solving, proxy rotation. Out of scope for the `httrack` profile only, which stays identical to HTTrack; no longer a dograpper non-goal since 2026-11-18 (`docs/DECISIONS.md`).
 - **Offline-browsing fidelity:** link-rewriting modes (`-K`), footers, index pages, MHT/WARC/single-file output, and asset mirroring. dograpper skips assets by design (`wget_mirror.py:28-37`) and its consumer is `pack`, not a browser.
 - **FTP, proxy chains, MPTCP, bandwidth caps in bytes per second.** Politeness is expressed as request rate (DL-05).
 

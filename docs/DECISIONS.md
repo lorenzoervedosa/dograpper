@@ -22,6 +22,23 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — Anti-bot evasion is no longer an anti-goal
+
+- **Decision:** challenge or CAPTCHA solving, JavaScript challenge execution,
+  browser TLS (JA3/JA4) or HTTP/2 fingerprint impersonation and proxy rotation
+  are no longer anti-goals of dograpper. The `httrack` profile design listed
+  them as "a failure even if it works". They are now a non-goal of that
+  profile only, and another downloader may implement them.
+- **Why:** maintainer decision. dograpper collects publicly available
+  documentation, and its fetch paths already pace requests (connection rate,
+  bandwidth, per-host gap, Retry-After, robots.txt). The target is scraping
+  parity with Firecrawl-style engines.
+- **Rejected:** dropping the exclusion from the `httrack` profile too. That
+  profile's goal is behavior identical to HTTrack, which has none of these.
+- **Pending:** confirm the `httrack` profile keeps them out, and design the
+  downloader that adds them (an ADR first: a native dependency such as
+  `curl_cffi` falls under contract 1).
+
 ## 2026-11-18 — Table cells in plain text, Javadoc grids in md only (#125, #120)
 
 - **Decision:** (#125) the plain-text renderer starts each `td`/`th` with a
