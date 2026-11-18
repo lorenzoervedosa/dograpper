@@ -22,6 +22,169 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — HTTrack's change report ported with the payload MD5 (#132)
+
+Supersedes the "-%d is not ported" decision of the entry below: the maintainer
+picked option (a).
+
+- **Decision:** `--changes` writes `hts-changes.json` in `-o`, in
+  `htschanges.c`'s format. Each manifest record gains `payload_md5`, the MD5 of
+  the body as received before `-K0`, which stands for the body HTTrack's cache
+  keeps; a parsed file is compared by it.
+- **Why:** HTTrack compares a parsed page by its payload because the saved copy
+  carries rewritten links (`src/htschanges.c:299-345`). Comparing the saved
+  bytes would report a page as changed when only its links moved.
+- **Rejected:** comparing the saved bytes (option b); not porting it (option c).
+- **Pending:** none. The deviations the port needs are recorded in spec §5.6
+  ("Change report"):
+  - `generator` names dograpper;
+  - `purged` is false;
+  - `url` follows the manifest's rule for the URL requested;
+  - the previous payload is read from the record of the same file;
+  - every page counts as parsed;
+  - files not reached are listed by path, seeded files in seed order;
+  - a failed run writes no report.
+
+## 2026-11-18 — HTTrack cache and update options in the httrack profile (#132)
+
+- **Decision:** HTTrack's cache mode is one flag, `--cache 0|1|2` (HTTrack's
+  `--cache=N`), default `None` meaning HTTrack's own (`2` over a manifest,
+  else `1`); no `--update` / `--continue` aliases.
+- **Why:** HTTrack's two aliases are `-iC2` and `-iC1`, and `-i` resumes the
+  command line saved in the cache, which dograpper has no use for (the URL is
+  required); one flag gives one config key and one precedence path.
+- **Rejected:** `--update` and `--continue` as extra flags; a `--cache` default
+  of `1` (an explicit `1` would then be indistinguishable from the default
+  that switches to `2` over a manifest).
+- **Pending:** none.
+
+- **Decision:** HTTrack's change report (`-%d` / `--changes`,
+  `hts-changes.json`) is not ported in #132; it stays under the spec's "Known
+  gaps".
+- **Why:** HTTrack sorts a parsed page into `changed` or `unchanged` by the MD5
+  of its payload, the previous one read from the body its cache holds
+  (`src/htschanges.c:299-345`), because the saved copy carries rewritten
+  links. dograpper keeps no cache body, and its saved pages carry `-K0` links,
+  so a page whose links were rewritten differently would read as `changed`.
+  Porting it faithfully needs a new manifest field, a choice for the
+  maintainer rather than a deviation invented here.
+- **Rejected:** comparing the saved bytes (an unapproved deviation that
+  over-reports `changed`); porting it with no page comparison at all.
+- **Pending:** pick one: (a, recommended) record the MD5 of each parsed page's
+  payload in its manifest record (one new `RECORD_FIELDS` entry) and compare
+  that, which reproduces HTTrack; (b) compare the saved bytes and record the
+  deviation in spec §5.6; (c) leave `-%d` out of the profile. Either port also
+  adds `hts-changes.json` to the state files `pack` and `build_manifest` skip,
+  writes it only for a run that ends without a front failure (HTTrack: only a
+  completed run, `src/htscore.c:2360-2367`), and reports `first_crawl: null`
+  under `--cache 0`.
+
+- **Decision:** `--cache`, `--updatehack` and `--do-not-recatch` act under
+  `--downloader fire-engine` exactly as under `httrack`, through the shared
+  `run_profile()` cascade (#130); no flag is refused there. Recorded in
+  ADR-0011, "Fatia 2".
+- **Why:** #130 gave fire-engine the update mode (the previous manifest, its
+  records), and the three options are policy and engine state, not transport
+  state. The one transport-specific piece, `-%s`'s `stop`, is honored in
+  curl's writer.
+- **Rejected:** refusing the three under fire-engine (written before #130, when
+  fire-engine ran no update, and dropped in the replay onto the batch).
+- **Pending:** none.
+
+- **Decision:** `--updatehack` decides at the headers through a `stop`
+  predicate of `Fetcher.get`, passed to `_request` only when set;
+  `CurlCffiFetcher._request` honors it too, in curl's writer (#130): at the
+  first chunk it asks `stop` with the status, `Content-Type` and
+  `Content-Length` curl reports (`CURLINFO`, the headers a writer can read
+  mid-transfer) and aborts the transfer, so no byte of the body is kept or
+  charged; a transfer that brings no chunk is asked once it ends, with the
+  response's headers. Its keeps are listed apart in the report (`Kept on a
+  matching size (--updatehack)`), not in `Not modified (304)`.
+- **Why:** HTTrack drops the connection before the body (`deletehttp`), so
+  reading the body and discarding it differs on the wire; passing `stop` only
+  when set keeps every `_request` override working. A separate line says why
+  a file was kept, as HTTrack's NOTICE does.
+- **Rejected:** comparing sizes after the full body is read; a thread-local
+  channel to `_request`.
+- **Pending:** none.
+
+- **Decision:** `--do-not-recatch` under `--cache 1` does not empty a file
+  whose size changed before requesting it, where HTTrack `-%n` does
+  (`src/htscache.c:796-814`). Recorded in spec §5.6 as a deviation.
+- **Why:** the spec's deviations are where HTTrack spoils the corpus (user
+  option "1"): emptying first loses the copy when the request then fails.
+- **Rejected:** emptying it as HTTrack does.
+- **Pending:** none.
+
+- **Decision:** `--cache 0` neither reads nor writes the records: each file
+  keeps the record the previous run made for its URL.
+- **Why:** HTTrack `-C0` leaves `hts-cache/` untouched (`src/htscache.c:59`,
+  `1174`), so its next update revalidates against the previous cache.
+- **Rejected:** recording this run's validators (a deviation with no corpus
+  reason); dropping all records.
+- **Pending:** none.
+
+- **Decision:** under `--cache 1` every recorded file, a page included, is
+  loaded only when its size is the recorded one; otherwise it is fetched in
+  full. HTTrack writes a page again from its cache body instead.
+- **Why:** dograpper keeps no cache body; one rule for every type, and the
+  closest outcome to HTTrack's (the site's bytes on disk), at the cost of one
+  request. Recorded in spec §5.6 as a deviation.
+- **Rejected:** keeping an edited page as it is without a request.
+- **Pending:** none.
+
+- **Decision:** a file time that cannot be set (`os.utime` fails) is an error
+  of the run report, and the file is kept; HTTrack ignores the return value of
+  `set_filetime_rfc822`.
+- **Why:** the global rule is no silent fallback; the failure cannot spoil the
+  corpus, so it does not stop the run either.
+- **Rejected:** ignoring it as HTTrack does; failing the run.
+- **Pending:** none.
+
+- **Decision:** `pack --delta` lets the content hashes decide whenever both
+  pack states carry them, and keeps the mtime fast path only for an entry
+  written before hashes existed.
+- **Why:** file times from `Last-Modified` let a rewrite keep size and mtime;
+  `build_manifest` hashes every file anyway, so the fast path saved nothing.
+- **Rejected:** not porting HTTrack's file times; a separate mtime source for
+  the pack state.
+- **Pending:** none.
+
+## 2026-11-18 — fire-engine decodes in Python; its extra gains brotli and zstandard (#130)
+
+- **Decision:** curl's decoding is off and its writer bounds the raw body;
+  `Fetcher.get` decodes it with the httrack `_decode`. The `fire-engine` extra
+  now also lists `brotli>=1.2` and `zstandard>=0.22` (the `httrack` extra's
+  decoders, already in the lock: no new package). `--timeout` maps to curl's
+  connect timeout plus a low-speed abort (no byte for `--timeout` s), not to a
+  total transfer time.
+- **Why:** a write callback alone still lets curl's own decoder expand a zstd
+  frame with a window up to 128 MiB; the shared decoder keeps the 8 MiB cap.
+  The Chrome profile advertises `br, zstd`, so without the decoders those
+  pages would fail to decode. A total timeout would abort large pages that are
+  paced by `--max-bandwidth` inside the writer.
+- **Rejected:** keeping curl's decoding with a capped writer (zstd window
+  unbounded); overriding `Accept-Encoding` to what Python can decode (breaks
+  the browser fingerprint); a total-time timeout (curl_cffi's non-streaming
+  default).
+- **Pending:** none.
+
+## 2026-11-18 — fire-engine sends only the request-specific httrack headers (#130)
+
+- **Decision:** `CurlCffiFetcher` forwards to curl only `Referer`,
+  `If-None-Match` and `If-Modified-Since` from the httrack header set; the
+  browser identity comes from the `--impersonate` profile (ADR-0011,
+  "Fatia 2").
+- **Why:** the validators must reach the server for the update mode, and
+  mixing HTTrack's identity headers with a Chrome TLS handshake is the
+  mismatch a WAF flags.
+- **Rejected:** forwarding the whole httrack set (breaks the fingerprint);
+  forwarding the per-link `Sec-Fetch-*` (no site in the project needs it yet).
+- **Pending:** none. `--user-agent` under `fire-engine` was resolved by the
+  maintainer (2026-11-18): an explicit value replaces the profile's
+  User-Agent, the rest of the identity unchanged. The exact Firecrawl
+  behavior to copy is researched in #136.
+
 ## 2026-11-18 — Anti-bot evasion is no longer an anti-goal
 
 - **Decision:** challenge or CAPTCHA solving, JavaScript challenge execution,
@@ -201,3 +364,43 @@ Entry format:
 - **Why:** `challenge.py` is Cloudflare-specific and shared with the httrack fetcher; the error-page rule has no fetcher use. Both layouts and `--dry-run` run after 6a, so they inherit the skip. Second copy tolerated per the project rule; a third skip class should extract the shared block.
 - **Rejected:** matching "404" anywhere in the text; requiring an `<h1>` (not all servers emit one).
 - **Pending:** none.
+
+## 2026-11-18 — -K0 of the links the script scans take (#133)
+
+- **Decision:** a link the scans take (script, stylesheet, `style=`, handler,
+  `javascript:`, `-%P`) is written exactly as HTTrack writes it
+  (`escape_uri_utf` path, `%28`/`%29` in a CSS `url()`, query appended, `&` raw
+  in script text), while a link attribute keeps PR 2's form (`%`/`#` only, no
+  query).
+- **Why:** the brief asks for HTTrack's form; `pack --cross-refs` reads only
+  `<a href>` and resolves it as a path with no percent-decoding or query cut,
+  so changing the attribute form would break it. Recorded as a deviation in
+  spec §5.6.
+- **Rejected:** one form for both (either breaks `--cross-refs` or deviates on
+  scanned links with no reason).
+- **Pending:** none.
+
+- **Decision:** a script whose loading page has no saved file gets absolute
+  links (its module specifiers stay relative to the script).
+- **Why:** HTTrack writes them relative to the page's planned name; dograpper
+  makes any link to an unsaved file absolute (PR 2), and with no saved page
+  there is nothing to be relative to. Recorded in spec §5.6.
+- **Rejected:** writing them relative to the script itself (wrong base).
+- **Pending:** none.
+
+- **Decision:** `_kept_links` reads kept stylesheets and scripts too, and
+  decodes a kept link with `unquote` instead of `%25`/`%23` only.
+- **Why:** once relink rewrites them, a kept copy holds saved names; reading
+  them against the URL would request names that are not URLs (a regression
+  the update test shows). `unquote` inverts both escapes in use.
+- **Rejected:** leaving kept stylesheets and scripts unrewritten (they are
+  rewritten when first saved, so the copy already holds names).
+- **Pending:** none.
+
+- **Decision:** `import "./m.js"` is written `import "m.js"`, as HTTrack does
+  (`./` dropped, `src/htsparse.c:2717-2726`; `lienrelatif` adds none).
+- **Why:** faithful port; a browser refuses a bare module specifier, so an
+  offline mirror of module code breaks there as HTTrack's does.
+- **Rejected:** prefixing `./` (an unrecorded deviation).
+- **Pending:** maintainer: keep HTTrack's form, or deviate (spec §5) to keep
+  module imports working offline.

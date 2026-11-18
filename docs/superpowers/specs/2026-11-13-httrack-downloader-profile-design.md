@@ -254,6 +254,7 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - It is a static scan; nothing is executed.
   - The URLs it finds go through scope, filters and `--include-extensions`
     like any other link, so assets are still dropped.
+  - They are rewritten like any other link (§5.6, "Link rewriting").
   - Turned off as in HTTrack, with `[httrack]` flags (usage errors under
     `wget`, like §5.7's): `--no-parse-scripts` is `-j4`, which also stops CSS
     `url()` / `@import` (one scanner in HTTrack); `--no-extended-parsing` is
@@ -327,9 +328,42 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   `Last-Modified` of the response the file was saved from, and whether that URL
   reached the file through a redirect. ETag and Last-Modified are kept as HTTrack
   keeps them: under 64 characters, with the response's `Date` standing for a
-  missing `Last-Modified` (`src/htslib.c:1632-1653`). `ManifestEntry` gains
-  `status`, `content_type` and `redirected` in a backward-compatible way: old
-  manifests still load.
+  missing `Last-Modified` (`src/htslib.c:1632-1653`). The record also keeps the
+  MD5 of the payload as received, before `-K0` rewrote its links: it stands for
+  the body HTTrack's cache keeps, which `--changes` compares
+  (`src/htschanges.c:299-345`; #132). `ManifestEntry` gains `status`,
+  `content_type`, `redirected` and `payload_md5` in a backward-compatible way:
+  old manifests still load.
+- **Link rewriting (`-K0`, #133):** once every name is known, every saved page,
+  stylesheet and script is written again with each link HTTrack records
+  rewritten: the link attributes, and the links the script scans and `-%P`
+  take (§5.5), under the same switches. HTTrack writes the buffer it parsed
+  for every hypertext file (`src/htsparse.c:1223`, `3807-3852`), with each
+  link in its place (`2400-2406`, `3379-3502`).
+  - A link to a saved file becomes its relative path; any other relative link
+    becomes its absolute URL; `<base href>` is emptied; no other byte changes.
+  - A link the scans took is written exactly as HTTrack writes it: the path
+    through `escape_uri_utf` (lower-case `%xx`, `src/htslib.c:4613-4618`),
+    `(` and `)` as `%28`/`%29` in a CSS `url()` (`src/htsparse.c:851-870`),
+    then the link's query (`includequery`, `3475-3480`); an absolute URL with
+    `" ' < >` percent-encoded (`1000-1033`); `&` as `&amp;` in a tag, never in
+    `<script>`/`<style>` text or a saved file (`977-988`, `history.txt:151`).
+    A script's links are written from the page that loaded it, a module
+    specifier's from the script (`src/htscore.h:276-283`).
+  - **Deviation:** a link attribute keeps PR 2's form: only `%` and `#` of a
+    saved name are escaped and the query is dropped, where HTTrack escapes the
+    path with `escape_uri_utf` and appends the query (`src/htsparse.c:3389`,
+    `3475-3480`). `pack --cross-refs` (`utils/link_extractor.py`) resolves an
+    `<a href>` as a path, neither percent-decoding it nor cutting a query, so
+    HTTrack's form would leave those links unresolved. `pack` never reads a
+    scanned link, which keeps HTTrack's form.
+  - **Deviation:** a link to a file the run did not save (an error, a type
+    `--include-extensions` leaves out) is made absolute, where HTTrack writes
+    the name it planned for it before the fetch; a local link to a missing
+    file browses nowhere. For the same reason, a script loaded by a page that
+    has no saved file gets absolute links (a module specifier still relative).
+  - **Deviation:** an absolute link is left as written, where HTTrack writes
+    back its own normalized form (`sink_add_absolute_url`).
   - **Deviation:** the final URL of a redirect is not recorded, where HTTrack's
     cache keeps every hop. It can carry a secret, and the manifest is meant to
     be shared (README "Incremental"); `redirected` says a chain was taken.
@@ -373,14 +407,106 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
       previous manifest recorded for that file, any other link read as
       written. HTTrack parses the original page from its cache. A file whose URL the manifest withholds (a query
       off the allowlist) is therefore not reached from a kept page, and is
-      never revalidated. The kept page is not relinked either, where HTTrack
-      writes it again from its cache.
+      never revalidated. A kept stylesheet or script is read back the same
+      way, a script against the page that loads it in this run: when that is
+      not the page that loaded it last time, its rewritten links do not map
+      back and are read as written. A kept file is not relinked either, where
+      HTTrack writes it again from its cache.
     - A file an update may keep keeps its name: no other URL takes it, and
       it is never moved. HTTrack computes names again and renames a file
       whose name changed (`src/htsback.c:2425-2456`); moving one would break
       the links of the kept pages.
     - robots.txt is fetched in full on every run. HTTrack caches and
       revalidates it too (`src/htsback.c:2396-2400`).
+- **Cache modes** (`--cache N`, HTTrack `-C`, `src/htsalias.c:194-195`; #132).
+  The default is HTTrack's: `2` when `-o` holds a manifest, else `1`
+  (`src/htscoremain.c:1263-1285`).
+  - `--cache 2` (HTTrack `--update`, `src/htsalias.c:271`) is the update above.
+  - `--cache 1` (HTTrack `--continue`, `src/htsalias.c:272`): a file recorded
+    from a 2xx, still on disk at its recorded size, is loaded without a
+    request, and a kept page's links are followed from it ("File immediately
+    loaded from cache", `src/htsback.c:2497-2556`). A file whose size changed
+    is requested in full, with no validator (`src/htscache.c:729-806`,
+    `src/htsback.c:2549-2554`).
+  - `--cache 0`: the manifest's records are neither read nor written, as
+    HTTrack touches no cache then (`src/htscache.c:59`, `1174`). Each file is
+    fetched in full and keeps the record the previous run made for its URL; no
+    file is listed as not reached (no `new.lst`, `src/htscore.c:2147`).
+  - **Deviations**, because dograpper keeps no cache beside the mirror: under
+    `--cache 1` the redirecting URL of a file reached through a redirect is
+    still requested (HTTrack loads the cached 3xx too), and a hypertext file
+    whose size changed is fetched in full, where HTTrack writes it again from
+    the body its cache holds (`src/htscache.c:264-272`).
+- **Update hacks** (`--updatehack`, HTTrack `-%s`, off as in HTTrack,
+  `src/htslib.c:5429`; #132). At the headers of a 200 for a recorded file whose
+  type is no hypertext (`src/htslib.h:884-905`), the copy on disk and its
+  record are kept, as a forced 304, the body unread and the connection dropped
+  (`src/htsback.c:4281-4357`, `back_keep_existing`): on a revalidation when
+  `Content-Length` is both the recorded size and the size on disk; without
+  validators when it is the size on disk. A recorded 200 with no validator is
+  therefore part of the update (sent plain, its name kept). HTTrack's third
+  hack, for `Range` resumes, has nothing to apply to: the profile sends no
+  `Range`.
+- **Do not recatch** (`--do-not-recatch`, HTTrack `-%n`, off as in HTTrack,
+  `src/htslib.c:5427`; #132). A recorded 2xx file whose type is no hypertext,
+  missing or empty since, is not requested: a missing one is created empty,
+  and the URL is an error at its link, "null-size file not recaught"
+  (`src/htsback.c:2466-2480`, `2653-2694`; `src/htsmirror.c:476-482`). It is
+  kept with its record, so the next run without the option fetches it again.
+  A hypertext file never reaches this branch in HTTrack (its body is in the
+  cache) and is fetched in full.
+  - **Deviation (protects the corpus):** under `--cache 1`, HTTrack `-%n`
+    empties a file whose size changed before requesting it in full
+    (`src/htscache.c:796-814`); the profile requests it without emptying it,
+    so a failed request leaves the copy as it was.
+- **Change report** (`--changes`, HTTrack `-%d`, off as in HTTrack,
+  `src/htslib.c:5441`; #132). `hts-changes.json` is written in `-o`, HTTrack's
+  log folder (`src/htschanges.c:573-574`), in HTTrack's format, field for
+  field and line for line (`src/htschanges.c:457-532`, strings escaped as
+  `src/htscharset.c:1268-1303`), and the summary line is HTTrack's
+  (`588-606`). One entry per file, in the order the run reached them. Each is
+  sorted as `changes_resolve` and `hts_changes_classify` sort it
+  (`src/htschanges.c:189-206`, `407-455`):
+  - a file left alone (304, kept after an error, `--cache 1`, `--updatehack`,
+    not recaught) is `unchanged`;
+  - a file written that did not exist is `new` (listed by the previous
+    manifest when there is one, else on disk before its write);
+  - a parsed file (a hypertext type with a body) compares the MD5 of its
+    payload with the `payload_md5` its previous record holds;
+  - any other file compares sizes, then the MD5 of its bytes before and after
+    the write;
+  - with no digest, a 200 means `changed`;
+  - under a cache mode, a file of the previous manifest that is still on disk
+    but was not reached is `gone`, or `unchanged` when this run requested its
+    URL past robots.txt (`src/htscore.c:2186-2210`);
+  - `--cache 0` reads no index: `first_crawl` is null and nothing is gone.
+  The report is written only for a run that succeeds, as HTTrack writes it
+  only for a completed one (`src/htscore.c:2360-2367`), and it is a state file
+  that `pack` and the manifest skip.
+  - **Deviations:**
+    - `generator` names dograpper (§5.1);
+    - `purged` is always false (no purge, below);
+    - `url` follows the manifest's rule for the URL requested: no
+      userinfo, and `""` (HTTrack's "no URL") for a query off the
+      allowlist. It is never a redirect target, which is never recorded.
+      HTTrack writes the URL the file was saved for;
+    - the previous payload is read from the record of the same file, which
+      stands for the cache entry of its URL;
+    - every page counts as parsed, as the profile rewrites every page's
+      links (HTTrack skips the pages past the depth limit);
+    - the files not reached are listed by path, because the manifest keeps
+      no crawl order, and seeded files are listed in seed order, whatever
+      the order their threads finished in (HTTrack lists them by
+      completion);
+    - a run that dograpper fails writes no report (a front failure, no file
+      saved or kept, the Playwright fallback), where HTTrack skips it only for
+      a stopped run or a rolled-back session (`src/htscore.c:2123-2138`).
+- **File times:** each saved file gets its recorded `Last-Modified` (else the
+  `Date`) as access and modification time, once its links are rewritten, read
+  as HTTrack reads the date (`src/htscore.c:451-452`, `src/htsback.c:2119-2128`,
+  `src/htsdate.c:53-157`). `pack --delta` lets content hashes decide when both
+  pack states carry them, so a file rewritten with the same size and time is
+  still a change (#132).
 - **No purge (deviation from HTTrack `-X`, user decision):** local files no
   longer reachable are listed in the report ("Not reached this run, kept on
   disk"), not deleted.
@@ -434,25 +560,7 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- **Links found in scripts, stylesheets and by `-%P` are not rewritten
-  (`-K0`).** HTTrack rewrites every link it records, those in a script or a
-  stylesheet too (`src/htsparse.c:3385-3393`; `history.txt:151`, #1616); the profile rewrites the link
-  attributes of HTML pages only, so such a link still points at the site.
-  - The crawl follows them (#122); only offline browsing of those links is
-    affected, not what `pack` reads.
-  - Pending a follow-up under #78.
-
-- **HTTrack's other cache modes and update options** are not in PR 3:
-  - `-C0` (no cache) and `-C1`/`--continue` (trust the cache: no request for a
-    cached file, `src/htsback.c:2497-2556`); with a manifest the profile always
-    acts as `-C2`/`--update`;
-  - `-%s` update hacks (off by default, `src/htsback.c:4281-4395`), `-%n`
-    do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and `-%d`
-    `--changes` (off, writes `hts-changes.json`);
-  - a saved file's modification time set to its `Last-Modified`
-    (`src/htscore.c:451-452`, `src/htsback.c:2121-2127`); porting it needs a
-    look at the mtime fast path of `pack --delta` (ADR-0008) first.
-  - Pending a follow-up PR under #78. Evidence: discovery note §2.9.
+- None at the moment: the cache and update options of #132 are in §5.6.
 
 ## 6. Code layout (proposal; the plan may refine)
 
@@ -487,8 +595,12 @@ README and CHANGELOG.
    `wget --mirror` under the profile.
 3. **Incremental.** Manifest records and conditional revalidation, with the
    previous copy kept on failure.
-   - **Status: implemented (wave 5).** Behavior and deviations in §5.6; the
-     opt-in cache options left are under "Known gaps".
+   - **Status: implemented (wave 5).** Behavior and deviations in §5.6.
+   - **Wave 6 (#132):** the cache modes (`--cache`, HTTrack `-C`), the update
+     hacks (`--updatehack`, `-%s`), do-not-recatch (`--do-not-recatch`,
+     `-%n`), the change report (`--changes`, `-%d`, `hts-changes.json`, with
+     the payload MD5 in each manifest record) and file times from
+     `Last-Modified`.
 4. **Playwright under the profile.**
    - Navigations go through `page.route` + `route.fetch()`.
    - A response carrying `cf-mitigated` or challenge markup is aborted

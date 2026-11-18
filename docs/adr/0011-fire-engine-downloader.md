@@ -71,6 +71,52 @@ e cada fatia é um PR próprio, começando pelo caso observado:
    de proxy, persistência de sessão entre execuções, cache compartilhado,
    detecção de outros WAFs.
 
+## Fatia 2 (#130)
+
+- **Uma cascata só.** `run_fire_engine` deixou de ser cópia de
+  `run_httrack`: os dois chamam `run_profile()` em
+  `commands/_httrack_profile.py`, e só o transporte, as mensagens e a regra de
+  `--headless` diferem. Com isso o `fire-engine` herda o modo de atualização
+  (HTTrack `-C2`, `previous=`): revalida os arquivos da execução anterior e
+  grava os validadores no manifest.
+- **Headers no fio.** Do conjunto de headers do perfil `httrack`
+  (`policy.request_headers`), o `CurlCffiFetcher` repassa ao curl só os que
+  são do pedido: `Referer`, `If-None-Match` e `If-Modified-Since`. A
+  identidade (User-Agent, Accept, Accept-Language, Accept-Encoding,
+  Sec-Fetch-\*, client hints, ordem dos headers) vem do perfil
+  `--impersonate`, porque misturar a identidade do HTTrack com um handshake de
+  Chrome é exatamente a incoerência que um WAF detecta. Consequência
+  aceita: os `Sec-Fetch-*` são os fixos do perfil (navegação), não os do link
+  (`FetchMeta`). Um `--user-agent` dado pelo usuário substitui o
+  `User-Agent` do perfil (decisão do mantenedor, 2026-11-18, provisória: o
+  comportamento exato do Firecrawl está em pesquisa no #136); sem ele, vale o
+  do perfil.
+- **Corpo limitado no lado do curl.** A decodificação do curl fica desligada
+  (`HTTP_CONTENT_DECODING` 0): o writer do curl (`content_callback`) recebe o
+  corpo como veio do fio, aborta a transferência além de `MAX_BODY_BYTES` e
+  cobra a banda por pedaço, como o caminho da stdlib; o `Fetcher.get` decodifica
+  com o mesmo decoder limitado do `httrack` (teto de tamanho, de membros e de
+  janela zstd de 8 MiB, que o decoder do próprio curl não aplica). Por isso o
+  extra `fire-engine` instala também `brotli` e `zstandard`: o perfil de Chrome
+  anuncia `br` e `zstd`, e quem os decodifica agora é o Python. Sem streaming
+  do curl_cffi, o `--timeout` vira opções do curl com a semântica do timeout de
+  socket da stdlib: para conectar, depois sem receber nada por `--timeout`
+  segundos (nunca a duração total da transferência).
+- **Credenciais do proxy fora da URL.** O curl cita na mensagem de erro a URL
+  de proxy que não consegue usar ("Unsupported proxy scheme for '...'"), e a
+  mensagem vai para o relatório. Por isso `user:senha` sai da URL do `--proxy`
+  (autoridade lida como o curl lê: esquema opcional, até o primeiro `/`, `?`
+  ou `#`; percent-decode) e vai ao curl como opções próprias (`proxy_auth` do
+  curl_cffi): nenhuma mensagem do curl pode conter a credencial, e a URL do
+  proxy que aparece no erro ainda passa por `redact_url`.
+- **Opções de cache e atualização do HTTrack (#132).** `--cache`,
+  `--updatehack` e `--do-not-recatch`, e as datas de arquivo tiradas do
+  `Last-Modified`, valem no `fire-engine` pela mesma cascata: são estado da
+  política e do motor, não do transporte. O `stop=` do `--updatehack`
+  (HTTrack `-%s`) é perguntado no writer do curl, no primeiro pedaço, com o
+  status, o `Content-Type` e o `Content-Length` que o curl leu (`CURLINFO`), e
+  o writer aborta a transferência sem guardar nem cobrar o corpo.
+
 ## Consequências
 
 - `download`/`sync` ganham `--downloader fire-engine` e as flags do perfil; o

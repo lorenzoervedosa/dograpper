@@ -1,15 +1,14 @@
 """lib/httrack/links.py: HTTrack's link extraction, dedup key and link rewriting."""
 
-import gc
 import logging
-import time
 
 import pytest
 
 from dograpper.lib.httrack import jsscan as J
 from dograpper.lib.httrack.links import (
-    css_links, page_links, rewrite_links, script_links, url_key)
+    css_links, page_links, rewrite_file_links, rewrite_links, script_links, url_key)
 from dograpper.lib.httrack.policy import FetchMeta
+from tests.linearity import assert_linear
 
 PAGE = "https://h.test/docs/guide/intro.html"
 
@@ -204,18 +203,18 @@ def test_rewritten_names_escape_percent_and_hash():
     assert _rewrite(html, local) == '<a href="100%25.html">a</a><a href="C%23.html">b</a>'
 
 
-@pytest.mark.parametrize("body", [
-    b"<a href=" * 40000,
-    b"<meta name=robots content=" + b"x" * 400000,
-    b"<style>" + b"url(" * 100000,
-    b"<style>" + b"@import '" * 100000,
-    b"<img srcset='" + b"a " * 200000 + b"'>",
+@pytest.mark.parametrize("build, n", [
+    (lambda k: b"<a href=" * k, 10000),
+    (lambda k: b"<meta name=robots content=" + b"x" * k, 1000000),
+    (lambda k: b"<style>" + b"url(" * k, 12000),
+    (lambda k: b"<style>" + b"@import '" * k, 12000),
+    (lambda k: b"<img srcset='" + b"a " * k + b"'>", 50000),
 ], ids=["unclosed-tags", "meta-robots", "css-url", "css-import", "srcset"])
-def test_parsing_is_linear_on_hostile_pages(body):
-    t0 = time.perf_counter()
-    page_links(body, PAGE)
-    rewrite_links(body, PAGE, "/o/p.html", {})
-    assert time.perf_counter() - t0 < 2.0
+def test_parsing_is_linear_on_hostile_pages(build, n):
+    def parse(body):
+        page_links(body, PAGE)
+        rewrite_links(body, PAGE, "/o/p.html", {})
+    assert_linear(build, parse, n)
 
 
 def test_rewrite_relative_path_uses_forward_slashes(tmp_path):
@@ -495,25 +494,111 @@ def test_script_link_needs_an_end_after_its_quote():
                 extended_parsing=False) == ["https://h.test/docs/guide/b.gif"]
 
 
-def test_script_and_dirty_links_are_not_rewritten():
-    html = '<script>x.src="a.html"</script><div data-p="a.html"></div>'
-    local = {"https://h.test/docs/guide/a.html": "/out/h.test/docs/guide/a.html"}
-    assert _rewrite(html, local) == html
+G = "https://h.test/docs/guide/"
+SAVED = {G + "a": "/out/h.test/docs/guide/a.html",
+         "https://h.test/docs/": "/out/h.test/docs/index.html",
+         G + "img/b.png?w=2&v=1": "/out/h.test/docs/guide/img/b1f2e.png"}
 
 
-def _cpu(fn, body: bytes) -> float:
-    # second copy of tests/test_api_reference.py _assert_linear's measure (#126); factor out on the third
-    best = float("inf")
-    for _ in range(3):
-        gc.collect()
-        gc.disable()
-        try:
-            t0 = time.process_time()
-            fn(body)
-            best = min(best, time.process_time() - t0)
-        finally:
-            gc.enable()
-    return best
+def test_script_style_and_dirty_links_are_rewritten_as_httrack_writes_them():
+    # HTTrack rewrites every link it records (htsparse.c:3379-3502; history.txt:151): a
+    # saved file becomes its relative path with the link's query after it (includequery,
+    # 3475-3480), any other relative link the absolute URL (sink_add_absolute_url,
+    # 1011-1033); & becomes &amp; in a tag, never in <script>/<style> text (sink_raw_text,
+    # 977-988, #1616). An absolute link to no saved file, and every other byte, stay.
+    html = ('<script>img.src = "a"; x = "far.html"; y = "/docs/"; '
+            'w.open("https://other.test/x.html");</script>'
+            '<style>p{background:url(img/b.png?v=1&w=2)}</style>'
+            '<p style="background:url(&quot;img/b.png?v=1&amp;w=2&quot;)" '
+            'onclick="x.src=\'a#top\'" data-p="far.png?x=1&amp;y=2">'
+            '<a href="javascript:location.href=\'/docs/\'">j</a>')
+    assert _rewrite(html, SAVED) == (
+        '<script>img.src = "a.html"; x = "https://h.test/docs/guide/far.html"; '
+        'y = "../index.html"; w.open("https://other.test/x.html");</script>'
+        '<style>p{background:url(img/b1f2e.png?v=1&w=2)}</style>'
+        '<p style="background:url(&quot;img/b1f2e.png?v=1&amp;w=2&quot;)" '
+        'onclick="x.src=\'a.html#top\'" data-p="https://h.test/docs/guide/far.png?x=1&amp;y=2">'
+        '<a href="javascript:location.href=\'../index.html\'">j</a>')
+
+
+def test_rewritten_script_names_are_escaped_as_httrack_escapes_them():
+    # escape_uri_utf (htslib.c:4452-4455, 4613-4618, lower-case hex) on the relative path,
+    # then "(" and ")" percent-encoded in a CSS url() (escape_url_parens, htsparse.c:851-870,
+    # #163); the query only loses " , blanks and controls (escape_check_url, 2688-2702)
+    name = "/out/h.test/docs/guide/a b'(1)é&c.png"
+    local = {G + "a%20b%27(1)%C3%A9&c.png": name, G + "a%20b%27(1)%C3%A9&c.png?q=a b": name}
+    html = ('<style>p{background:url("a%20b%27(1)%C3%A9&c.png?q=a b")}</style>'
+            "<script>img.src = 'a%20b%27(1)%C3%A9&c.png';</script>")
+    assert _rewrite(html, local) == (
+        '<style>p{background:url("a%20b%27%281%29%c3%a9%26c.png?q=a%20b")}</style>'
+        "<script>img.src = 'a%20b%27(1)%c3%a9%26c.png';</script>")
+
+
+def test_scan_links_stay_as_written_with_the_scans_off():
+    html = b'<script>x.src="a";</script><div data-p="a.html"></div><a href="a">a</a>'
+    keys = {url_key(u): p for u, p in SAVED.items()}
+    out = rewrite_links(html, PAGE, "/out/h.test/docs/guide/intro.html", keys,
+                        parse_scripts=False, extended_parsing=False)
+    assert out == html.replace(b'href="a"', b'href="a.html"')
+
+
+def test_script_inside_a_rewritten_srcset_is_left_to_the_attribute():
+    # the tokenizer reads srcset candidates past a javascript: one; the attribute's rewrite
+    # replaces the whole value, so the script link inside it is not written twice
+    html = '<img srcset="javascript:x.src=\'a\'; 1x, img/c.png 2x">'
+    assert _rewrite(html, SAVED) == ('<img srcset="javascript:x.src=&#x27;a&#x27;; 1x, '
+                                     'https://h.test/docs/guide/img/c.png 2x">')
+
+
+@pytest.mark.parametrize("raw,writer,want", [  # st_sink, htsparse_selftest.c:1309-1328
+    ('a&"<\xe9', True, 'a&%22%3c\xe9'), ('a&"<\xe9', False, 'a&amp;%22%3c\xe9')])
+def test_absolute_url_writer_matches_httrack_selftest(raw, writer, want):
+    from dograpper.lib.httrack.links import _url_text
+    assert _url_text(raw, writer) == want
+
+
+CSS = "https://h.test/docs/css/site.css"
+
+
+def test_stylesheet_links_are_rewritten_relative_to_the_stylesheet():
+    # a stylesheet is parsed as one script (htsparse.c:1264-1287) and written back
+    # (3807-3852), its links relative to itself (relativesavename(), htscore.h:282-283);
+    # comments are no links
+    local = {"https://h.test/docs/css/t.css?page=2": "/out/h.test/docs/css/t1234.css",
+             "https://h.test/docs/img/a.png": "/out/h.test/docs/img/a.png",
+             "https://h.test/docs/img/a%20(1).png": "/out/h.test/docs/img/a (1).png"}
+    body = (b'@import "t.css?page=2" screen;\nh1{background:url(../img/a.png)}\n'
+            b'p{background:url("../img/a%20(1).png")} /* url(x.png) */ i{background:url(m.png)}'
+            b"\xff")
+    out = rewrite_file_links(body, CSS, "/out/h.test/docs/css/site.css",
+                             {url_key(u): p for u, p in local.items()}, css=True)
+    assert out == (b'@import "t1234.css?page=2" screen;\nh1{background:url(../img/a.png)}\n'
+                   b'p{background:url("../img/a%20%281%29.png")} /* url(x.png) */ '
+                   b"i{background:url(https://h.test/docs/css/m.png)}\xff")
+
+
+def test_script_file_links_are_written_relative_to_the_page_that_loaded_it():
+    # a script's links take its page's base and its page's save name, a module specifier
+    # the script's own (relative_to_parent(), htscore.h:276-283); "./" is dropped
+    # (htsparse.c:2718-2725), as lienrelatif writes a path in the same directory
+    js = "https://h.test/docs/static/app.js"
+    local = {url_key(G + "a"): "/out/h.test/docs/guide/a.html",
+             url_key("https://h.test/docs/static/m.js"): "/out/h.test/docs/static/m.js"}
+    body = b'img.src = "a"; import "./m.js";'
+    out = rewrite_file_links(body, js, "/out/h.test/docs/static/app.js", local, css=False,
+                             page=PAGE, page_path="/out/h.test/docs/guide/intro.html")
+    assert out == b'img.src = "a.html"; import "m.js";'
+    # a page with no saved file: its links are made absolute, a module's stay relative
+    out = rewrite_file_links(body, js, "/out/h.test/docs/static/app.js", local, css=False,
+                             page=PAGE, page_path=None)
+    assert out == b'img.src = "https://h.test/docs/guide/a"; import "m.js";'
+    # a script with no page (a start URL) resolves and writes against itself
+    out = rewrite_file_links(b'x.src = "../guide/a";', js, "/out/h.test/docs/static/app.js",
+                             local, css=False)
+    assert out == b'x.src = "../guide/a.html";'
+    assert rewrite_file_links(body, js, "/o/app.js", local, css=False, page=PAGE,
+                              page_path="/o/p.html", parse_scripts=False,
+                              extended_parsing=False) is body
 
 
 HOSTILE = {  # (head, piece repeated n times, tail, n): each must cost linear CPU time
@@ -538,8 +623,45 @@ def test_script_scans_are_linear_on_hostile_pages(name):
     # CPU time, not wall time: 4x the input may cost at most ~4x (quadratic would be 16x);
     # n is per shape, so each case stays short while a quadratic scan of it still fails
     head, piece, tail, n = HOSTILE[name]
-    small, big = head + piece * n + tail, head + piece * (4 * n) + tail
     def scan(b):
         page_links(b, PAGE)
-    ratio = _cpu(scan, big) / max(_cpu(scan, small), 1e-3)
-    assert ratio < 9, f"{name}: {ratio:.1f}x for 4x the input"
+    assert_linear(lambda k: head + piece * k + tail, scan, n, bound=9, floor=1e-3)
+
+
+@pytest.mark.parametrize("text,at,in_tag,in_css,escape", [  # htsparse_selftest.c:804-822
+    ("url(a.png)", 0, False, True, True), ("url('a (2).png')", 0, False, True, True),
+    ('x.src="a (2).png";', 1, False, False, False),
+    ("url(&quot;a (2).png&quot;)", 0, True, True, True), ('new URL("a.gif")', 4, False, False, False)])
+def test_css_url_links_escape_their_parentheses(text, at, in_tag, in_css, escape):
+    got = J._js_link(text, at, J.Ctx(css=in_css, in_tag=in_tag, tag_lastc='"'))
+    assert got[5] is escape
+
+
+HOSTILE_KEYS = {url_key(u): p for u, p in {  # every hostile link is rewritten
+    **SAVED, G + "a.png": "/out/h.test/docs/guide/img/a.png"}.items()}
+HOSTILE_REWRITES = {  # (head, piece repeated n times, tail, n)
+    "script-links": (b"<script>", b'x.src="a";', b"</script>", 3000),
+    "style-attr-urls": (b'<p style="', b"url(a) ", b'">', 3000),  # the #127 shape
+    "style-attr-unclosed-urls": (b'<p style="', b"url(", b'">', 3000),
+    "dirty-tags": (b"", b'<p data-p="a.png">', b"", 2000),
+}
+
+
+@pytest.mark.parametrize("name", list(HOSTILE_REWRITES))
+def test_rewrite_of_scanned_links_is_linear_on_hostile_pages(name):
+    # n is large enough that a quadratic pass over the edits (one Python step per earlier
+    # edit) reaches a ratio near 9-12, while a linear one stays near 4
+    head, piece, tail, n = HOSTILE_REWRITES[name]
+
+    def rewrite(b):
+        rewrite_links(b, PAGE, "/out/h.test/docs/guide/intro.html", HOSTILE_KEYS)
+    assert_linear(lambda k: head + piece * k + tail, rewrite, n)
+
+
+@pytest.mark.parametrize("piece,css", [
+    (b"url(a) ", True), (b"url(", True), (b'x.src = "a";\n', False)],
+    ids=["css-urls", "css-unclosed", "js-links"])
+def test_rewrite_of_stylesheets_and_scripts_is_linear(piece, css):
+    def rewrite(b):
+        rewrite_file_links(b, PAGE, "/out/h.test/docs/guide/x", HOSTILE_KEYS, css=css)
+    assert_linear(lambda k: piece * k, rewrite, 4000)

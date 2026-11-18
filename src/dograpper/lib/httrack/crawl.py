@@ -1,5 +1,6 @@
 """Seeded-list fetch for the httrack profile: fetch each URL, write only clean 2xx bodies."""
 
+import hashlib
 import logging
 import os
 import re
@@ -15,11 +16,11 @@ from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.portable_names import resolve_under
 from dograpper.utils.progress import ProgressReporter
-from dograpper.utils.redact import redact_url
+from dograpper.utils.redact import recordable_url, redact_url
 
 from .escape import request_target
 from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
-from .links import rewrite_links, url_key
+from .links import JS_MIMES, rewrite_file_links, rewrite_links, url_key
 from .naming import NameRegistry, no_page
 from .policy import (NAVIGATION, SITES, FetchMeta, HttrackPolicy, conditional_headers,
                      response_validators, site_of)
@@ -40,6 +41,7 @@ class HttrackResult:
     urls: dict[str, str] = field(default_factory=dict)  # written file -> seed URL requested
     kept: list[str] = field(default_factory=list)  # files an update kept as they were
     records: dict[str, dict] = field(default_factory=dict)  # file -> manifest RECORD_FIELDS
+    changes: tuple[str, str] | None = None  # --changes: (hts-changes.json, summary line)
 
 
 class Previous(NamedTuple):
@@ -49,6 +51,8 @@ class Previous(NamedTuple):
     validators: tuple[tuple[str, str], ...]  # policy.conditional_headers
     redirected: bool                         # its URL reached it through a redirect
     record: dict                             # its manifest RECORD_FIELDS, kept with it
+    size: int | None = None                  # its recorded size_bytes (--cache 1 checks it)
+    erased: bool = False                     # missing or empty since: -%n leaves it so
 
 
 def _named(name: str | None, path: str) -> bool:
@@ -59,20 +63,32 @@ def _named(name: str | None, path: str) -> bool:
     return re.fullmatch(re.escape(stem) + r"(-[0-9]+)?" + re.escape(ext), path) is not None
 
 
-def previous_files(previous: Manifest | None, names: NameRegistry,
-                   output_dir: str) -> dict[str, Previous]:
-    """url_key of the recorded URL -> Previous, for each file `previous` recorded from a
-    200 with a validator and still on disk, not empty: HTTrack revalidates a cached 200
-    only (htsback.c:2557-2607; 203 is stored as 200, 4224-4226) and fetches a file erased
-    or emptied since in full (2414-2492). A file not named as its URL would be (an edited
-    manifest) is left out, so a manifest never chooses where a page is written; one reached
-    through a redirect is checked against the hop that reaches it (sends)."""
+def previous_files(previous: Manifest | None, names: NameRegistry, output_dir: str,
+                   cache: int | None = None, do_not_recatch: bool = False
+                   ) -> dict[str, Previous]:
+    """url_key of the recorded URL -> Previous, for each file `previous` recorded and still
+    on disk, not empty, as the cache mode (policy.cache) reads the cache: -C2 (None over a
+    previous run) revalidates a cached 200 only (htsback.c:2557-2607; 203 is stored as 200,
+    4224-4226), with the validators it has (none: a plain request, -%s may keep the file),
+    -C1 loads any recorded 2xx (2497-2556), -C0 reads nothing (htscache.c:1174). A file
+    erased or emptied since is fetched in full (2414-2492), unless `do_not_recatch` (-%n)
+    and its type is no hypertext: it is `erased` then (2466-2480, 2653-2694). A file not
+    named as its URL would be (an edited manifest) is left out, so a manifest never chooses
+    where a page is written; one reached through a redirect is checked against the hop
+    that reaches it (sends)."""
+    if cache == 0:
+        return {}
     root, out = os.path.realpath(output_dir), {}
     for key, e in sorted((previous.files if previous else {}).items()):
         validators = conditional_headers(e.etag, e.last_modified)
         path = resolve_under(root, e.local_path or key)
-        if not (e.url and e.status in (200, 203) and validators and path
-                and os.path.isfile(path) and os.path.getsize(path) > 0):
+        status = e.status if type(e.status) is int else None  # an edited manifest: no bool
+        ok = status is not None and 200 <= status < 300
+        present = bool(path) and os.path.isfile(path) and os.path.getsize(path) > 0
+        erased = (do_not_recatch and bool(path) and not present and ok
+                  and not hypertext(e.content_type))  # data on disk only (htscache.c:264)
+        usable = erased or present and (ok if cache == 1 else status in (200, 203))
+        if not (e.url and usable):
             continue
         try:
             k = url_key(e.url)
@@ -81,8 +97,75 @@ def previous_files(previous: Manifest | None, names: NameRegistry,
         except ValueError:  # an unusable URL (an edited manifest)
             continue
         out.setdefault(k, Previous(e.url, path, validators, bool(e.redirected),
-                                   {f: getattr(e, f) for f in RECORD_FIELDS}))
+                                   {f: getattr(e, f) for f in RECORD_FIELDS}, e.size_bytes,
+                                   erased))
     return out
+
+
+def uncached(records: dict[str, dict], urls: Mapping[str, str], previous: Manifest | None,
+             output_dir: str) -> dict[str, dict]:
+    """The records of a -C0 run (file -> URL requested in `urls`): HTTrack writes no cache
+    then (htscache.c:59, 1174), and the previous one survives as it was, so each file keeps
+    the record the previous run made for its URL, and one it did not record gets none."""
+    root = os.path.realpath(output_dir)
+    old = {resolve_under(root, e.local_path or k): e
+           for k, e in (previous.files if previous else {}).items()}
+
+    def kept(f: str) -> dict:
+        e = old.get(f)
+        if e is None or e.url is None or e.url != recordable_url(urls[f]):
+            return dict.fromkeys(RECORD_FIELDS)
+        return {x: getattr(e, x) for x in RECORD_FIELDS}
+    return {f: kept(f) for f in records}
+
+
+def _fsize(path: str) -> int:
+    """htslib.c fsize: the file's size, -1 when it cannot be read."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return -1
+
+
+HYPERTEXT = frozenset(("text/html", "application/xhtml+xml", "text/css", "image/svg+xml",
+                       "image/svg-xml", "application/x-authorware-map", *JS_MIMES))
+
+
+def hypertext(content_type: str | None) -> bool:
+    """htslib.h is_hypertext_mime: a page, script, stylesheet or SVG, or no type at all
+    (HTTrack reads it as HTML). shortcut: no guess from the extension for an
+    application/octet-stream type (may_unknown); upgrade if a site serves documents so."""
+    mime = (content_type or "").split(";")[0].strip().lower()
+    return not mime or mime in HYPERTEXT
+
+
+NOT_RECAUGHT = "null-size file not recaught"
+
+
+def _not_recaught(path: str, report: RunReport, safe: str, via: str | None) -> None:
+    """-%n: a missing file is created empty ("erased by user ?), ignoring",
+    htsback.c:2466-2480), and the URL is an error at its link (htsmirror.c:476-482)."""
+    if not os.path.exists(path):
+        try:
+            open(path, "xb").close()
+        except OSError as exc:
+            report.errors.append((safe, f"empty file not created: {exc}", via))
+    report.errors.append((safe, NOT_RECAUGHT, via))
+
+
+def _size_hack(p: Previous, revalidating: bool) -> Callable[[int, dict], bool]:
+    """HTTrack -%s at the headers (htsback.c:4281-4357): a 200 for a type that is no
+    hypertext keeps the copy on disk when its Content-Length (htslib.c:1610) is that copy's
+    size and, on a revalidation, the size recorded for it."""
+    def stop(status: int, headers: dict) -> bool:
+        if status not in (200, 203) or hypertext(headers.get("content-type")):
+            return False
+        m = re.match(r"\s*([0-9]+)", headers.get("content-length") or "")
+        length, ondisk = (int(m[1]) if m else -1), _fsize(p.path)
+        if revalidating:  # "matching the cached size" (4283-4336)
+            return length >= 0 and p.size == length and ondisk == length
+        return ondisk >= 0 and ondisk == length  # "matching the announced size" (4338-4357)
+    return stop
 
 
 def reserve_names(names: NameRegistry, prev: Mapping[str, Previous]) -> None:
@@ -103,10 +186,63 @@ def sends(p: Previous | None, url: str, redirected: bool, names: NameRegistry | 
 
 
 def record_of(res: FetchResult) -> dict:
-    """RECORD_FIELDS of the 2xx response `res` a file is saved from ("redirected" aside)."""
+    """RECORD_FIELDS of the 2xx response `res` a file is saved from ("redirected" aside),
+    with the MD5 of its payload as received (HTTrack --changes, htschanges.c:299-345)."""
     etag, last_modified = response_validators(res.headers)
     return {"status": res.status, "content_type": res.headers.get("content-type"),
-            "etag": etag, "last_modified": last_modified}
+            "etag": etag, "last_modified": last_modified,
+            "payload_md5": hashlib.md5(res.body).hexdigest()}
+
+
+_MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec"
+_NUMBER = re.compile(r"[ \t\n\v\f\r]*\+?([0-9]+)")  # hts_scan_llint, after a "+" zone sign
+
+
+def file_time(date: str | None) -> int | None:
+    """Seconds since the epoch HTTrack stamps a saved file with, from its recorded
+    Last-Modified or Date, read as htsdate.c convert_time_rfc822 (pivot 50) reads it:
+    tokens split on blanks, "-", ":" and ","; a three-letter month name; the first five
+    numbers are the day, then year, hour, minute and second, or hour, minute, second and
+    year when the fifth has four digits; a two-digit year up to 50 is 20xx; any zone is
+    ignored (GMT); no range check. None when it does not read, or reads as 0 or -1
+    (hts_tm_filetime, htsdate.c:200-208)."""
+    if not date or len(date) > 200:
+        return None
+    month, nums = None, []
+    for tok in re.sub("[-:,]", " ", date.lower()).split(" "):
+        if len(tok) == 3 and _MONTHS.find(tok) % 4 == 0:
+            month = _MONTHS.find(tok) // 4
+        elif (m := _NUMBER.match(tok)) and int(m[1]) <= 2**31 - 1 and len(nums) < 5:
+            nums.append(int(m[1]))
+    if month is None or len(nums) < 5:
+        return None
+    day, n1, n2, n3, n4 = nums
+    if n4 >= 1000:
+        year, hour, minute, second = n4, n1, n2, n3
+    else:
+        hour, minute, second = n2, n3, n4
+        year = n1 + 2000 if n1 <= 50 else n1 + 1900 if n1 < 1000 else n1
+    # htsdate.c hts_utc_seconds: days from the civil date, years counted from March
+    y = year - (month < 2)
+    yoe = y - y // 400 * 400
+    doy = (153 * ((month + 10) % 12) + 2) // 5 + day - 1
+    days = y // 400 * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468
+    t = days * 86400 + hour * 3600 + minute * 60 + second
+    return None if t in (0, -1) else t
+
+
+def stamp(files: Mapping[str, str], fields: Mapping[str, dict], report: RunReport) -> None:
+    """Set the access and modification times of each file this run wrote (file -> URL
+    requested for it) to file_time() of its record, as HTTrack does once a file is
+    complete (htscore.c:451-452, htsback.c:2119-2128); a failure is an error of the
+    report, the file kept."""
+    for path, url in files.items():
+        t = file_time(fields[path]["last_modified"])
+        if t is not None:
+            try:
+                os.utime(path, (t, t))
+            except (OSError, OverflowError, ValueError) as exc:
+                report.errors.append((redact_url(url), f"file time not set: {exc}", None))
 
 
 def _count(report: RunReport, status: int | None, error: bool) -> None:
@@ -137,8 +273,9 @@ def moved_request(url: str, referer: str | None, meta: FetchMeta, target: str, *
 def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lock,
                redirect_ok: Callable[[str, str], bool] | None, *, kind: str = "navigate",
                referer: str | None = None, meta: FetchMeta = NAVIGATION,
-               prev: Previous | None = None,
-               names: NameRegistry | None = None) -> tuple[str, str, FetchResult | None]:
+               prev: Previous | None = None, names: NameRegistry | None = None,
+               tried: Callable[[str], None] | None = None
+               ) -> tuple[str, str, FetchResult | None]:
     """GET `url` for every fetch path: /cdn-cgi/ is never requested, robots.txt is checked
     before each hop, and a redirect is followed (at most MAX_REDIRECTS) only when
     `redirect_ok(url, target)`, called under `lock`, accepts the target; `url` is then a
@@ -152,7 +289,11 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
     but a 2xx or a redirect keeps that file: ("kept", URL, result), as HTTrack masks it as a
     304 (htsback.c:4266-4280, 4437-4494); a challenge is also listed as challenged. A failed
     transfer is an error that keeps it too (htsback.c:1307-1321): ("kept", URL, result)
-    with result.error set."""
+    with result.error set. Without a request, a file -C1 (policy.cache 1) finds at its
+    recorded size is ("kept", URL, an empty result), and one erased under -%n
+    (prev.erased) ("kept", URL, result) with result.error NOT_RECAUGHT; a 200 that -%s
+    (policy.updatehack) takes at its headers is ("kept", URL, result) with
+    result.stopped. `tried(url)` is told of each hop requested past robots.txt."""
     via, hops = (redact_url(referer) if referer else None), 0
     while True:
         safe = redact_url(url)
@@ -177,14 +318,31 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 report.robots_blocked.append(safe)
             logger.info("robots.txt disallows %s", safe)
             return "refused", url, None
-        sent = prev.validators if sends(prev, url, hops > 0, names) else ()
+        if tried is not None:
+            tried(url)
+        mine = sends(prev, url, hops > 0, names)
+        if mine and prev.erased:  # -%n: "Null-size file not recaught" (htsback.c:2653-2694)
+            with lock:
+                _not_recaught(prev.path, report, safe, via)
+            return "kept", url, FetchResult(url, error=NOT_RECAUGHT)
+        if mine and fetcher.policy.cache == 1 and _fsize(prev.path) == prev.size:
+            with lock:  # -C1: "File immediately loaded from cache" (htsback.c:2497-2556)
+                report.from_cache += 1
+            return "kept", url, FetchResult(url)
+        # -C1 sends no validator: a file whose size changed is requested in full (2549-2554)
+        sent = prev.validators if mine and fetcher.policy.cache != 1 else ()
+        stop = _size_hack(prev, bool(sent)) if mine and fetcher.policy.updatehack else None
         res = fetcher.get(url, kind=kind, referer=referer, meta=meta,
-                          **({"validators": sent} if sent else {}))
+                          **({"validators": sent} if sent else {}),
+                          **({"stop": stop} if stop else {}))
         # the fetcher keeps a 3xx's Location even when its body fails to decode
         redirect = bool(res.status in REDIRECTS and res.location)
         with lock:
             report.retried += max(res.attempts - 1, 0)
             _count(report, res.status, res.error is not None and not redirect)
+            if res.stopped:  # -%s forced a 304: the copy and its record stay
+                report.size_kept.append(safe)
+                return "kept", url, res
             if res.error is not None and not redirect:
                 report.errors.append((safe, res.error, via))
                 return ("kept", url, res) if sent else ("refused", url, None)
@@ -224,19 +382,30 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
         return "ok", url, res
 
 
-def relink(pages: Mapping[str, str], local: Mapping[str, str], report: RunReport) -> None:
-    """Rewrite the links of the saved HTML `pages` (file -> URL it was fetched from) as
-    HTTrack -K0 does, `local` mapping links.url_key() to saved files; a failure is an error
-    of the report, the page keeps its links."""
-    for path, url in pages.items():
+def relink(pages: Mapping[str, str], local: Mapping[str, str], report: RunReport,
+           scripts: Mapping[str, tuple[str, str | None, bool]] | None = None, *,
+           parse_scripts: bool = True, extended_parsing: bool = True) -> None:
+    """Rewrite the links of the saved HTML `pages` (file -> URL it was fetched from) and of
+    the saved stylesheets and `scripts` (file -> (URL, page that loaded a script or None,
+    stylesheet?)) as HTTrack -K0 does, `local` mapping links.url_key() to saved files; the
+    links the script scans take are rewritten under the same switches. A failure is an
+    error of the report, the file keeps its links."""
+    def one(path: str, url: str, rewrite, **kw) -> None:
         try:
             with open(path, "rb") as f:
                 body = f.read()
-            new = rewrite_links(body, url, path, local)
+            new = rewrite(body, url, path, local, parse_scripts=parse_scripts,
+                          extended_parsing=extended_parsing, **kw)
             if new is not body:
                 atomic_write_bytes(path, new)
         except OSError as exc:
             report.errors.append((redact_url(url), f"link rewrite failed: {exc}", None))
+
+    for path, url in pages.items():
+        one(path, url, rewrite_links)
+    for path, (url, page, css) in (scripts or {}).items():
+        one(path, url, rewrite_file_links, css=css, page=page,
+            page_path=local.get(url_key(page)) if page else None)
 
 
 def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
@@ -250,8 +419,10 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     (fetch_page) and a kept one is left byte-identical, relink included."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
-    prev = previous_files(previous, names, output_dir)
+    prev = previous_files(previous, names, output_dir, policy.cache, policy.do_not_recatch)
     reserve_names(names, prev)
+    from .changes import Changes  # changes.py imports this module
+    changes = Changes(output_dir, previous, policy.cache) if policy.changes else None
     kept: set[str] = set()
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
@@ -259,7 +430,9 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     # written file -> (redirected?, seed): of several seeds reaching one file, the one
     # that needed no redirect, else the smallest, whichever thread wrote first
     requested: dict[str, tuple[bool, str]] = {}
+    writing: dict[str, threading.Event] = {}  # file -> set once its write ended, either way
     pages: dict[str, str] = {}  # written HTML file -> URL it came from, for relink
+    scripts: dict[str, tuple] = {}  # written stylesheet or script -> relink's (URL, None, css?)
     reached: list[tuple[str, str]] = []  # (seed or final URL, file it reached)
     seeds = list(dict.fromkeys(urls))
     if len(seeds) > policy.max_links:
@@ -281,7 +454,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         except ValueError:  # a malformed URL: fetch_page records it
             p = None
         outcome, final, res = fetch_page(url, fetcher, report, lock, redirect_ok, prev=p,
-                                         names=names)
+                                         names=names, tried=changes and changes.tried)
         if outcome == "kept":
             return keep(final, url, p, res.challenged or res.error is not None)
         if outcome != "ok":
@@ -311,14 +484,23 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 report.filtered.append(safe)
             return "scoped"
         key = (url != seed, seed)
-        with lock:
-            if path in written or path in kept:  # same final URL reached from several seeds
-                requested[path] = min(requested[path], key)
-                reached.append((seed, path))
-                return "written"
-            written.add(path)
-            requested[path] = key
+        while True:
+            with lock:
+                if path in kept or (path in written and path not in writing):
+                    # same final URL reached from several seeds
+                    requested[path] = min(requested[path], key)
+                    reached.append((seed, path))
+                    return "written"
+                if path not in writing:
+                    written.add(path)
+                    writing[path] = threading.Event()
+                    requested[path] = key
+                    break
+                pending = writing[path]
+            pending.wait()  # another seed is writing this file: count as written only if it lands
         try:
+            if changes is not None:
+                changes.overwriting(path)
             atomic_write_bytes(path, res.body)
         except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
             with lock:
@@ -326,12 +508,18 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 del requested[path]
                 report.errors.append((safe, f"write failed: {exc}", None))
             return "refused"
+        finally:
+            with lock:
+                writing.pop(path).set()
         with lock:
             size[0] += len(res.body)
             fields[path] = record_of(res)
             reached.extend(((url, path), (seed, path)))
-            if (res.headers.get("content-type") or "").split(";")[0].strip().lower() == "text/html":
+            mime = (res.headers.get("content-type") or "").split(";")[0].strip().lower()
+            if mime == "text/html":
                 pages[path] = url
+            elif mime == "text/css" or mime in JS_MIMES:  # a seed: no page loaded it
+                scripts[path] = (url, None, mime == "text/css")
         return "written"
 
     def run(seed: str) -> None:
@@ -346,16 +534,25 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         list(pool.map(run, seeds))  # list() re-raises any worker exception
     progress.finish()
 
-    relink(pages, {url_key(u): p for u, p in reached if p in written or p in kept}, report)
+    relink(pages, {url_key(u): p for u, p in reached if p in written or p in kept}, report,
+           scripts, parse_scripts=policy.parse_scripts,
+           extended_parsing=policy.extended_parsing)
+    stamp({p: requested[p][1] for p in written}, fields, report)
     report.challenged.sort()
     report.robots_blocked.sort()
     report.out_of_scope.sort()
     report.filtered.sort()
     report.kept.sort()
+    report.size_kept.sort()
     report.errors.sort(key=lambda e: (e[0], e[1]))
     files = sorted(written)
     front_failed = not files and bool(seeds) and refused[0] == len(seeds)
     chosen = {path: seed for path, (_, seed) in requested.items()}
     records = {path: {**fields[path], "redirected": r} for path, (r, _) in requested.items()}
+    if policy.cache == 0:
+        records = uncached(records, chosen, previous, output_dir)
+    rank = {s: i for i, s in enumerate(seeds)}  # threads finish in any order: seed order
+    report_of = changes and changes.report(sorted(requested, key=lambda p: rank[requested[p][1]]),
+                                           written, chosen, fields)
     return HttrackResult(bool(files or kept), files, len(kept), report, front_failed, chosen,
-                         sorted(kept), records)
+                         sorted(kept), records, report_of)

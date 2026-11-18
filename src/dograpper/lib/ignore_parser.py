@@ -31,6 +31,7 @@ def is_binary_path(path: str) -> bool:
 # dograpper's own state files: never mirror content in a manifest either (#95).
 DOGRAPPER_STATE_NAMES = frozenset({
     ".dograpper-manifest.json", "delta_manifest.json", "pack_state.json",
+    "hts-changes.json",  # download --changes (lib/httrack/changes.py)
 })
 # Files that are never documentation, whatever extension filter is active:
 # crawler leftovers and dograpper's own state/sidecars (they can land inside

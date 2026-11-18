@@ -350,6 +350,35 @@ def test_pack_cross_refs_resolve_links_of_a_crawled_tree(server, tmp_path):
     assert refs["unresolved"] == []
 
 
+CSS, JS = {"content-type": "text/css"}, {"content-type": "text/javascript"}
+SCANNED = {  # links only the script scans find, to files whose names are not their URLs
+    "/": page(extra='<link rel="stylesheet" href="css/site.css"><script src="js/app.js">'
+                    '</script><script>img.src = "next";</script>'),
+    "/css/site.css": (CSS, b'@import "t.css?page=2";\np{background:url(../next)}'),
+    "/css/t.css?page=2": (CSS, b"p{}"),
+    "/js/app.js": (JS, b'x.src = "next"; import "./m.js";'),
+    "/js/m.js": (JS, b"export {};"), "/next": page()}
+
+
+def test_links_found_by_the_scans_point_at_the_saved_files(server, tmp_path):
+    """HTTrack rewrites every link it records, in a page's scripts and in the stylesheets
+    and scripts it saves (htsparse.c:3379-3502, 3807-3852; history.txt:151); a script's
+    link is written from the page that loaded it, a module's from the script
+    (htscore.h:276-283)."""
+    base, script, _ = server
+    site(script, SCANNED)
+    res, _ = crawl(f"{base}/", tmp_path, exts="html,css,js")
+    host = tmp_path / f"127.0.0.1:{base.rsplit(':', 1)[1]}"
+    [t] = [n for n in os.listdir(host / "css") if n.startswith("t")]
+    assert re.fullmatch(r"t[0-9a-f]{4}\.css", t) and res.report.errors == []
+    assert '<script>img.src = "next.html";</script>' in (host / "index.html").read_text()
+    assert (host / "css" / "site.css").read_bytes() == (
+        f'@import "{t}?page=2";\np{{background:url(../next.html)}}'.encode())
+    assert (host / "js" / "app.js").read_bytes() == b'x.src = "next.html"; import "m.js";'
+    res, _ = crawl(f"{base}/", tmp_path / "off", exts="html,css,js", parse_scripts=False)
+    assert (tmp_path / "off" / host.name / "index.html").read_bytes() == SCANNED["/"][1]
+
+
 # -- update mode: a crawl over the previous run's manifest --
 
 from dograpper.lib.manifest import build_manifest  # noqa: E402
@@ -482,7 +511,7 @@ def test_new_page_never_takes_the_name_of_a_redirected_file(server, tmp_path):
     assert res.records[kept]["etag"] == '"/new"'
 
 
-def test_kept_page_follows_its_style_links_relink_left_as_written(server, tmp_path):
+def test_kept_page_follows_its_rewritten_style_links(server, tmp_path):
     base, script, seen = server
     log = []
     vsite(script, {"/docs/": page("p", extra='<style>@import "/docs/s.css";</style>'),
@@ -495,6 +524,23 @@ def test_kept_page_follows_its_style_links_relink_left_as_written(server, tmp_pa
     mirror_site(f"{base}/docs/", str(tmp_path), build_policy(retries=0), "html,css",
                 fetcher=Spy(build_policy(retries=0)), previous=previous)
     assert "/docs/s.css" in seen and "/docs/p" in seen
+
+
+def test_kept_stylesheets_and_scripts_follow_their_rewritten_links(server, tmp_path):
+    """A kept stylesheet or script is re-parsed (htsback.c:4437-4494) from the saved copy,
+    whose links relink() wrote as saved names: each maps back through the manifest, as a
+    kept page's does, so no rewritten name is requested as a URL."""
+    base, script, _ = server
+    log = []
+    vsite(script, SCANNED, log)
+    policy = build_policy(retries=0)
+    first = mirror_site(f"{base}/", str(tmp_path), policy, "html,css,js", fetcher=Spy(policy))
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    log.clear()
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,css,js", fetcher=Spy(policy),
+                      previous=previous)
+    assert sorted(path for path, _ in log) == sorted(SCANNED)
+    assert res.report.not_modified == len(SCANNED) and res.report.errors == []
 
 
 def test_kept_pages_and_scripts_are_scanned_under_the_same_flags(server, tmp_path):
@@ -568,3 +614,115 @@ def test_scripts_are_scanned_for_links_as_httrack_does(server, tmp_path):
     res, _ = crawl(f"{base}/", tmp_path / "off", exts="html,js", parse_scripts=False,
                    extended_parsing=False)
     assert rel(res, tmp_path / "off") == ["index.html", "static/app.js"]
+
+
+def test_crawled_files_get_their_last_modified_time(server, tmp_path):
+    """htscore.c:451-452, htsback.c:2119-2128: a crawled file is stamped with its recorded
+    Last-Modified once its links are rewritten (crawl.file_time)."""
+    base, script, _ = server
+    site(script, {
+        "/": ({**HTML, "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT"},
+              b'<a href="a.html">a</a>'),
+        "/a.html": ({**HTML, "last-modified": "Wed, 31 Jan 2024 00:00:00 GMT"}, b"<p>a</p>"),
+    })
+    res, _ = crawl(f"{base}/", tmp_path)
+    times = {os.path.basename(f): os.stat(f).st_mtime for f in res.files_downloaded}
+    assert times == {"index.html": 1704067200, "a.html": 1706659200}
+
+
+def test_a_relinked_stylesheet_is_stamped_after_its_links_are_rewritten(server, tmp_path):
+    """relink() rewrites a saved stylesheet's links after its write (#133); its file time is
+    set after that, as HTTrack sets it once the file is complete."""
+    base, script, _ = server
+    css = {"content-type": "text/css", "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT"}
+    site(script, {"/": page("p.html", extra='<link rel="stylesheet" href="a.css">'),
+                  "/p.html": page(),
+                  "/a.css": (css, f'@import "{base}/b.css";'.encode()),
+                  "/b.css": (css, b"p{}")})
+    policy = build_policy(retries=0)
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,css", fetcher=Spy(policy))
+    a = next(f for f in res.files_downloaded if f.endswith("a.css"))
+    assert os.stat(a).st_mtime == 1704067200
+    assert open(a, "rb").read() != f'@import "{base}/b.css";'.encode()  # relinked
+
+
+# -- cache modes: --cache 0 | 1 (HTTrack -C0 | -C1) --
+
+def test_cache_1_crawls_a_previous_mirror_from_its_copies_without_requests(server, tmp_path):
+    """-C1 (htsback.c:2497-2556): each recorded page is loaded without a request and its
+    links are followed from the saved copy, as a 304 page's are."""
+    base, script, seen = server
+    log = []
+    vsite(script, {"/": page("a.html"), "/a.html": page()}, log)
+    first, _ = crawl(f"{base}/", tmp_path)
+    seen.clear(), log.clear()
+    res, _ = update(f"{base}/", tmp_path, first, cache=1)
+    assert log == [] and seen == ["/robots.txt"]
+    assert len(res.kept) == 2 and res.report.from_cache == 2 and res.success
+
+
+def test_cache_0_crawls_with_plain_requests(server, tmp_path):
+    base, script, _ = server
+    log = []
+    vsite(script, {"/": page("a.html"), "/a.html": page()}, log)
+    first, _ = crawl(f"{base}/", tmp_path)
+    log.clear()
+    res, _ = update(f"{base}/", tmp_path, first, cache=0)
+    assert sorted(log) == [("/", None), ("/a.html", None)]
+    assert rel(res, tmp_path) == ["a.html", "index.html"] and res.kept == []
+
+
+def test_cache_1_follows_a_loaded_stylesheet_from_its_relinked_copy(server, tmp_path):
+    """A stylesheet loaded under -C1 is no page: its links, which relink() rewrote (#133),
+    are read from the copy and mapped back through the manifest, with no request."""
+    base, script, seen = server
+    css = {"content-type": "text/css"}
+    site(script, {"/": page("p.html", extra='<link rel="stylesheet" href="a.css">'),
+                  "/p.html": page(),
+                  "/a.css": (css, f'@import "{base}/b.css";'.encode()),
+                  "/b.css": (css, b"p{}")})
+    policy = build_policy(retries=0)
+    first = mirror_site(f"{base}/", str(tmp_path), policy, "html,css", fetcher=Spy(policy))
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    seen.clear()
+    policy = build_policy(retries=0, cache=1)
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,css", fetcher=Spy(policy),
+                      previous=previous)
+    assert seen == ["/robots.txt"] and res.report.from_cache == 4
+    assert res.kept == sorted(first.files_downloaded) and res.files_downloaded == []
+
+
+def test_updatehack_keeps_a_crawled_file_whose_size_matches(server, tmp_path):
+    """-%s in the crawl (htsback.c:4283-4336): the forced 304 keeps the copy, which is no
+    page, so no link is read from it."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/"] = (200, {**HTML, "etag": '"i"'}, b'<a href="n.txt">n</a>')
+    script["/n.txt"] = (200, {"content-type": "text/plain", "etag": '"n1"'}, b"old!")
+    policy = build_policy(retries=0, updatehack=True)
+    first = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy))
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    script["/n.txt"] = (200, {"content-type": "text/plain", "etag": '"n2"'}, b"new!")
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy),
+                      previous=previous)
+    n = next(f for f in first.files_downloaded if f.endswith("n.txt"))
+    assert res.kept == [n] and open(n, "rb").read() == b"old!"
+    assert res.report.size_kept == [f"{base}/n.txt"] and res.records[n] == first.records[n]
+
+
+def test_do_not_recatch_in_the_crawl(server, tmp_path):
+    """-%n in the crawl: the erased file linked from a kept page is not requested."""
+    base, script, seen = server
+    log = []
+    vsite(script, {"/": page("n.txt"), "/n.txt": ({"content-type": "text/plain"}, b"n")}, log)
+    policy = build_policy(retries=0)
+    first = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy))
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    n = next(f for f in first.files_downloaded if f.endswith("n.txt"))
+    os.remove(n)
+    log.clear()
+    policy = build_policy(retries=0, do_not_recatch=True)
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,txt", fetcher=Spy(policy),
+                      previous=previous)
+    assert log == [("/", '"/"')] and open(n, "rb").read() == b""
+    assert res.kept == sorted(first.files_downloaded) and res.success

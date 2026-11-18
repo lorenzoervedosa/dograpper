@@ -98,7 +98,7 @@ Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/lorenzoervedosa/dograpper.git
 cd dograpper
-uv sync --extra dev --extra headless --extra httrack   # same extras as CI
+uv sync --extra dev --extra headless --extra httrack --extra fire-engine   # same extras as CI
 uv run dograpper --help
 ```
 
@@ -419,9 +419,14 @@ HTTrack's mirror loop:
   chain (`none` after a start URL).
 - **Links rewritten** (HTTrack `-K0`): once the crawl ends, every saved HTML
   page links to the files saved for its links with relative paths, other
-  links become absolute URLs, and `<base href>` is emptied. The mirror browses
-  offline and `pack --cross-refs` resolves its links. No other byte of the
-  page changes.
+  links become absolute URLs, and `<base href>` is emptied. The links found
+  in scripts, stylesheets and quoted strings (above) are rewritten too, in
+  pages and in saved stylesheets and scripts, as HTTrack writes them: the
+  relative path percent-encoded, `(` `)` as `%28` `%29` inside a CSS `url()`,
+  the link's query kept, `&` as `&amp;` only inside a tag; a script's links
+  are written from the page that loaded it (a module specifier from the
+  script). The mirror browses offline and `pack --cross-refs` resolves its
+  links. No other byte of the file changes.
 - **Output is deterministic:** requests run in parallel, but responses are
   handled in queue order, so names, files, report and manifest never depend on
   which request finished first.
@@ -433,7 +438,15 @@ HTTrack's mirror loop:
   crawl that saves at most one HTML page, or an SPA shell, would fall back to
   Playwright, which the profile does not have yet (see below).
 
-**Updates (`httrack`).** A run on an `-o` that already holds a manifest is an
+**File times (`httrack`, `fire-engine`).** Each saved file gets the response's
+`Last-Modified`, else its `Date`, as its modification and access time, as
+HTTrack sets them once a file is complete (links rewritten first). The date
+is read as HTTrack reads it: any zone counts as GMT, and a date that does not
+read leaves the file's time alone. `pack --delta` compares content hashes, so
+a file rewritten with other bytes under the same time and size still counts
+as changed.
+
+**Updates (`httrack`, `fire-engine`).** A run on an `-o` that already holds a manifest is an
 update, as HTTrack's `-C2` on a finished mirror: on both paths, each file the
 previous run recorded from a `200` with an `ETag` or a date, still on disk and
 not empty, is revalidated.
@@ -443,7 +456,7 @@ not empty, is revalidated.
   response's `Last-Modified`, else its `Date`.
 - **304 Not Modified:** the file is left byte-identical (its links are not
   rewritten again) and keeps its manifest record; the crawl follows the links
-  of a kept page from that copy.
+  of a kept page, stylesheet or script from that copy.
 - **Any other answer but a 2xx or a redirect** (404, 500, 429, a challenge):
   the previous copy is kept and the answer is not retried, as HTTrack does on
   an update. The URL is listed as `Kept the previous copy after an error` (a
@@ -452,7 +465,7 @@ not empty, is revalidated.
   reported as an error, and the previous copy and its record are kept (its
   links are not followed).
 - **A 2xx** replaces the file and its record. A file erased or emptied since
-  is fetched again in full.
+  is fetched again in full (unless `--do-not-recatch`, below).
 - The summary counts the kept files as `Files skipped: N (cached)`, the 304s
   as `Not modified (304): N`, and the files of the previous run this one did
   not reach as `Not reached this run, kept on disk: N` (`--verbose` lists
@@ -461,6 +474,56 @@ not empty, is revalidated.
   takes it over. A manifest entry whose file is not named as its URL would be
   (an edited manifest) is ignored, so the manifest never decides where a page
   is written.
+
+**Cache modes (`--cache`, HTTrack `-C`).** The default is HTTrack's: `2` (the
+update above) when `-o` holds a manifest, else `1`.
+
+- `--cache 2` (HTTrack `--update`): each recorded file is revalidated, as
+  above.
+- `--cache 1` (HTTrack `--continue`): a file recorded from a 2xx and still on
+  disk at its recorded size is not requested at all; the crawl follows its
+  links from that copy, and the summary counts it as `Loaded from cache
+  without a request: N`. A file whose size changed is fetched in full, with no
+  validator.
+- `--cache 0`: the manifest's records are neither used nor written. Every file
+  is fetched in full, with no validator, and keeps the record the previous run
+  made for its URL (a file that run did not record gets none), so a later
+  `--cache 2` run revalidates against the previous records, as HTTrack's next
+  update revalidates against the cache a `-C0` run left alone. No file is
+  listed as not reached.
+
+**Update hacks (`--updatehack`, HTTrack `-%s`, off).** For a recorded file
+that is not a page, a script or a stylesheet, a `200` whose `Content-Length`
+is the size of the copy on disk (and, when validators were sent, the size the
+manifest recorded) keeps that copy and its record, as a 304 would: the body is
+never read and the connection is dropped, as HTTrack drops it. The summary
+counts these as `Kept on a matching size (--updatehack): N`.
+
+**Change report (`--changes`, HTTrack `-%d`, off).** The run writes
+`hts-changes.json` in `-o`, in HTTrack's format, and prints its summary
+(`Change report: 2 new, 1 changed, 40 unchanged, 1 gone (hts-changes.json)`).
+Each file is listed once, with its URL and its size:
+
+- `new`: no copy before this run;
+- `changed` (with `previous_size`): a page whose payload, the body as
+  received before its links were rewritten, differs from the one its manifest
+  record holds (`payload_md5`), or another file whose bytes differ;
+- `unchanged`: a file left as it was, or rewritten with the same payload or
+  bytes;
+- `gone`: a file of the previous run no link reached this run (a URL the run
+  requested without keeping it is `unchanged`).
+
+`first_crawl` is `true` without a previous manifest, and `null` under
+`--cache 0`, which lists nothing as gone. `purged` is always `false`. A URL is
+written as the manifest writes it (`""` when the manifest records none). A
+run that fails leaves the previous report as it was.
+
+**`--do-not-recatch` (HTTrack `-%n`, off).** A recorded file other than a
+page, a script or a stylesheet that was erased or emptied since is not fetched
+again: a missing one is created empty, and its URL is listed under `Errors` as
+`null-size file not recaught`, as HTTrack logs it. A page, script or
+stylesheet is fetched again in full (HTTrack restores it from the body its
+cache holds).
 
 `[httrack]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
@@ -481,6 +544,10 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--disable-security-limits` | off | Lift the connection, rate and bandwidth clamps |
 | `--no-parse-scripts` | off | Do not scan scripts, event handlers and stylesheets for links (HTTrack `-j4`, which stops CSS `url()` / `@import` too) |
 | `--no-extended-parsing` | off | Do not follow quoted strings that look like links (HTTrack `-%P0`, or `-j8`) |
+| `--cache` | `2` with a manifest, else `1` | Cache mode (HTTrack `-C`): `0` ignores the manifest, `1` trusts it, `2` revalidates (see "Cache modes") |
+| `--updatehack` | off | Keep a recorded non-page file when a `200` announces its size (HTTrack `-%s`, see "Update hacks") |
+| `--do-not-recatch` | off | Leave a recorded non-page file erased since empty instead of fetching it (HTTrack `-%n`) |
+| `--changes` | off | Write `hts-changes.json` in `-o`: what this run left new, changed, unchanged or gone (HTTrack `-%d`, see "Change report") |
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -498,14 +565,25 @@ protect the corpus:
 - A `--filter` rule never widens the crawl to another host.
 - No asset mirroring: the crawl does not request links whose extension is a
   known non-page type left out of `--include-extensions`.
+- Link rewriting: a link to a file the run did not save is made absolute
+  (HTTrack writes the name it planned); an absolute link is left as written;
+  a link attribute (`href`, `src`...) escapes only `%` and `#` of a saved name
+  and drops the query, so `pack --cross-refs` resolves it.
 - Updates keep no cache beside the mirror (HTTrack's `hts-cache/`), so:
   - the manifest never records a redirect target: the validators of a file
     reached through a redirect go to the hop whose file name is that file's;
   - the links of a kept page are read from the saved copy and mapped back
     through the manifest: a file recorded with `"url": null` is not reached
     from a kept page and never revalidated;
-  - a kept file is never renamed, and a kept page never rewritten;
-  - robots.txt is fetched in full on every run.
+  - a kept file is never renamed nor rewritten, and a kept script's links are
+    read against the page that loads it in this run;
+  - robots.txt is fetched in full on every run;
+  - under `--cache 1`, the redirecting URL of a file reached through a
+    redirect is still requested (its target is not), and a page, script or
+    stylesheet whose size changed is fetched in full, where HTTrack loads both
+    from its cache.
+- Under `--cache 1 --do-not-recatch`, a file whose size changed is fetched in
+  full and left as it was if that fails; HTTrack empties it before the request.
 - A `Retry-After` on a revalidation still pauses the whole queue, and a
   challenged start URL still exits 1 on an update (HTTrack treats both as a
   304).
@@ -523,12 +601,7 @@ is used when available. The release binary includes this extra.
 
 **Current gaps (temporary).** Under `httrack`, the Playwright fallback is
 not implemented yet and fails loud (exit 1); use `--downloader wget` for
-those sites. Links found in scripts, stylesheets and by extended parsing are
-followed but not rewritten to the saved files (HTTrack rewrites them too).
-With a manifest an update always revalidates (HTTrack `-C2`): the
-other cache modes (`-C0`, `-C1`/`--continue`), the `-%s`, `-%n` and
-`--changes` options and file times from `Last-Modified` are not ported yet.
-None of these is a deviation from HTTrack.
+those sites. It is no deviation from HTTrack.
 
 ##### fire-engine
 
@@ -539,37 +612,52 @@ request. All `[httrack]` flags above apply, plus:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--proxy` | — | One proxy URL for every request (`http://user:pass@host:port`) |
+| `--proxy` | — | One proxy URL for every request (`http://user:pass@host:port`); its credentials go to curl apart from the URL, so no error or report line shows them |
 | `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`) |
 
 Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
-'dograpper[fire-engine]'`), which installs `curl_cffi`. Without it, the
+'dograpper[fire-engine]'`), which installs `curl_cffi` plus the `br` / `zstd`
+decoders of the `httrack` extra: curl hands the body over as it came, and the
+profile decodes it with the `httrack` decoder, under the same size and zstd
+window limits. `--timeout` is the time to connect, then the longest silence
+while receiving, as under `httrack`. Without the extra, the
 profile fails loud with an install hint. `--headless` is rejected (the profile
 has its own transport). If the site still challenges the request after the
 browser fingerprint, the run exits 1 and suggests `--proxy` with a different
 IP or `--downloader wget`; a manual-login browser solver is planned
 ([ADR-0011](docs/adr/0011-fire-engine-downloader.md)). Automatic challenge or
-CAPTCHA solving is a non-goal. robots.txt and the pacing flags apply exactly
-as under `httrack`.
+CAPTCHA solving is a non-goal. robots.txt, the pacing flags and the update
+mode ("Updates" above) apply exactly as under `httrack`.
+
+On the wire, the browser profile sends its own identity headers
+(`User-Agent`, `Accept`, `Accept-Language`, `Accept-Encoding`, `Sec-Fetch-*`,
+client hints) in its own order; of the `httrack` header set only the
+request-specific ones are sent: `Referer` and, on an update, `If-None-Match` /
+`If-Modified-Since`. A `--user-agent` you give (on the command line or in
+config) replaces the profile's `User-Agent`; the rest of the identity stays the
+profile's. How this should match Firecrawl exactly is open in
+[#136](https://github.com/lorenzoervedosa/dograpper/issues/136).
 
 #### Incremental
 
 A `.dograpper-manifest.json` manifest is generated after each download,
 recording mirrored files with MD5 content hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
-changed on the server; under `--downloader httrack` they revalidate each
+changed on the server; under `--downloader httrack` or `fire-engine` they revalidate each
 file with the validators the manifest recorded (see "Updates" under
 [Downloader profiles](#downloader-profiles)). For the files it saves, the
-httrack profile also records the response's `status`, `content_type`, `etag`
+httrack and fire-engine profiles also record the response's `status`, `content_type`, `etag`
 and `last_modified` (the `Date` when the server sent no `Last-Modified`), and
-`redirected` when the requested URL reached the file through a redirect; the
-other downloaders leave these `null`. A file a run did not touch keeps what
+`redirected` when the requested URL reached the file through a redirect, and
+`payload_md5`, the MD5 of the body as received (before its links were
+rewritten), which `--changes` compares; the other downloaders leave these
+`null`. A file a run did not touch keeps what
 an earlier run recorded.
 
 The manifest lives in the output directory: a relative `--manifest`
 resolves against `-o`, an absolute one is used as is, so a re-run from any
 directory finds it and two mirrors never share one. It never lists itself,
-`delta_manifest.json` or `pack_state.json`. `pack` reads it the same way,
+`delta_manifest.json`, `pack_state.json` or `hts-changes.json`. `pack` reads it the same way,
 relative to `INPUT_DIR` (its `--manifest` row says how a subdirectory of a
 mirror finds the mirror's manifest). Up to 0.4.0 the default was relative to the current
 directory; a manifest left there is not read (it may belong to another
@@ -1240,7 +1328,7 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1600,6 +1688,7 @@ longer read and can be deleted once `input-dir` holds the new one.
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
 | `pack_state.json` | `--delta` | Corpus state as of this pack; the next `--delta` run diffs against it |
 | `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes), in the `-o` directory |
+| `hts-changes.json` | `download --changes` | HTTrack's change report of the last run, in the `-o` directory |
 
 ---
 

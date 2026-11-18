@@ -44,10 +44,12 @@ class ManifestEntry:
     # The httrack profile's record of the response the file was saved from, which its
     # update mode revalidates (etag and last_modified above too); None from the other
     # downloaders and in manifests written before. `redirected`: `url` reached the file
-    # through a redirect, whose target is never recorded.
+    # through a redirect, whose target is never recorded. `payload_md5`: the MD5 of the
+    # body as received, before links were rewritten, which `--changes` compares.
     status: Optional[int] = None
     content_type: Optional[str] = None
     redirected: Optional[bool] = None
+    payload_md5: Optional[str] = None
 
 @dataclass
 class Manifest:
@@ -57,7 +59,8 @@ class Manifest:
 
 _ENTRY_FIELDS = {f.name for f in fields(ManifestEntry)}
 # What a downloader records per file (build_manifest's `records`).
-RECORD_FIELDS = ('status', 'content_type', 'etag', 'last_modified', 'redirected')
+RECORD_FIELDS = ('status', 'content_type', 'etag', 'last_modified', 'redirected',
+                 'payload_md5')
 
 
 def read_manifest(path: str) -> Manifest:
@@ -281,16 +284,17 @@ def diff_manifests(old: Optional[Manifest], new: Manifest) -> ManifestDiff:
             old_entry = old.files[key]
             if old_entry.size_bytes != new_entry.size_bytes:
                 modified.append(key)
-            elif old_entry.mtime == new_entry.mtime:
-                # Fast path: mtime unchanged, content assumed unchanged
-                # without hashing.
-                pass
             elif old_entry.content_hash is not None and new_entry.content_hash is not None:
-                # mtime changed but content hash is available on both sides:
-                # trust the hash, not the mtime (touch, cp without -p, a
-                # fresh git clone all churn mtime without changing bytes).
+                # A hash on both sides decides, whatever the mtime: touch, cp
+                # without -p or a fresh git clone churn mtime without changing
+                # bytes, and a downloader that stamps files with the server's
+                # time (httrack's Last-Modified) keeps it over new bytes.
                 if old_entry.content_hash != new_entry.content_hash:
                     modified.append(key)
+            elif old_entry.mtime == new_entry.mtime:
+                # Backward compat: no hash to compare, mtime unchanged, content
+                # assumed unchanged.
+                pass
             else:
                 # Backward compat: old_entry came from a manifest written
                 # before content_hash existed. Can't verify by hash, so fall

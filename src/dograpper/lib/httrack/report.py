@@ -19,6 +19,8 @@ class RunReport:
     errors: list[tuple[str, str, str | None]] = field(default_factory=list)
     partial: bool = False
     not_modified: int = 0  # update mode: 304 to a revalidation
+    from_cache: int = 0  # --cache 1: recorded files loaded without a request
+    size_kept: list[str] = field(default_factory=list)  # --updatehack: kept on their size
     kept: list[tuple[str, str]] = field(default_factory=list)  # update: (URL, error) kept over
     unreached: list[str] = field(default_factory=list)  # previous run's files this one missed
 
@@ -35,6 +37,12 @@ def format_report(r: RunReport, verbose: bool) -> list[str]:
                 lines.extend(neutralize_controls(f"  {u}") for u in urls)
     if r.not_modified:
         lines.append(f"Not modified (304): {r.not_modified}")
+    if r.from_cache:  # HTTrack -C1's "File immediately loaded from cache" (htsback.c:2529)
+        lines.append(f"Loaded from cache without a request: {r.from_cache}")
+    if r.size_kept:  # HTTrack -%s's "Kept existing file ..., matching the ... size"
+        lines.append(f"Kept on a matching size (--updatehack): {len(r.size_kept)}")
+        if verbose:
+            lines.extend(neutralize_controls(f"  {u}") for u in r.size_kept)
     if r.kept:  # HTTrack's "Kept existing file ... after error N on update" (htsback.c:4266)
         lines.append(f"Kept the previous copy after an error: {len(r.kept)}")
         if verbose:

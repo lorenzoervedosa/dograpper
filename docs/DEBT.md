@@ -36,9 +36,14 @@ Entry format, grouped under one heading per issue or PR:
   `src/dograpper/lib/fire_engine/fetcher.py` streams with `iter_content` and
   raises once `total > MAX_BODY_BYTES`, but curl_cffi can decode and buffer
   bytes ahead of the bandwidth-throttled drain, so peak allocation from a
-  decompression bomb can pass the cap before the check fires. ⏸ **accepted: the
+  decompression bomb can pass the cap before the check fires. ~~⏸ accepted: the
   consumer cap bounds the non-adversarial case, and the correct producer-side
   bound — disable curl's auto-decode and route the raw stream through
   `httrack.fetcher._decode` (already bounded), or a WRITEFUNCTION that aborts
   past the cap — must be verified against the real curl_cffi, which slice 1 does
-  not install; fix it in the curl_cffi smoke-test slice.**
+  not install; fix it in the curl_cffi smoke-test slice.~~ ✅ **fixed (#130):
+  both. curl's decoding is off (`HTTP_CONTENT_DECODING` 0), its writer
+  (`content_callback`) aborts the transfer past `MAX_BODY_BYTES` and paces the
+  bandwidth, and `Fetcher.get` decodes the raw body with `_decode`. Measured on
+  curl_cffi 0.17.0 with a 1 GiB bomb: peak RSS over baseline went from ~1030 MiB
+  (gzip, br, zstd) to 71-130 MiB, the same as the stdlib path.**

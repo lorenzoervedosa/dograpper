@@ -51,10 +51,14 @@ and fixes alone are a PATCH bump.
 - `download --downloader fire-engine` (and on `sync`): the httrack crawl over a
   `curl_cffi` transport that sends a browser TLS/HTTP-2 fingerprint, for docs
   behind a WAF that rejects the stdlib handshake. Adds `--proxy` and
-  `--impersonate`; needs the optional `fire-engine` extra (`curl_cffi`), and
+  `--impersonate` (an explicit `--user-agent` replaces the impersonated
+  profile's User-Agent); needs the optional `fire-engine` extra (`curl_cffi`, plus
+  `brotli` and `zstandard` to decode what the browser profile accepts), and
   fails loud with an install hint when it is missing. Same discovery, scope,
-  pacing, robots.txt and link rewriting as `httrack`; automatic challenge/CAPTCHA
-  solving is a non-goal. ([ADR-0011](docs/adr/0011-fire-engine-downloader.md))
+  pacing, robots.txt, link rewriting and update mode (a re-run revalidates the
+  previous run's files, and the manifest records their validators) as
+  `httrack`; automatic challenge/CAPTCHA solving is a non-goal.
+  ([ADR-0011](docs/adr/0011-fire-engine-downloader.md), [#130])
 
 - `dograpper docs`: serves a self-contained, offline reference page for every
   command and option on `127.0.0.1` (`--port`, default 8000; `--no-browser`),
@@ -69,9 +73,11 @@ and fixes alone are a PATCH bump.
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
   `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`,
-  `--no-extended-parsing`). When llms.txt and the
-  sitemap give no URL list, it crawls the site from the start URL as HTTrack
-  does: links from `href`, HTTrack's link attributes, meta refresh and CSS,
+  `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`,
+  `--changes`).
+  When llms.txt and the sitemap give no URL list, it crawls the site from the
+  start URL as HTTrack does: links from `href`, HTTrack's link attributes,
+  meta refresh and CSS,
   from scripts and event handlers (HTTrack `-j`) and from quoted strings that
   name a file (HTTrack `-%P`), both on by default as in HTTrack;
   the start host and directory, `--filter` and `--depth` link hops as scope;
@@ -79,14 +85,31 @@ and fixes alone are a PATCH bump.
   targets queued as links; a deterministic output whatever the request order;
   `[progress] httrack crawl:` lines. On both paths, links between saved pages
   are rewritten to relative paths (HTTrack `-K0`), so the mirror browses
-  offline and `pack --cross-refs` resolves them. A run over an earlier one is
+  offline and `pack --cross-refs` resolves them; the links found in scripts,
+  stylesheets and quoted strings are rewritten too, in pages and in saved
+  stylesheets and scripts, as HTTrack writes them ([#133]). A run over an earlier one is
   an update, as HTTrack `-C2`: each saved file is revalidated with
   `If-None-Match` / `If-Modified-Since` from its manifest record (new manifest
-  fields `status`, `content_type`, `redirected`; `etag` and `last_modified`
-  filled in), a 304 or an error leaves the previous copy byte-identical, and
+  fields `status`, `content_type`, `redirected` and `payload_md5`, the MD5 of
+  the body as received; `etag` and `last_modified` filled in), a 304 or an error leaves the previous copy byte-identical, and
   the summary adds `Not modified (304)`, `Kept the previous copy after an
-  error` and `Not reached this run, kept on disk`. The Playwright fallback
-  fails loud under this profile for now.
+  error` and `Not reached this run, kept on disk`. `--cache` picks HTTrack's
+  cache mode (`-C`, default `2` over a manifest, else `1`): `1` loads each
+  recorded file still at its recorded size without a request (`Loaded from
+  cache without a request: N`), `0` fetches everything in full and leaves the
+  manifest's records as they were. `--updatehack` (HTTrack `-%s`, off) keeps
+  a recorded file other than a page, script or stylesheet when a 200
+  announces the size it has on disk, without reading the body (`Kept on a
+  matching size (--updatehack): N`). `--do-not-recatch` (HTTrack `-%n`, off)
+  leaves a recorded file other than a page, script or stylesheet that was
+  erased since empty instead of fetching it again, and reports it as `null-size
+  file not recaught`. `--changes` (HTTrack `-%d`, off) writes
+  `hts-changes.json` in `-o`, HTTrack's change report: each file new, changed
+  (a page by the MD5 of its payload against `payload_md5`), unchanged or gone
+  against the previous run, and a `Change report:` line in the summary. `pack`
+  and the manifest skip it. Each saved file gets the response's `Last-Modified`
+  (else its `Date`) as its modification and access time, as HTTrack sets it.
+  The Playwright fallback fails loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
@@ -215,6 +238,11 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack --delta` no longer reports "no files changed" when a file was rewritten
+  with other bytes of the same size and the same modification time, as a
+  downloader that stamps files with the server's time can leave it: the
+  content hashes decide whenever both pack states have them, and the mtime
+  only for a state written before hashes existed. ([#132])
 - `pack` skips a saved HTTP error page (a `<title>` such as `404 Not Found`
   and almost no other text, as a mirror stores when a URL answered an error),
   warns once with the affected files (also in `--dry-run` and `--layout page`),
@@ -464,3 +492,6 @@ and fixes alone are a PATCH bump.
 [#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
+[#133]: https://github.com/lorenzoervedosa/dograpper/issues/133
+[#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
+[#132]: https://github.com/lorenzoervedosa/dograpper/issues/132

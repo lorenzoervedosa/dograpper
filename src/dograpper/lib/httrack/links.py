@@ -16,7 +16,7 @@ each byte outside strings and comments is tried against hts_js_scan_link's keywo
 (hts_dirty_link_is_url, htsparse.c:2160-2276). Both are on by default, as in HTTrack.
 Their contexts are the ones this tokenizer reads (a script attribute is its HTML5 value);
 inside one, HTTrack's byte rules apply (jsscan.py), reading the page past it where HTTrack
-does. Links found by these scans are followed but not rewritten.
+does. -K0 rewrites the links these scans find too, as HTTrack writes them (_scanned_ref).
 
 Pages are read as UTF-8 with surrogateescape, so every byte survives a rewrite; a URL
 holding a byte that is not UTF-8 is not a usable link. The tokenizer is this module's own,
@@ -33,7 +33,7 @@ import os
 import re
 from collections.abc import Mapping
 from typing import NamedTuple
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 from ...utils.redact import redact_url
 from .jsscan import (
@@ -171,10 +171,12 @@ class _Hit(NamedTuple):
     tag: str
     attrs: dict            # first value of each attribute of the tag
     name: str              # attribute holding the link; "css" / "script" / "" for a scan's
-    span: tuple[int, int]  # the URL's span in `value`
+    span: tuple[int, int]  # the URL's span in `value`; a scan's link: in the page
     raw: str               # the URL as written
     url: str | None        # absolute, no fragment; None when unusable
     follow: bool           # False once a meta robots nofollow was seen
+    text: bool = False     # a scan's link in <script>/<style> text, where no entity is read
+    parens: bool = False   # a scan's link in a CSS url() (Found.parens)
 
 
 class _Scan:
@@ -254,10 +256,11 @@ class _Scan:
                 attrs: dict | None = None) -> list[tuple[int, _Hit]]:
         """The links of the script t[i:end], each with its position."""
         name = "css" if ctx.css else "script"
-        return [(pos, _Hit(None, "", tag, attrs or {}, name, (0, 0), raw,
-                           self._resolve(unescape_attr(raw)), not self.nofollow))
-                for pos, raw, _ in scan_script(self.text, i, end, ctx, lastc,
-                                                self.parse_scripts, self.extended)]
+        return [(f.start, _Hit(None, "", tag, attrs or {}, name, (f.start, f.end), f.link,
+                               self._resolve(unescape_attr(f.link)), not self.nofollow,
+                               not ctx.in_tag, f.parens))
+                for f in scan_script(self.text, i, end, ctx, lastc, self.parse_scripts,
+                                     self.extended)]
 
     def _attr_script(self, tag: str, amap: dict, j: int, start: int, vend: int,
                      lastq: str, ctx: Ctx) -> list[tuple[int, _Hit]]:
@@ -367,9 +370,9 @@ class _Scan:
             if got is None:
                 pos = p + 1
                 continue
-            raw, term = got
+            raw, term, start = got
             if raw:
-                found.append((p + 1, _Hit(None, "", tag, amap, "", (0, 0), raw,
+                found.append((p + 1, _Hit(None, "", tag, amap, "", (start, term), raw,
                                           self._resolve(unescape_attr(raw)),
                                           not self.nofollow)))
             last, pos = (p + 1, term + 1), term + 1
@@ -435,23 +438,25 @@ def page_links(body: bytes, url: str, *, frame: str = "document", robots: bool =
             for h in scan.hits if h.url and h.follow]
 
 
-def _file_links(body: bytes, url: str, base: str, css: bool, parse_scripts: bool,
-                extended: bool) -> list[Link]:
-    """The links of a whole stylesheet or script: HTTrack parses it as one script body
-    (htsparse.c:1264-1287), its links resolved against `base`, a module specifier's
-    against the file itself."""
-    out, text = [], _decode(body)
-    for _, raw, module in scan_script(text, 0, len(text), Ctx(css, css), "\0",
-                                       parse_scripts, extended):
-        raw = unescape_attr(raw)
+def _file_hits(text: str, url: str, base: str, css: bool, parse_scripts: bool,
+               extended: bool):
+    """Each link of a whole stylesheet or script with its URL (None: unusable): HTTrack
+    parses it as one script body (htsparse.c:1264-1287), its links resolved against
+    `base`, a module specifier's against the file itself."""
+    for f in scan_script(text, 0, len(text), Ctx(css, css), "\0", parse_scripts, extended):
+        raw, u = unescape_attr(f.link), None
         if len(raw) <= URL_MAX:
             try:
-                u = _usable(urljoin(url if module else base, raw))
+                u = _usable(urljoin(url if f.module else base, raw))
             except ValueError:
-                u = None
-            if u:
-                out.append(Link(u, _css_meta(u) if css else _NO_META))
-    return out
+                pass
+        yield f, u
+
+
+def _file_links(body: bytes, url: str, base: str, css: bool, parse_scripts: bool,
+                extended: bool) -> list[Link]:
+    return [Link(u, _css_meta(u) if css else _NO_META)
+            for _, u in _file_hits(_decode(body), url, base, css, parse_scripts, extended) if u]
 
 
 def css_links(body: bytes, url: str, *, parse_scripts: bool = True,
@@ -469,9 +474,80 @@ def script_links(body: bytes, url: str, parent: str, *, parse_scripts: bool = Tr
     return _file_links(body, url, parent, False, parse_scripts, extended_parsing)
 
 
+def _relative(path: str, page_path: str) -> str:
+    """lienrelatif (htstools.c:260-344): `path` from the directory of `page_path`."""
+    return os.path.relpath(path, os.path.dirname(page_path)).replace(os.sep, "/")
+
+
 def _local_ref(path: str, page_path: str) -> str:
-    rel = os.path.relpath(path, os.path.dirname(page_path)).replace(os.sep, "/")
-    return rel.replace("%", "%25").replace("#", "%23")  # a name holding them is no URL syntax
+    # a name holding them is no URL syntax
+    return _relative(path, page_path).replace("%", "%25").replace("#", "%23")
+
+
+def _hex(m: re.Match) -> str:
+    return m.group().lower()  # HTTrack writes its %XX in lower case
+
+
+def _uri_utf(s: str) -> str:
+    """escape_uri_utf (htslib.c:4452-4455, x_escape_http mode 30, 4613-4618): every byte
+    but letters, digits, "/", "-", "_", ".", "~", "(" and ")" as %xx."""
+    return re.sub("%[0-9A-F]{2}", _hex, quote(s, safe="/()", errors="surrogateescape"))
+
+
+def _check_url(s: str) -> str:
+    """escape_check_url (htslib.c:4457-4460, mode 0, 4597-4598): '"', blanks, controls and
+    bytes above 126 as %xx."""
+    return re.sub(r'[\x00-\x20"\x7f-\U0010ffff]',
+                  lambda m: re.sub("%[0-9A-F]{2}", _hex, quote(m.group(), safe="",
+                                                               errors="surrogateescape")), s)
+
+
+def _html(s: str, text: bool) -> str:
+    """sink_add_htmlescaped (htsparse.c:977-988): & as &amp;, but not in script or style
+    text (sink_raw_text; history.txt:151, #1616)."""
+    return s if text else s.replace("&", "&amp;")
+
+
+def _url_text(url: str, text: bool) -> str:
+    """sink_add_url_htmlescaped (htsparse.c:1000-1007, escape_url_quotes_any 875-905):
+    " ' < > as %xx, then _html()."""
+    return _html(re.sub("[\"'<>]", lambda m: f"%{ord(m.group()):02x}", url), text)
+
+
+def _scanned_ref(raw: str, url: str, from_path: str | None, local: Mapping[str, str],
+                 text: bool, parens: bool) -> str | None:
+    """HTTrack -K0 for a link a script scan or -%P took, written from `from_path` (None: no
+    saved file to write it from): a saved file is its relative path (htsparse.c:3379-3502:
+    _uri_utf, then "(" ")" as %28 %29 in a CSS url(), escape_url_parens 851-870) and the
+    link's query after it (includequery, 3475-3480; entities decoded 2657-2670, then
+    _check_url, 2688-2702); any other relative link is its absolute URL
+    (sink_add_absolute_url, 1011-1033, 3161-3169). None leaves the link as written."""
+    saved = local.get(url_key(url)) if from_path else None
+    if saved is not None:
+        ref = _uri_utf(_relative(saved, from_path))
+        if parens:
+            ref = ref.replace("(", "%28").replace(")", "%29")
+        _, sep, query = unescape_attr(raw).partition("?")
+        return ref + _html(sep + _check_url(query), text)
+    if urlsplit(raw).scheme:
+        return None  # already absolute
+    return _url_text(url, text)
+
+
+def _splice(body: bytes, text: str, edits: list[tuple[tuple[int, int], str]]) -> bytes:
+    """`text` with each span of `edits` replaced, every other byte kept; `body` itself when
+    there is none. A span starting inside an earlier one is dropped: a script in a srcset
+    value that the attribute's rewrite replaces whole."""
+    if not edits:
+        return body
+    out, last = [], 0
+    for (start, stop), new in sorted(edits):
+        if start < last:
+            continue
+        out += [text[last:start], new]
+        last = stop
+    out.append(text[last:])
+    return "".join(out).encode("utf-8", errors="surrogateescape")
 
 
 def _new_value(value: str, hits: list[_Hit], page_path: str, local: Mapping[str, str]) -> str:
@@ -488,28 +564,48 @@ def _new_value(value: str, hits: list[_Hit], page_path: str, local: Mapping[str,
     return value
 
 
-def rewrite_links(body: bytes, url: str, path: str, local: Mapping[str, str]) -> bytes:
+def rewrite_links(body: bytes, url: str, path: str, local: Mapping[str, str], *,
+                  parse_scripts: bool = True, extended_parsing: bool = True) -> bytes:
     """`body` (an HTML page fetched from `url`, saved at `path`) with HTTrack -K0 links: a
     link to a saved file becomes a relative path to it, any other relative link becomes
     absolute, and <base href> is blanked so the relative links resolve on disk. `local`
-    maps url_key() to saved paths. Bytes outside the rewritten attribute values are kept;
-    a page with nothing to rewrite is returned as is."""
+    maps url_key() to saved paths. The links the script scan (-j, `parse_scripts`) and -%P
+    (`extended_parsing`) take are rewritten too (_scanned_ref). Bytes outside the rewritten
+    attribute values and links are kept; a page with nothing to rewrite is returned as is."""
     text = _decode(body)
-    scan = _Scan(text, url, robots=False, parse_scripts=False, extended=False)
+    scan = _Scan(text, url, robots=False, parse_scripts=parse_scripts,
+                 extended=extended_parsing)
     values: dict[tuple[int, int], list[_Hit]] = {}
+    edits = []
     for h in scan.hits:
-        if h.vspan is not None and h.url:
+        if h.url and h.vspan is not None:
             values.setdefault(h.vspan, []).append(h)
-    edits = {vspan: "" for vspan in scan.base_hrefs if text[vspan[0]:vspan[1]] not in ('""', "''")}
+        elif h.url and (new := _scanned_ref(h.raw, h.url, path, local, h.text,
+                                            h.parens)) not in (None, text[h.span[0]:h.span[1]]):
+            edits.append((h.span, new))
+    edits += [(vspan, '""') for vspan in scan.base_hrefs
+              if text[vspan[0]:vspan[1]] not in ('""', "''")]
     for vspan, hits in values.items():
         new = _new_value(hits[0].value, hits, path, local)
         if new != hits[0].value:
-            edits[vspan] = new
-    if not edits:
-        return body
-    out, last = [], 0
-    for (start, stop), new in sorted(edits.items()):
-        out += [text[last:start], '"', html.escape(new, quote=True), '"']
-        last = stop
-    out.append(text[last:])
-    return "".join(out).encode("utf-8", errors="surrogateescape")
+            edits.append((vspan, '"' + html.escape(new, quote=True) + '"'))
+    return _splice(body, text, edits)
+
+
+def rewrite_file_links(body: bytes, url: str, path: str, local: Mapping[str, str], *,
+                       css: bool, page: str | None = None, page_path: str | None = None,
+                       parse_scripts: bool = True, extended_parsing: bool = True) -> bytes:
+    """`body`, the stylesheet (`css`) or script fetched from `url` and saved at `path`, with
+    its links rewritten as rewrite_links() rewrites a <style>/<script> body: HTTrack writes
+    the buffer it parsed for every hypertext file (htsparse.c:1223, 3807-3852). A script
+    loaded by the page `page` takes that page's base and is written from its saved file,
+    `page_path`, bar a module specifier (relative_to_parent(), htscore.h:276-283); with no
+    saved page, those links are made absolute."""
+    text = _decode(body)
+    edits = []
+    for f, u in _file_hits(text, url, page or url, css, parse_scripts, extended_parsing):
+        own = f.module or page is None
+        if u and (new := _scanned_ref(f.link, u, path if own else page_path, local, True,
+                                      f.parens)) not in (None, text[f.start:f.end]):
+            edits.append(((f.start, f.end), new))
+    return _splice(body, text, edits)

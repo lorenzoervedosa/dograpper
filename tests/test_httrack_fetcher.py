@@ -1,7 +1,6 @@
 import gzip
 import random
 import socket
-import time
 import logging
 import threading
 import zlib
@@ -13,6 +12,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from dograpper.utils.challenge import is_challenge
+from tests.linearity import assert_linear
 from dograpper.lib.httrack import fetcher as fetcher_mod, policy as policy_mod
 from dograpper.lib.httrack.crawl import fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher
@@ -282,10 +282,10 @@ def test_request_headers_sent_in_order(server):
 
 
 def test_is_challenge_is_linear_on_hostile_bodies():
-    t0 = time.perf_counter()
-    assert not is_challenge(200, {}, b"<title" * 25000)
-    assert not is_challenge(200, {}, b"<title>" * 25000)
-    assert time.perf_counter() - t0 < 1.0
+    def check(body):
+        assert not is_challenge(200, {}, body)
+    assert_linear(lambda k: b"<title" * k, check, 25000)
+    assert_linear(lambda k: b"<title>" * k, check, 25000)
 
 
 def test_decompression_bomb_and_oversize_body_rejected(server, monkeypatch):
@@ -598,11 +598,12 @@ def test_many_tiny_gzip_members_rejected_fast():
     assert fetcher_mod._decode(one * 64, "gzip") == b"x" * 64
     with pytest.raises(ValueError, match="too many compressed members"):
         fetcher_mod._decode(one * 65, "gzip")
-    body = gzip.compress(b"") * 100_000  # ~2 MB; took ~3 s before the cap
-    t = time.perf_counter()
-    with pytest.raises(ValueError, match="too many compressed members"):
-        fetcher_mod._decode(body, "gzip")
-    assert time.perf_counter() - t < 0.5
+    empty = gzip.compress(b"")  # 100_000 of these (~2 MB) took ~3 s before the cap
+
+    def decode(body):
+        with pytest.raises(ValueError, match="too many compressed members"):
+            fetcher_mod._decode(body, "gzip")
+    assert_linear(lambda k: empty * k, decode, 25_000)
 
 
 @pytest.mark.parametrize("name", ["compression.zstd", "zstandard"])
@@ -614,10 +615,12 @@ def test_zstd_frame_cap_and_fast_rejection(name):
     assert fetcher_mod._zstd(mod, one * 64) == b"x" * 64
     with pytest.raises(ValueError, match="too many compressed members"):
         fetcher_mod._zstd(mod, one * 65)
-    t = time.perf_counter()
-    with pytest.raises(ValueError, match="too many compressed members"):
-        fetcher_mod._zstd(mod, mod.compress(b"") * 100_000)
-    assert time.perf_counter() - t < 0.5
+    empty = mod.compress(b"")
+
+    def decode(body):
+        with pytest.raises(ValueError, match="too many compressed members"):
+            fetcher_mod._zstd(mod, body)
+    assert_linear(lambda k: empty * k, decode, 25_000)
 
 
 def test_brotli_multi_call_continuation():
@@ -685,8 +688,8 @@ def test_request_target_escaped_like_httrack(url, target):
 
 
 def test_host_header_is_idna_encoded():
-    assert fetcher_mod._wire_host(urlsplit("http://u:p@Café.example:8080/")) == "xn--caf-dma.example:8080"
-    assert fetcher_mod._wire_host(urlsplit("https://Example.com:8443/")) == "Example.com:8443"
+    assert fetcher_mod.wire_host(urlsplit("http://u:p@Café.example:8080/")) == "xn--caf-dma.example:8080"
+    assert fetcher_mod.wire_host(urlsplit("https://Example.com:8443/")) == "Example.com:8443"
     f, _ = make()
     assert f.get("http://é" + "a" * 70 + ".com/", kind="navigate").error == "invalid URL"
 
@@ -717,3 +720,21 @@ def test_conditional_request_sends_validators_first_and_is_not_retried(server):
     f.get(base + "/b", kind="navigate")
     assert ft.sleeps[0] == pytest.approx(5.0)
     assert not any(k.startswith("If-") for k, _ in seen[1][1])
+
+
+def test_stop_drops_the_connection_before_the_body(server):
+    """-%s decides at the headers and drops the connection (deletehttp, htsback.c:4283-4336):
+    the body is never read, nor its bandwidth charged, and the next request reconnects."""
+    base, script, _ = server
+    script["/big"] = [(200, {"content-type": "text/plain"}, b"x" * 50_000)]
+    ft = FakeTime()
+    f = Fetcher(build_policy(retries=0, max_bandwidth=1000), clock=ft.clock, sleep=ft.sleep)
+    opened, connect = [], f._connect
+    f._connect = lambda parts: opened.append(parts) or connect(parts)
+    asked = []
+    res = f.get(base + "/big", kind="navigate",
+                stop=lambda status, h: asked.append((status, h["content-length"])) or True)
+    assert res.stopped and (res.status, res.body, res.error) == (200, b"", None)
+    assert asked == [(200, "50000")] and sum(ft.sleeps) < 1  # reading it costs 50 s
+    assert f.get(base + "/big", kind="navigate").body == b"x" * 50_000
+    assert len(opened) == 2

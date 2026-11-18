@@ -1,3 +1,4 @@
+import hashlib
 import os
 import threading
 
@@ -316,6 +317,26 @@ def test_links_between_seeded_pages_are_rewritten(server, tmp_path):
     assert res.report.errors == []
 
 
+
+def test_seeded_scripts_and_stylesheets_are_rewritten(server, tmp_path):
+    """The links the script scans take, in a page and in a seeded stylesheet, are
+    rewritten too (htsparse.c:3379-3502, 3807-3852); a seed is a start URL, so no page
+    loaded it and its links resolve against itself (htsparse.c:1280-1285)."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/a"] = (200, HTML, b'<script>img.src = "b";</script>')
+    script["/docs/b"] = (200, HTML, b"<p>b</p>")
+    script["/docs/s.css"] = (200, {"content-type": "text/css"}, b"p{background:url(b)}")
+    res = run([f"{base}/docs/a", f"{base}/docs/b", f"{base}/docs/s.css"], tmp_path,
+              exts="html,css")
+    docs = tmp_path / base.split("//")[1] / "docs"
+    assert (docs / "a.html").read_bytes() == b'<script>img.src = "b.html";</script>'
+    assert (docs / "s.css").read_bytes() == b"p{background:url(b.html)}"
+    assert res.report.errors == []
+    run([f"{base}/docs/a", f"{base}/docs/b"], tmp_path / "off", parse_scripts=False)
+    assert (tmp_path / "off" / docs.relative_to(tmp_path) / "a.html").read_bytes() == (
+        b'<script>img.src = "b";</script>')
+
 # -- update mode: the previous run's manifest records drive conditional revalidation --
 
 from dograpper.lib.manifest import build_manifest  # noqa: E402
@@ -356,7 +377,8 @@ def test_first_run_records_what_a_revalidation_needs(server, tmp_path):
     res = run([f"{base}/a", f"{base}/d", f"{base}/old"], tmp_path)
     recs = {os.path.basename(p): r for p, r in res.records.items()}
     assert recs["a.html"] == {"status": 200, "content_type": "text/html", "etag": '"a1"',
-                              "last_modified": LM, "redirected": False}
+                              "last_modified": LM, "redirected": False,
+                              "payload_md5": hashlib.md5(b"<p>a</p>").hexdigest()}
     assert recs["d.html"]["etag"] is None and recs["d.html"]["last_modified"].endswith(" GMT")
     assert recs["new.html"]["redirected"] is True and recs["new.html"]["etag"] == '"n1"'
 
@@ -582,3 +604,253 @@ def test_seed_redirect_target_is_requested_as_htsmirror_c_requests_it(server, tm
     assert "Referer" not in spy.sent["/old"] and "Referer" not in spy.sent["/doc"]
     # the report names the referrer of the failed request, as htsmirror.c:462-482 logs it
     assert [e for e in res.report.errors] == [(f"{base}/missing", "HTTP 404", f"{base}/gone")]
+
+
+def test_failed_write_leaves_no_seed_counted_for_the_shared_file(server, tmp_path, monkeypatch):
+    """Two seeds reaching one file: the write fails, so neither counts as written (#134)."""
+    from dograpper.lib.httrack import crawl
+
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (301, {"location": "/t"}, b"")
+    script["/b"] = (301, {"location": "/t"}, b"")
+    script["/t"] = (200, HTML, b"<p>t</p>")
+    second_seed_done, first = threading.Event(), threading.Event()
+    real_reporter = crawl.ProgressReporter
+
+    class Reporter(real_reporter):
+        def update(self, *a, **kw):  # run() calls it when a seed has an outcome
+            second_seed_done.set()
+            super().update(*a, **kw)
+
+    def failing_write(path, body):
+        if not first.is_set():  # the first writer holds the claim until the other seed
+            first.set()         # has an outcome; a seed that must wait for the write never
+            second_seed_done.wait(1)  # does, so the bound only ends the wait
+        raise OSError("disk full")
+
+    monkeypatch.setattr(crawl, "ProgressReporter", Reporter)
+    monkeypatch.setattr(crawl, "atomic_write_bytes", failing_write)
+    res = run([f"{base}/a", f"{base}/b"], tmp_path, connections=2)
+    assert res.files_downloaded == [] and res.urls == {} and res.records == {}
+    assert res.front_failed
+    assert [e[1].startswith("write failed") for e in res.report.errors] == [True, True]
+
+
+# -- file times: a saved file is stamped with its Last-Modified, else its Date --
+
+from dograpper.lib.httrack.crawl import file_time  # noqa: E402
+
+JAN1 = 1704067200  # LM
+
+
+@pytest.mark.parametrize("date, expected", [
+    ("Sun, 06 Nov 1994 08:49:37 GMT", 784111777),    # IMF-fixdate
+    ("Sunday, 06-Nov-94 08:49:37 GMT", 784111777),   # RFC 850
+    ("Sun Nov  6 08:49:37 1994", 784111777),         # asctime: a four-digit fifth number
+    ("Sun, 06 Nov 1994 08:49:37 +0100", 784111777),  # any zone is ignored (GMT)
+    ("Sun, 06 Nov 50 08:49:37 GMT", 2551337377),     # a two-digit year up to 50 is 20xx
+    ("Sun, 06 Nov 51 08:49:37 GMT", -572886623),     # ... above, 19xx
+    ("Wed, 32 Jan 2024 00:00:00 GMT", JAN1 + 31 * 86400),  # no range check
+    ("Thu, 01 Jan 1970 00:00:00 GMT", None),         # 0 is never applied
+    ("Sun, 06 Nov 1994", None), ("garbage", None), ("", None), (None, None),
+])
+def test_file_time_reads_dates_as_htsdate_c(date, expected):
+    """htsdate.c convert_time_rfc822 (pivot 50) and hts_tm_filetime: lenient tokens, the
+    first five numbers, the zone ignored, 0 or -1 never applied (htsdate.c:53-157, 200-208)."""
+    assert file_time(date) == expected
+
+
+def test_saved_files_get_their_last_modified_time(server, tmp_path):
+    """htscore.c:451-452 and htsback.c:2119-2128: access and modification times are the
+    recorded Last-Modified, else the Date; a page relinked after its write keeps it."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, {**HTML, "last-modified": LM}, b'<a href="b.txt">b</a>')
+    script["/b.txt"] = (200, {"content-type": "text/plain"}, b"b")  # http.server sends Date
+    res = run([f"{base}/a", f"{base}/b.txt"], tmp_path, exts="html,txt")
+    a, b = sorted(res.files_downloaded)
+    assert (os.stat(a).st_mtime, os.stat(a).st_atime) == (JAN1, JAN1)  # before any read
+    assert open(a).read() == '<a href="b.txt">b</a>'  # rewritten by relink, then stamped
+    assert os.stat(b).st_mtime == file_time(res.records[b]["last_modified"]) is not None
+
+
+def test_file_time_failure_is_reported_and_the_file_kept(server, tmp_path, monkeypatch):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, {**HTML, "last-modified": LM}, b"<p>a</p>")
+
+    def refuse(path, times):
+        raise PermissionError("read-only")
+    monkeypatch.setattr("dograpper.lib.httrack.crawl.os.utime", refuse)
+    res = run([f"{base}/a"], tmp_path)
+    assert open(res.files_downloaded[0], "rb").read() == b"<p>a</p>" and res.success
+    assert res.report.errors == [(f"{base}/a", "file time not set: read-only", None)]
+
+
+# -- cache modes: --cache 0 | 1 | 2 (HTTrack -C0 | -C1 | -C2) --
+
+from dograpper.lib.manifest import RECORD_FIELDS  # noqa: E402
+
+
+def test_cache_1_loads_a_recorded_file_without_a_request(server, tmp_path):
+    """-C1 (htsback.c:2497-2556): a recorded file still on disk at its recorded size is
+    "immediately loaded from cache", with no request; one whose size changed is fetched
+    in full ("does not have the expected size", htscache.c:729-806)."""
+    base, script, seen = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>")
+    script["/b"] = validated('"b1"', b"<p>b</p>", log=log)
+    first = run([f"{base}/a", f"{base}/b"], tmp_path)
+    previous = again(first, base, tmp_path)
+    a, b = sorted(first.files_downloaded)
+    with open(b, "wb") as f:
+        f.write(b"<p>b, edited</p>")
+    seen.clear(), log.clear()
+    res = run_update([f"{base}/a", f"{base}/b"], tmp_path, previous, cache=1)
+    assert "/a" not in seen and log == [{}]  # a: no request; b: a plain one
+    assert res.kept == [a] and res.records[a] == first.records[a]
+    assert res.files_downloaded == [b] and open(b, "rb").read() == b"<p>b</p>"
+    assert res.report.from_cache == 1 and res.report.not_modified == 0
+    assert "Loaded from cache without a request: 1" in format_report(res.report, False)
+
+
+def test_cache_1_requests_a_redirect_but_not_its_recorded_target(server, tmp_path):
+    """The manifest never records a redirect target (spec 5.6): the redirecting URL is still
+    requested, and the hop whose name is the recorded file's is loaded without a request."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    first = run([f"{base}/old"], tmp_path)
+    seen.clear()
+    res = run_update([f"{base}/old"], tmp_path, again(first, base, tmp_path), cache=1)
+    assert "/old" in seen and "/new" not in seen
+    assert [os.path.basename(f) for f in res.kept] == ["new.html"] and res.success
+
+
+def test_cache_0_fetches_in_full_and_leaves_the_records_as_they_were(server, tmp_path):
+    """-C0 (htscache.c:59, 1174): no cache is read, so each request is plain and each
+    answer written; none is written, so a file keeps the record the previous run made for
+    its URL (the next -C2 run revalidates against it), and a file it did not record has
+    none."""
+    base, script, _ = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>", log=log)
+    first = run([f"{base}/a"], tmp_path)
+    script["/a"] = validated('"a2"', b"<p>a, new</p>", log=log)
+    script["/c"] = (200, {**HTML, "etag": '"c1"'}, b"<p>c</p>")
+    log.clear()
+    res = run_update([f"{base}/a", f"{base}/c"], tmp_path, again(first, base, tmp_path),
+                     cache=0)
+    a, c = sorted(res.files_downloaded)
+    assert log == [{}] and res.kept == [] and open(a, "rb").read() == b"<p>a, new</p>"
+    assert res.records[a] == first.records[a] and res.records[a]["etag"] == '"a1"'
+    assert res.records[c] == dict.fromkeys(RECORD_FIELDS)
+
+
+# -- --updatehack (HTTrack -%s): a matching size keeps the copy on disk --
+
+TXT = {"content-type": "text/plain"}
+
+
+def test_updatehack_keeps_a_revalidated_file_whose_size_still_matches(server, tmp_path):
+    """htsback.c:4283-4336: a 200 to a revalidation, for a type that is no hypertext, whose
+    Content-Length is the recorded size and the size on disk, is forced to a 304: the copy
+    and its record stay ("Kept existing file ..., matching the cached size")."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n1"'}, b"old!")
+    script["/p"] = (200, {**HTML, "etag": '"p1"'}, b"<p>old</p>")
+    first = run([f"{base}/n.txt", f"{base}/p"], tmp_path, exts="html,txt")
+    previous = again(first, base, tmp_path)
+    script["/n.txt"] = (200, {**TXT, "etag": '"n2"'}, b"new!")  # ignores If-None-Match
+    script["/p"] = (200, {**HTML, "etag": '"p2"'}, b"<p>new</p>")
+    res = run_update([f"{base}/n.txt", f"{base}/p"], tmp_path, previous, "html,txt",
+                     updatehack=True)
+    n, p = sorted(first.files_downloaded)
+    assert open(n, "rb").read() == b"old!" and res.kept == [n]
+    assert res.records[n] == first.records[n] and res.report.size_kept == [f"{base}/n.txt"]
+    assert open(p, "rb").read() == b"<p>new</p>"  # a page is hypertext: never kept so
+    assert "Kept on a matching size (--updatehack): 1" in format_report(res.report, False)
+    off = run_update([f"{base}/n.txt"], tmp_path, previous, "html,txt")  # off by default
+    assert open(n, "rb").read() == b"new!" and off.report.size_kept == []
+
+
+def test_updatehack_rewrites_a_file_whose_size_changed(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n1"'}, b"old!")
+    first = run([f"{base}/n.txt"], tmp_path, exts="txt")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n2"'}, b"longer")
+    res = run_update([f"{base}/n.txt"], tmp_path, again(first, base, tmp_path), "txt",
+                     updatehack=True)
+    assert open(res.files_downloaded[0], "rb").read() == b"longer" and res.kept == []
+
+
+def test_updatehack_keeps_a_file_sent_no_validator_on_the_size_on_disk(server, tmp_path):
+    """htsback.c:4338-4357: a cached file sent no validator (its record has none) is kept
+    when the announced size is the size on disk ("matching the announced size")."""
+    base, script, _ = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, TXT, b"old!")
+    first = run([f"{base}/n.txt"], tmp_path, exts="txt")
+    previous = again(first, base, tmp_path)
+    for e in previous.files.values():  # a server that sent no Date, no ETag
+        e.etag = e.last_modified = None
+
+    def reply(h):
+        log.append(h.get("If-Modified-Since"))
+        return (200, TXT, b"new!")
+    script["/n.txt"] = reply
+    res = run_update([f"{base}/n.txt"], tmp_path, previous, "txt", updatehack=True)
+    assert log == [None] and res.kept == first.files_downloaded
+    assert open(res.kept[0], "rb").read() == b"old!"
+
+
+# -- --do-not-recatch (HTTrack -%n): an erased file stays empty --
+
+@pytest.mark.parametrize("cache", [None, 1])
+def test_do_not_recatch_leaves_an_erased_file_empty_without_a_request(server, tmp_path, cache):
+    """htsback.c:2466-2480, 2653-2694: a recorded file that is no hypertext, missing since,
+    is created empty and not requested ("Null-size file not recaught", an error at its
+    link); a page keeps its body in HTTrack's cache, never reaches that branch, and is
+    fetched again."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/n.txt"] = (200, {**TXT, "etag": '"n1"'}, b"notes")
+    script["/e.txt"] = (200, {**TXT, "etag": '"e1"'}, b"empty me")
+    script["/p"] = (200, {**HTML, "etag": '"p1"'}, b"<p>p</p>")
+    seeds = [f"{base}/n.txt", f"{base}/e.txt", f"{base}/p"]
+    first = run(seeds, tmp_path, exts="html,txt")
+    previous = again(first, base, tmp_path)
+    e, n, p = sorted(first.files_downloaded)
+    os.remove(n), os.remove(p)
+    open(e, "wb").close()
+    seen.clear()
+    res = run_update(seeds, tmp_path, previous, "html,txt", do_not_recatch=True, cache=cache)
+    assert "/n.txt" not in seen and "/e.txt" not in seen and "/p" in seen
+    assert open(n, "rb").read() == b"" and open(e, "rb").read() == b""
+    assert res.kept == [e, n] and res.records[n] == first.records[n]
+    assert res.files_downloaded == [p] and not res.front_failed
+    assert res.report.errors == [(f"{base}/e.txt", "null-size file not recaught", None),
+                                 (f"{base}/n.txt", "null-size file not recaught", None)]
+    again_ = run_update(seeds, tmp_path, again(res, base, tmp_path), "html,txt")
+    assert open(n, "rb").read() == b"notes" and again_.kept == []  # off: "recatching"
+
+
+def test_the_record_keeps_the_md5_of_the_payload_as_received(server, tmp_path):
+    """--changes compares a parsed page by its payload, the body before -K0 rewrote its
+    links (htschanges.c:299-345); the record keeps that MD5, the file on disk differs."""
+    base, script, _ = server
+    body = b'<a href="b">b</a>'
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, HTML, body)
+    script["/b"] = (200, HTML, b"<p>b</p>")
+    res = run([f"{base}/a", f"{base}/b"], tmp_path)
+    a = next(f for f in res.files_downloaded if f.endswith("a.html"))
+    assert open(a, "rb").read() != body  # relinked
+    assert res.records[a]["payload_md5"] == hashlib.md5(body).hexdigest()

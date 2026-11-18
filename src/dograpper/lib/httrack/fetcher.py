@@ -40,6 +40,7 @@ class FetchResult:
     error: str | None = None
     challenged: bool = False
     attempts: int = 0
+    stopped: bool = False  # `stop` took the headers: the body was never read
 
 
 def _check(out) -> None:
@@ -155,7 +156,7 @@ def same_host(a: str, b: str) -> bool:
         return False
 
 
-def _wire_host(parts) -> str:
+def wire_host(parts) -> str:
     """Host header value: netloc without userinfo, a non-ASCII name IDNA-encoded
     (UnicodeError, a ValueError, when IDNA cannot encode it)."""
     host = drop_userinfo(parts).netloc
@@ -230,7 +231,7 @@ class Fetcher:
                                                timeout=self.policy.timeout, context=self._ssl)
         return http.client.HTTPConnection(parts.hostname, parts.port, timeout=self.policy.timeout)
 
-    def _request(self, key, parts, target, headers):
+    def _request(self, key, parts, target, headers, stop=None):
         conns = self._local.__dict__.setdefault("conns", {})
         for _ in range(2):
             conn = conns.get(key)
@@ -243,6 +244,12 @@ class Fetcher:
                     conn.putheader(k, v)
                 conn.endheaders()
                 resp = conn.getresponse()
+                if stop is not None:
+                    hdrs = {k.lower(): v for k, v in resp.getheaders()}
+                    if stop(resp.status, hdrs):  # HTTrack drops the connection (deletehttp)
+                        conn.close()
+                        conns.pop(key, None)
+                        return resp.status, hdrs, None
                 chunks, total = [], 0
                 while chunk := resp.read(CHUNK):
                     chunks.append(chunk)
@@ -270,14 +277,17 @@ class Fetcher:
 
     def get(self, url: str, *, kind: str, referer: str | None = None,
             meta: FetchMeta = NAVIGATION,
-            validators: tuple[tuple[str, str], ...] = ()) -> FetchResult:
+            validators: tuple[tuple[str, str], ...] = (), stop=None) -> FetchResult:
         """GET `url`. With `validators` (a revalidation, policy.conditional_headers) an
         answered status is not retried: HTTrack keeps the previous copy instead
-        (htsback.c:4266-4280); the Retry-After gate is still set (spec 5.6)."""
+        (htsback.c:4266-4280); the Retry-After gate is still set (spec 5.6). `stop(status,
+        headers)` is asked once the headers arrive; True ends the request there, the
+        connection dropped and the body never read (HTTrack -%s, htsback.c:4281-4357), and
+        the result is `stopped`."""
         res = FetchResult(url)
         try:
             parts, key = urlsplit(url), _origin(url)
-            host, target = _wire_host(parts), request_target(parts)
+            host, target = wire_host(parts), request_target(parts)
         except ValueError:
             res.error = "invalid URL"
             return res
@@ -287,7 +297,8 @@ class Fetcher:
             res.attempts = attempt
             self._acquire(key)
             try:
-                status, hdrs, raw = self._request(key, parts, target, headers)
+                status, hdrs, raw = self._request(key, parts, target, headers,
+                                                  **({"stop": stop} if stop else {}))
             # timeouts, ssl.SSLError, RemoteDisconnected; short bodies (htsback.c: recatch)
             except (OSError, http.client.IncompleteRead) as exc:
                 res.error = f"{type(exc).__name__}: {exc}"
@@ -302,6 +313,9 @@ class Fetcher:
                 return res
             res.error = None
             res.status, res.headers = status, hdrs
+            if raw is None:  # `stop` took it at the headers
+                res.stopped = True
+                return res
             ra = _parse_retry_after(hdrs.get("retry-after"))
             if status in (429, 503) and ra is not None:
                 self._set_gate(url, ra)

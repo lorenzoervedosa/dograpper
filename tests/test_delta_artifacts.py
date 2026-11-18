@@ -300,3 +300,39 @@ def test_sync_packs_on_the_first_run_and_no_ops_on_the_second(tmp_path, monkeypa
         assert "no files changed" in second.output.lower()
         # The no-op must not remove what the first run produced.
         assert os.path.exists(os.path.join(chunks, "docs_chunk_01.md"))
+
+
+# ---------------------------------------------------------------------------
+# File times from the httrack profile (#132)
+# ---------------------------------------------------------------------------
+
+def test_delta_on_a_tree_stamped_with_last_modified(server, tmp_path):
+    """The httrack profile gives each file its Last-Modified as mtime: a page rewritten
+    with other bytes of the same length under the same Last-Modified keeps size and
+    mtime, and the gate must still fire; a run that changes no byte must not."""
+    from dograpper.cli import cli
+
+    base, script, _ = server
+    lm = {"content-type": "text/html", "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT"}
+    words = " ".join(["word"] * 60)
+    script["/robots.txt"] = (404, {}, b"")
+    script["/"] = (200, lm, _page("Index", words + ' <a href="a.html">a</a>').encode())
+    out, chunks = str(tmp_path / "mirror"), str(tmp_path / "chunks")
+    a = os.path.join(out, base.split("//")[1], "a.html")
+
+    def update(word):
+        script["/a.html"] = (200, lm, _page("Alpha", f"{word} {words}").encode())
+        res = CliRunner().invoke(cli, ["download", base + "/", "-o", out,
+                                       "--downloader", "httrack", "--include-extensions", "html"])
+        assert res.exit_code == 0, res.output
+        assert os.stat(a).st_mtime == 1704067200
+        res = CliRunner().invoke(cli, ["pack", out, "-o", chunks, "--delta"])
+        assert res.exit_code == 0, res.output
+        return res.output
+
+    update("alpha")
+    size = os.path.getsize(a)
+    assert "Nothing to do" not in update("omega")  # same length, same Last-Modified
+    assert os.path.getsize(a) == size
+    assert "omega" in open(os.path.join(chunks, "docs_chunk_01.md")).read()
+    assert "Nothing to do" in update("omega")  # rewritten with the same bytes

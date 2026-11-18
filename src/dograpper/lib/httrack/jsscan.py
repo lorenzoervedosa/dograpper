@@ -152,9 +152,10 @@ class Ctx(NamedTuple):
     tag_start: int = -1
 
 
-def _js_link(t: str, p: int, ctx: Ctx) -> tuple[int, int, str, str, bool] | None:
+def _js_link(t: str, p: int, ctx: Ctx) -> tuple[int, int, str, str, bool, bool] | None:
     """hts_js_scan_link (htsparse.c:557-788) at t[p]: (start and end of the URL, byte ending
-    an unquoted one, quote its entity stands for, module specifier) or None."""
+    an unquoted one, quote its entity stands for, module specifier, CSS url(): its rewrite
+    percent-encodes parentheses, escape_parens) or None."""
     expected, ends = "=", ";\"'" if ctx.in_tag else ";"
     avoid_quotes, unquoted_end = False, ""
     not_mime = not_method = is_import = is_specifier = False
@@ -228,14 +229,15 @@ def _js_link(t: str, p: int, ctx: Ctx) -> tuple[int, int, str, str, bool] | None
     if "${" in url or any(ch in url for ch in "\"'\t\r\n") or url.lstrip(" ")[:1] in (",", ";"):
         return None  # a template, or code (htsparse.c:747-777)
     return a, b, (unquoted_end if avoid_quotes and not ndelim else ""), entity, \
-        (is_import or is_specifier) and not ctx.css
+        (is_import or is_specifier) and not ctx.css, avoid_quotes
 
 
 def _take(t: str, i: int, inscript: bool, ending: str = "",
-          entity: str = "") -> tuple[str | None, int]:
+          entity: str = "") -> tuple[str | None, int, int]:
     """htsparse.c:2318-2565: the link starting at t[i], past the blanks and the quote before
-    it, cut where HTTrack cuts it; (link or None, index of the byte that ended it). The
-    caller resumes after that byte, whether a link came out or not."""
+    it, cut where HTTrack cuts it; (link or None, index of the byte that ended it, index of
+    its first byte). The caller resumes after the end, whether a link came out or not; -K0
+    replaces t[first:end] (htsparse.c:2400-2406, 3500)."""
     n, quote = len(t), ""
     while i < n and t[i] in _SPACE and not quote:
         quote = t[i] if t[i] in QUOTES else ""
@@ -243,13 +245,13 @@ def _take(t: str, i: int, inscript: bool, ending: str = "",
     if inscript and at(t, i) == "\\" and at(t, i + 1) in QUOTES:
         i += 2
     if not inscript and field(t, i, "javascript:"):
-        return None, i  # HTTrack parses it as a script instead
+        return None, i, i  # HTTrack parses it as a script instead
     j = i
     while True:
         m = _CUT.search(t, j, min(n, i + URL_MAX + 1))
         if m is None:
             if n - i > URL_MAX:
-                return None, i + URL_MAX + 1  # too long (HTS_URLMAXSIZE)
+                return None, i + URL_MAX + 1, i  # too long (HTS_URLMAXSIZE)
             j = n  # the end of the page ends it
             break
         j, ch = m.start(), m.group()
@@ -274,10 +276,10 @@ def _take(t: str, i: int, inscript: bool, ending: str = "",
         j += 1
     link = t[i:j]
     if not link or field(t, i, "(empty reference!)"):
-        return None, j
+        return None, j, i
     # both ends lose every control byte and space, as a browser trims them; CR, LF, TAB go
     link = link.strip(_C0).translate({9: None, 10: None, 13: None})
-    return link or None, j
+    return link or None, j, i
 
 
 def _fragment_or_query(s: str) -> bool:
@@ -352,7 +354,7 @@ def _import_arg(t: str, q: int) -> bool:
 
 
 def dirty(t: str, q: int, lastc: str, inscript: bool, tag_start: int = -1,
-           startattr: str | None = None) -> tuple[str | None, int] | None:
+           startattr: str | None = None) -> tuple[str | None, int, int] | None:
     """htsparse.c:2160-2276, -%P at the quote t[q]: None when the string it opens is not
     taken, else what _take() makes of it. In a tag, `startattr` names the attribute
     holding a quote that has no name of its own."""
@@ -381,20 +383,29 @@ def dirty(t: str, q: int, lastc: str, inscript: bool, tag_start: int = -1,
     return _take(t, q, inscript)
 
 
+class Found(NamedTuple):
+    """A link scan_script() took: t[start:end] is what -K0 replaces."""
+    start: int
+    end: int
+    link: str     # as _take() cut and trimmed it
+    module: bool  # an ES module specifier, resolved against the script itself
+    parens: bool  # in a CSS url(): the rewrite percent-encodes "(" and ")" (escape_parens)
+
+
 def scan_script(t: str, i: int, end: int, ctx: Ctx, lastc: str, parse_scripts: bool,
-                 extended: bool) -> list[tuple[int, str, bool]]:
+                 extended: bool) -> list[Found]:
     """The links HTTrack's parser takes in the script t[i:end] (htsparse.c:1745-2276): -j
     tries hts_js_scan_link at each byte the automaton leaves outside strings and comments,
     -%P each quote opening a string after "=", "(" or "," (`lastc`, parseall_lastc, is the
-    last such byte). Returns (position, link, module specifier) per link."""
-    out: list[tuple[int, str, bool]] = []
+    last such byte)."""
+    out: list[Found] = []
     st, leave = _START, -1  # the next byte that leaves START; still it while i <= leave
 
-    def take(p: int, got) -> int:
-        """Record the link `got` found at byte p; return where the scan resumes."""
-        link, term = got[0], got[1]
+    def take(got, module: bool, parens: bool = False) -> int:
+        """Record the link `got` (_take's); return where the scan resumes."""
+        link, term, start = got
         if link:
-            out.append((p, link, got[2]))
+            out.append(Found(start, term, link, module, parens))
         return term + 1
 
     while i < end:
@@ -409,11 +420,11 @@ def scan_script(t: str, i: int, end: int, ctx: Ctx, lastc: str, parse_scripts: b
                         found = km.start(), js
                         break
             if found:
-                p, (a, _, ending, entity, module) = found
+                p, (a, _, ending, entity, module, parens) = found
                 lastc = t[p]
-                link, term = _take(t, a, True, ending, entity)
-                st = _feed(t, _START, p + 1, term + 1, ctx.css_file)
-                i = take(a, (link, term, module))
+                got = _take(t, a, True, ending, entity)
+                st = _feed(t, _START, p + 1, got[1] + 1, ctx.css_file)
+                i = take(got, module, parens)
                 continue
             tail = t[i:k].rstrip(" \n\r\t\f\v")
             lastc = tail[-1] if tail else lastc
@@ -423,7 +434,7 @@ def scan_script(t: str, i: int, end: int, ctx: Ctx, lastc: str, parse_scripts: b
             if st in (_Q1, _Q2) and extended and (got := dirty(t, k, lastc, True,
                                                                ctx.tag_start)) is not None:
                 st = _feed(t, st, k + 1, got[1] + 1, ctx.css_file)
-                i = take(k + 1, (got[0], got[1], _import_arg(t, k)))
+                i = take(got, _import_arg(t, k))
         elif st in (_Q1, _Q2):
             m = _IN_QUOTES.search(t, i, end)
             if m is None:
@@ -433,7 +444,7 @@ def scan_script(t: str, i: int, end: int, ctx: Ctx, lastc: str, parse_scripts: b
             if nxt == st and extended and (got := dirty(t, k, lastc, True,
                                                          ctx.tag_start)) is not None:
                 nxt = _feed(t, st, k + 1, got[1] + 1, ctx.css_file)
-                i = take(k + 1, (got[0], got[1], _import_arg(t, k)))
+                i = take(got, _import_arg(t, k))
             st = nxt
         elif st in (_LINE, _COMMENT):
             m = _RUN[st].search(t, i, end)
@@ -448,13 +459,13 @@ def scan_script(t: str, i: int, end: int, ctx: Ctx, lastc: str, parse_scripts: b
             elif nxt in (_Q1, _Q2) and t[i] in QUOTES and extended:
                 got = dirty(t, i, lastc, True, ctx.tag_start)
             if js is not None:
-                a, _, ending, entity, module = js
-                link, term = _take(t, a, True, ending, entity)
-                st = _feed(t, _START, i + 1, term + 1, ctx.css_file)
-                i = take(a, (link, term, module))
+                a, _, ending, entity, module, parens = js
+                got = _take(t, a, True, ending, entity)
+                st = _feed(t, _START, i + 1, got[1] + 1, ctx.css_file)
+                i = take(got, module, parens)
             elif got is not None:
                 st = _feed(t, nxt, i + 1, got[1] + 1, ctx.css_file)
-                i = take(i + 1, (got[0], got[1], _import_arg(t, i)))
+                i = take(got, _import_arg(t, i))
             else:
                 st, i = nxt, i + 1
     return out

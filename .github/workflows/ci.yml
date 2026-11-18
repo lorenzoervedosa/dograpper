@@ -30,12 +30,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies (dev + headless + httrack extras)
+      - name: Install dependencies (dev + headless + httrack + fire-engine extras)
         # headless (playwright) is required: tests/test_doctor.py patches
         # playwright.__main__, so the module must be importable. No browser
         # download is needed — playwright install chromium is not run here.
         # httrack (brotli, zstandard) makes the br/zstd decoder tests run.
-        run: uv sync --extra dev --extra headless --extra httrack
+        # fire-engine (curl_cffi) makes the real-transport smoke tests run.
+        run: uv sync --extra dev --extra headless --extra httrack --extra fire-engine
 
       - name: Run test suite
         run: uv run pytest tests/ -v

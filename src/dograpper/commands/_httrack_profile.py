@@ -11,6 +11,7 @@ from urllib.parse import urljoin, urlsplit
 import click
 
 from ..lib.config_loader import is_explicit
+from ..lib.httrack.changes import CHANGES_FILE
 from ..lib.httrack.crawl import MAX_REDIRECTS, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
@@ -19,6 +20,7 @@ from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import format_report
 from ..lib.manifest import Manifest
 from ..lib.spa_detector import is_spa
+from ..utils.atomic_write import atomic_write_bytes
 from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
 
@@ -31,7 +33,8 @@ _PLAYWRIGHT_MSG = ("httrack profile: Playwright fallback is not implemented yet 
 # The [httrack] options of `download` (single list; sync forwards these plus --downloader).
 PROFILE_OPTIONS = ('user_agent', 'no_robots', 'connections', 'max_conn_rate', 'max_bandwidth',
                    'timeout', 'retries', 'max_links', 'max_retry_after',
-                   'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing')
+                   'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
+                   'cache', 'updatehack', 'do_not_recatch', 'changes')
 # --no-X flags: the policy holds the positive switch
 _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
             'no_extended_parsing': 'extended_parsing'}
@@ -139,53 +142,78 @@ def _unreached(previous: Manifest, output: str, reached) -> List[str]:
     return sorted(out)
 
 
-def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
-                policy_kw, from_config, discover, filters, previous: Manifest | None = None
+def run_profile(name, make_fetcher, url, output, depth, delay, include_extensions, verbose,
+                policy_kw, from_config, discover, filters, previous: Manifest | None, *,
+                front_failed: Callable[[bool, bool], str], fallback: str
                 ) -> Tuple[int, int, List[str], Dict[str, str], Dict[str, dict]]:
-    """Seeded fetch when `discover` (download's layers 1+2, `_discover_urls`) finds a URL
-    list, else the recursive crawl from `url`; `filters` (--filter) scopes both. With the
-    `previous` run's manifest the run is an update (HTTrack -C2): its files are revalidated.
-    Returns (downloaded, kept unchanged, report lines, file -> URL fetched, file -> record)."""
-    warn_if_old_openssl()
-    if headless:
-        raise click.ClickException(_PLAYWRIGHT_MSG)
+    """The cascade of the profiles on the httrack engine (httrack, fire-engine), over the
+    transport `make_fetcher(policy)` builds: seeded fetch when `discover` (download's layers
+    1+2, `_discover_urls`) finds a URL list, else the recursive crawl from `url`; `filters`
+    (--filter) scopes both. With the `previous` run's manifest the run is an update (HTTrack
+    -C2): its files are revalidated. `front_failed(discovered, challenged)` words the exit
+    when the start URL or every seed failed; `fallback` is the exit when the result needs a
+    browser. Returns (downloaded, kept unchanged, report lines, file -> URL fetched,
+    file -> record)."""
     policy = _build_policy(delay, policy_kw, from_config)
-    fetcher = Fetcher(policy)
+    fetcher = make_fetcher(policy)
     parts = urlsplit(url)
     sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
     discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints,
                                          filters)
     if discovered:
-        logger.info(f"[cascade] httrack: fetching {len(discovered)} URLs from {winning_layer}")
+        logger.info(f"[cascade] {name}: fetching {len(discovered)} URLs from {winning_layer}")
         res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher,
                              filters=filters, previous=previous)
     else:
-        logger.info("[cascade] layer-3 httrack crawl: link-graph fallback")
+        logger.info(f"[cascade] layer-3 {name} crawl: link-graph fallback")
         res = mirror_site(url, output, policy, include_extensions, depth=depth,
                           fetcher=fetcher, filters=filters, previous=previous)
-    if previous is not None:
+    if previous is not None and policy.cache != 0:  # -C0 keeps no file list (htscore.c:2147)
         res.report.unreached = _unreached(previous, output, [*res.files_downloaded, *res.kept])
     if res.front_failed or not res.success:
         for line in format_report(res.report, verbose):
             click.echo(f"  {line}", err=True)
     if res.front_failed:
-        if discovered:
-            cause = ("the site refused or challenged every seed URL (likely bot protection)"
-                     if res.report.challenged else
-                     "every seed URL was blocked by robots.txt or failed (see the report above)")
-        else:
-            cause = ("the site challenged the start URL (likely bot protection)"
-                     if res.report.challenged else
-                     "the start URL was blocked by robots.txt, redirected out of scope or "
-                     "failed (see the report above)")
-        raise click.ClickException(
-            f"httrack profile: {cause}. See the README section \"Downloader profiles\".")
+        raise click.ClickException(front_failed(bool(discovered), bool(res.report.challenged)))
     if not res.success:
-        raise click.ClickException("httrack fetch failed.")
+        raise click.ClickException(f"{name} fetch failed.")
     # the wget cascade's Playwright triggers: an SPA shell, or a crawl that found one page
     html_count = sum(f.lower().endswith((".html", ".htm"))
                      for f in (*res.files_downloaded, *res.kept))
     if is_spa(output) or (not discovered and html_count <= 1):
+        raise click.ClickException(fallback)
+    lines = format_report(res.report, verbose)
+    if res.changes is not None:  # written for a completed run only (htscore.c:2360-2367)
+        report, summary = res.changes
+        path = os.path.join(output, CHANGES_FILE)
+        try:
+            atomic_write_bytes(path, report.encode("utf-8"))
+        except OSError as e:  # HTTrack logs it and the run goes on (htschanges.c:575-586)
+            summary = f"Unable to write the change report {path}: {e}"
+        lines.append(summary)
+    return len(res.files_downloaded), res.files_skipped, lines, res.urls, res.records
+
+
+def _front_failed(discovered: bool, challenged: bool) -> str:
+    if discovered:
+        cause = ("the site refused or challenged every seed URL (likely bot protection)"
+                 if challenged else
+                 "every seed URL was blocked by robots.txt or failed (see the report above)")
+    else:
+        cause = ("the site challenged the start URL (likely bot protection)"
+                 if challenged else
+                 "the start URL was blocked by robots.txt, redirected out of scope or "
+                 "failed (see the report above)")
+    return f"httrack profile: {cause}. See the README section \"Downloader profiles\"."
+
+
+def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
+                policy_kw, from_config, discover, filters, previous: Manifest | None = None
+                ) -> Tuple[int, int, List[str], Dict[str, str], Dict[str, dict]]:
+    """The httrack profile: run_profile over the stdlib Fetcher, HTTrack's identity."""
+    warn_if_old_openssl()
+    if headless:
         raise click.ClickException(_PLAYWRIGHT_MSG)
-    return (len(res.files_downloaded), res.files_skipped, format_report(res.report, verbose),
-            res.urls, res.records)
+    return run_profile("httrack", Fetcher, url, output, depth, delay, include_extensions,
+                       verbose, policy_kw, from_config, discover, filters, previous,
+                       front_failed=_front_failed, fallback=_PLAYWRIGHT_MSG)
