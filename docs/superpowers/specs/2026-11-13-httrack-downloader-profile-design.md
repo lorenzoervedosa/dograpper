@@ -415,6 +415,12 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
       the links of the kept pages.
     - robots.txt is fetched in full on every run. HTTrack caches and
       revalidates it too (`src/htsback.c:2396-2400`).
+- **File times:** each saved file gets its recorded `Last-Modified` (else the
+  `Date`) as access and modification time, once its links are rewritten, read
+  as HTTrack reads the date (`src/htscore.c:451-452`, `src/htsback.c:2119-2128`,
+  `src/htsdate.c:53-157`). `pack --delta` lets content hashes decide when both
+  pack states carry them, so a file rewritten with the same size and time is
+  still a change (#132).
 - **No purge (deviation from HTTrack `-X`, user decision):** local files no
   longer reachable are listed in the report ("Not reached this run, kept on
   disk"), not deleted.
@@ -475,9 +481,6 @@ yet and will get; none is approved as a difference from HTTrack.
   - `-%s` update hacks (off by default, `src/htsback.c:4281-4395`), `-%n`
     do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and `-%d`
     `--changes` (off, writes `hts-changes.json`);
-  - a saved file's modification time set to its `Last-Modified`
-    (`src/htscore.c:451-452`, `src/htsback.c:2121-2127`); porting it needs a
-    look at the mtime fast path of `pack --delta` (ADR-0008) first.
   - Pending a follow-up PR under #78. Evidence: discovery note §2.9.
 
 ## 6. Code layout (proposal; the plan may refine)

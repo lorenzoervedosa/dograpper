@@ -26,7 +26,7 @@ from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, moved_request,
-                    previous_files, record_of, relink, reserve_names, sends)
+                    previous_files, record_of, relink, reserve_names, sends, stamp)
 from .fetcher import Fetcher, same_host
 from .links import JS_MIMES, css_links, page_links, script_links, url_key
 from .naming import NameRegistry, no_page, url_extension
@@ -321,6 +321,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             for u in asked:
                 cand = (k not in saved, u)  # reached through a redirect, URL requested
                 chosen[f] = min(chosen[f], cand) if f in chosen else cand
+    stamp({f: u for f, (_, u) in chosen.items() if f not in kept}, fields, report)
 
     report.challenged.sort()
     report.robots_blocked.sort()

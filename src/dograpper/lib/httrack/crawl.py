@@ -109,6 +109,57 @@ def record_of(res: FetchResult) -> dict:
             "etag": etag, "last_modified": last_modified}
 
 
+_MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec"
+_NUMBER = re.compile(r"[ \t\n\v\f\r]*\+?([0-9]+)")  # hts_scan_llint, after a "+" zone sign
+
+
+def file_time(date: str | None) -> int | None:
+    """Seconds since the epoch HTTrack stamps a saved file with, from its recorded
+    Last-Modified or Date, read as htsdate.c convert_time_rfc822 (pivot 50) reads it:
+    tokens split on blanks, "-", ":" and ","; a three-letter month name; the first five
+    numbers are the day, then year, hour, minute and second, or hour, minute, second and
+    year when the fifth has four digits; a two-digit year up to 50 is 20xx; any zone is
+    ignored (GMT); no range check. None when it does not read, or reads as 0 or -1
+    (hts_tm_filetime, htsdate.c:200-208)."""
+    if not date or len(date) > 200:
+        return None
+    month, nums = None, []
+    for tok in re.sub("[-:,]", " ", date.lower()).split(" "):
+        if len(tok) == 3 and _MONTHS.find(tok) % 4 == 0:
+            month = _MONTHS.find(tok) // 4
+        elif (m := _NUMBER.match(tok)) and int(m[1]) <= 2**31 - 1 and len(nums) < 5:
+            nums.append(int(m[1]))
+    if month is None or len(nums) < 5:
+        return None
+    day, n1, n2, n3, n4 = nums
+    if n4 >= 1000:
+        year, hour, minute, second = n4, n1, n2, n3
+    else:
+        hour, minute, second = n2, n3, n4
+        year = n1 + 2000 if n1 <= 50 else n1 + 1900 if n1 < 1000 else n1
+    # htsdate.c hts_utc_seconds: days from the civil date, years counted from March
+    y = year - (month < 2)
+    yoe = y - y // 400 * 400
+    doy = (153 * ((month + 10) % 12) + 2) // 5 + day - 1
+    days = y // 400 * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468
+    t = days * 86400 + hour * 3600 + minute * 60 + second
+    return None if t in (0, -1) else t
+
+
+def stamp(files: Mapping[str, str], fields: Mapping[str, dict], report: RunReport) -> None:
+    """Set the access and modification times of each file this run wrote (file -> URL
+    requested for it) to file_time() of its record, as HTTrack does once a file is
+    complete (htscore.c:451-452, htsback.c:2119-2128); a failure is an error of the
+    report, the file kept."""
+    for path, url in files.items():
+        t = file_time(fields[path]["last_modified"])
+        if t is not None:
+            try:
+                os.utime(path, (t, t))
+            except (OSError, OverflowError, ValueError) as exc:
+                report.errors.append((redact_url(url), f"file time not set: {exc}", None))
+
+
 def _count(report: RunReport, status: int | None, error: bool) -> None:
     key = "error" if error or status is None else f"{status // 100}xx"
     report.status_counts[key] = report.status_counts.get(key, 0) + 1
@@ -375,6 +426,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     relink(pages, {url_key(u): p for u, p in reached if p in written or p in kept}, report,
            scripts, parse_scripts=policy.parse_scripts,
            extended_parsing=policy.extended_parsing)
+    stamp({p: requested[p][1] for p in written}, fields, report)
     report.challenged.sort()
     report.robots_blocked.sort()
     report.out_of_scope.sort()

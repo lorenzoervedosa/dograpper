@@ -438,6 +438,14 @@ HTTrack's mirror loop:
   crawl that saves at most one HTML page, or an SPA shell, would fall back to
   Playwright, which the profile does not have yet (see below).
 
+**File times (`httrack`, `fire-engine`).** Each saved file gets the response's
+`Last-Modified`, else its `Date`, as its modification and access time, as
+HTTrack sets them once a file is complete (links rewritten first). The date
+is read as HTTrack reads it: any zone counts as GMT, and a date that does not
+read leaves the file's time alone. `pack --delta` compares content hashes, so
+a file rewritten with other bytes under the same time and size still counts
+as changed.
+
 **Updates (`httrack`, `fire-engine`).** A run on an `-o` that already holds a manifest is an
 update, as HTTrack's `-C2` on a finished mirror: on both paths, each file the
 previous run recorded from a `200` with an `ETag` or a date, still on disk and
@@ -535,7 +543,7 @@ is used when available. The release binary includes this extra.
 not implemented yet and fails loud (exit 1); use `--downloader wget` for
 those sites. With a manifest an update always revalidates (HTTrack `-C2`): the
 other cache modes (`-C0`, `-C1`/`--continue`), the `-%s`, `-%n` and
-`--changes` options and file times from `Last-Modified` are not ported yet.
+`--changes` options are not ported yet.
 None of these is a deviation from HTTrack.
 
 ##### fire-engine

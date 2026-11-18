@@ -614,3 +614,33 @@ def test_scripts_are_scanned_for_links_as_httrack_does(server, tmp_path):
     res, _ = crawl(f"{base}/", tmp_path / "off", exts="html,js", parse_scripts=False,
                    extended_parsing=False)
     assert rel(res, tmp_path / "off") == ["index.html", "static/app.js"]
+
+
+def test_crawled_files_get_their_last_modified_time(server, tmp_path):
+    """htscore.c:451-452, htsback.c:2119-2128: a crawled file is stamped with its recorded
+    Last-Modified once its links are rewritten (crawl.file_time)."""
+    base, script, _ = server
+    site(script, {
+        "/": ({**HTML, "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT"},
+              b'<a href="a.html">a</a>'),
+        "/a.html": ({**HTML, "last-modified": "Wed, 31 Jan 2024 00:00:00 GMT"}, b"<p>a</p>"),
+    })
+    res, _ = crawl(f"{base}/", tmp_path)
+    times = {os.path.basename(f): os.stat(f).st_mtime for f in res.files_downloaded}
+    assert times == {"index.html": 1704067200, "a.html": 1706659200}
+
+
+def test_a_relinked_stylesheet_is_stamped_after_its_links_are_rewritten(server, tmp_path):
+    """relink() rewrites a saved stylesheet's links after its write (#133); its file time is
+    set after that, as HTTrack sets it once the file is complete."""
+    base, script, _ = server
+    css = {"content-type": "text/css", "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT"}
+    site(script, {"/": page("p.html", extra='<link rel="stylesheet" href="a.css">'),
+                  "/p.html": page(),
+                  "/a.css": (css, f'@import "{base}/b.css";'.encode()),
+                  "/b.css": (css, b"p{}")})
+    policy = build_policy(retries=0)
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,css", fetcher=Spy(policy))
+    a = next(f for f in res.files_downloaded if f.endswith("a.css"))
+    assert os.stat(a).st_mtime == 1704067200
+    assert open(a, "rb").read() != f'@import "{base}/b.css";'.encode()  # relinked

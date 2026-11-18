@@ -22,6 +22,25 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — HTTrack cache and update options in the httrack profile (#132)
+
+- **Decision:** a file time that cannot be set (`os.utime` fails) is an error
+  of the run report, and the file is kept; HTTrack ignores the return value of
+  `set_filetime_rfc822`.
+- **Why:** the global rule is no silent fallback; the failure cannot spoil the
+  corpus, so it does not stop the run either.
+- **Rejected:** ignoring it as HTTrack does; failing the run.
+- **Pending:** none.
+
+- **Decision:** `pack --delta` lets the content hashes decide whenever both
+  pack states carry them, and keeps the mtime fast path only for an entry
+  written before hashes existed.
+- **Why:** file times from `Last-Modified` let a rewrite keep size and mtime;
+  `build_manifest` hashes every file anyway, so the fast path saved nothing.
+- **Rejected:** not porting HTTrack's file times; a separate mtime source for
+  the pack state.
+- **Pending:** none.
+
 ## 2026-11-18 — fire-engine decodes in Python; its extra gains brotli and zstandard (#130)
 
 - **Decision:** curl's decoding is off and its writer bounds the raw body;

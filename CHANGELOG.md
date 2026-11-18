@@ -90,8 +90,10 @@ and fixes alone are a PATCH bump.
   fields `status`, `content_type`, `redirected`; `etag` and `last_modified`
   filled in), a 304 or an error leaves the previous copy byte-identical, and
   the summary adds `Not modified (304)`, `Kept the previous copy after an
-  error` and `Not reached this run, kept on disk`. The Playwright fallback
-  fails loud under this profile for now.
+  error` and `Not reached this run, kept on disk`. Each saved file gets the
+  response's `Last-Modified` (else its `Date`) as its modification and access
+  time, as HTTrack sets it. The Playwright fallback fails loud under this
+  profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the

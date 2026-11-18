@@ -633,3 +633,54 @@ def test_failed_write_leaves_no_seed_counted_for_the_shared_file(server, tmp_pat
     assert res.files_downloaded == [] and res.urls == {} and res.records == {}
     assert res.front_failed
     assert [e[1].startswith("write failed") for e in res.report.errors] == [True, True]
+
+
+# -- file times: a saved file is stamped with its Last-Modified, else its Date --
+
+from dograpper.lib.httrack.crawl import file_time  # noqa: E402
+
+JAN1 = 1704067200  # LM
+
+
+@pytest.mark.parametrize("date, expected", [
+    ("Sun, 06 Nov 1994 08:49:37 GMT", 784111777),    # IMF-fixdate
+    ("Sunday, 06-Nov-94 08:49:37 GMT", 784111777),   # RFC 850
+    ("Sun Nov  6 08:49:37 1994", 784111777),         # asctime: a four-digit fifth number
+    ("Sun, 06 Nov 1994 08:49:37 +0100", 784111777),  # any zone is ignored (GMT)
+    ("Sun, 06 Nov 50 08:49:37 GMT", 2551337377),     # a two-digit year up to 50 is 20xx
+    ("Sun, 06 Nov 51 08:49:37 GMT", -572886623),     # ... above, 19xx
+    ("Wed, 32 Jan 2024 00:00:00 GMT", JAN1 + 31 * 86400),  # no range check
+    ("Thu, 01 Jan 1970 00:00:00 GMT", None),         # 0 is never applied
+    ("Sun, 06 Nov 1994", None), ("garbage", None), ("", None), (None, None),
+])
+def test_file_time_reads_dates_as_htsdate_c(date, expected):
+    """htsdate.c convert_time_rfc822 (pivot 50) and hts_tm_filetime: lenient tokens, the
+    first five numbers, the zone ignored, 0 or -1 never applied (htsdate.c:53-157, 200-208)."""
+    assert file_time(date) == expected
+
+
+def test_saved_files_get_their_last_modified_time(server, tmp_path):
+    """htscore.c:451-452 and htsback.c:2119-2128: access and modification times are the
+    recorded Last-Modified, else the Date; a page relinked after its write keeps it."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, {**HTML, "last-modified": LM}, b'<a href="b.txt">b</a>')
+    script["/b.txt"] = (200, {"content-type": "text/plain"}, b"b")  # http.server sends Date
+    res = run([f"{base}/a", f"{base}/b.txt"], tmp_path, exts="html,txt")
+    a, b = sorted(res.files_downloaded)
+    assert (os.stat(a).st_mtime, os.stat(a).st_atime) == (JAN1, JAN1)  # before any read
+    assert open(a).read() == '<a href="b.txt">b</a>'  # rewritten by relink, then stamped
+    assert os.stat(b).st_mtime == file_time(res.records[b]["last_modified"]) is not None
+
+
+def test_file_time_failure_is_reported_and_the_file_kept(server, tmp_path, monkeypatch):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, {**HTML, "last-modified": LM}, b"<p>a</p>")
+
+    def refuse(path, times):
+        raise PermissionError("read-only")
+    monkeypatch.setattr("dograpper.lib.httrack.crawl.os.utime", refuse)
+    res = run([f"{base}/a"], tmp_path)
+    assert open(res.files_downloaded[0], "rb").read() == b"<p>a</p>" and res.success
+    assert res.report.errors == [(f"{base}/a", "file time not set: read-only", None)]
