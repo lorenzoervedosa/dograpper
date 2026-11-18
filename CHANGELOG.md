@@ -72,6 +72,9 @@ and fixes alone are a PATCH bump.
   size matches but mtime disagrees, instead of trusting mtime alone; the
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
+- `pack` no longer drops HTML-escaped angle brackets (`&lt;T&gt;`, escaped
+  markup in code blocks) during content extraction; default output now keeps
+  `List<T>` and `<div>` examples, matching `--no-extract`. ([#66])
 
 ### Security
 
@@ -147,3 +150,4 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#66]: https://github.com/lorenzoervedosa/dograpper/issues/66

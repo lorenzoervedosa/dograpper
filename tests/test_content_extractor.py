@@ -564,3 +564,67 @@ def test_matches_class_no_false_positive_on_unrelated():
     """_matches_class does not match unrelated strings."""
     assert _matches_class("pagination", {"nav"}) is False
     assert _matches_class("main-body", {"sidebar"}) is False
+
+
+# ---------------------------------------------------------------------------
+# Escaped markup must survive re-serialization (issue #66)
+# ---------------------------------------------------------------------------
+
+ESCAPED_PAGE = (
+    "<html><body><main><h1>Generics</h1>\n"
+    "<p>Some prose so the page has enough text to be extracted normally here.</p>\n"
+    "<pre>public static &lt;T&gt; List&lt;T&gt; wrap(T item)</pre>\n"
+    '<pre>&lt;div class="note"&gt;hello&lt;/div&gt;</pre>\n'
+    "</main></body></html>"
+)
+
+
+def test_escaped_angle_brackets_survive_semantic_extraction():
+    text = strip_html(extract_content(ESCAPED_PAGE))
+    assert "public static <T> List<T> wrap(T item)" in text
+    assert '<div class="note">hello</div>' in text
+
+
+def test_escaped_angle_brackets_survive_density_extraction():
+    html = (
+        "<html><body><div><p>"
+        + "Plenty of prose to win the density scoring here. " * 10
+        + "</p><pre>List&lt;T&gt; &amp; Map&lt;K, V&gt;</pre></div></body></html>"
+    )
+    assert "List<T> & Map<K, V>" in strip_html(extract_content(html))
+
+
+def test_escaped_angle_brackets_survive_blacklist_removal():
+    html = (
+        "<html><body><main><nav>menu</nav>"
+        "<p>Enough prose here to be kept as the main content block.</p>"
+        "<pre>&lt;C&gt;</pre></main></body></html>"
+    )
+    text = strip_html(extract_content(html))
+    assert "<C>" in text
+    assert "menu" not in text
+
+
+def test_attribute_values_are_escaped_on_rebuild():
+    html = (
+        '<html><body><main><a title="a &quot;b&quot; &amp; c" href="/x?a=1&amp;b=2">'
+        "link</a></main></body></html>"
+    )
+    out = extract_content(html)
+    assert 'title="a &quot;b&quot; &amp; c"' in out
+    assert 'href="/x?a=1&amp;b=2"' in out
+
+
+def test_default_pack_matches_no_extract_for_escaped_brackets(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "page.html").write_text(ESCAPED_PAGE)
+    outputs = {}
+    for name, extra in (("default", []), ("raw", ["--no-extract"])):
+        out = tmp_path / name
+        result = CliRunner().invoke(cli, ["pack", str(docs), "-o", str(out), *extra])
+        assert result.exit_code == 0
+        outputs[name] = next(out.glob("*.md")).read_text()
+    for text in outputs.values():
+        assert "public static <T> List<T> wrap(T item)" in text
+        assert '<div class="note">hello</div>' in text
