@@ -1129,7 +1129,11 @@ below the cap and combine with `--dedup both`.
 
 wget exit code 8 means "server error on some URLs" — treated as a
 partial success. The manifest only records files that were actually
-downloaded. Re-running (incremental) usually closes the gaps.
+downloaded. The failing URLs are listed at the end of the `Download complete`
+summary as `Failed: N URLs (first 5 shown)`, each with its HTTP status; add
+`--verbose` (before the subcommand) to list all of them. A missing
+`robots.txt` is not counted. Re-running (incremental) closes transient gaps,
+but a permanent 404 stays missing.
 
 ---
 

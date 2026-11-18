@@ -56,6 +56,9 @@ and fixes alone are a PATCH bump.
   Playwright fallback fail loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
+- `download` (wget paths) lists the URLs behind a wget exit code 8 in the
+  summary as `Failed: N URLs (first 5 shown)` with each URL and HTTP status;
+  `--verbose` lists them all ([#97](https://github.com/lorenzoervedosa/dograpper/issues/97)).
 
 ### Fixed
 

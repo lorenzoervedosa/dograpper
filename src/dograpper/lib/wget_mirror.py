@@ -1,14 +1,17 @@
 """Wrapper for wget --mirror command."""
 
+import os
+import re
 import subprocess
 import logging
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 from pathlib import Path
 
 from dograpper.utils.dep_resolver import resolve_wget
+from dograpper.utils.redact import neutralize_controls, redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +68,23 @@ def _content_filter_args(include_extensions: str) -> List[str]:
         return [f"--reject={ASSET_REJECT_EXTENSIONS}"]
     return [f"--accept={include_extensions}"]
 
+MAX_SHOWN_FAILURES = 5
+
+# wget prints "--YYYY-MM-DD HH:MM:SS--  <URL>" per request and later
+# "YYYY-MM-DD HH:MM:SS ERROR <code>: <message>." when the server refuses it.
+_REQUEST_LINE = re.compile(r"^--\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}--\s+(\S+)")
+_ERROR_LINE = re.compile(r"\bERROR (\d{3}): ")
+
+# wget localizes these lines; LANGUAGE=C makes gettext return the untranslated msgid and leaves LC_CTYPE (IRI encoding) alone.
+_WGET_ENV = {**os.environ, "LANGUAGE": "C"}
+
+
+@dataclass
+class WgetFailure:
+    url: str
+    status: int
+
+
 @dataclass
 class WgetResult:
     success: bool
@@ -72,6 +92,34 @@ class WgetResult:
     files_downloaded: List[str]
     errors: List[str]
     files_skipped: int = 0
+    failed: List[WgetFailure] = field(default_factory=list)
+
+
+def parse_failed_urls(stderr: str) -> List[WgetFailure]:
+    """Pair each ``ERROR <code>`` line of wget's stderr with its request URL."""
+    failed: List[WgetFailure] = []
+    current = None
+    for line in stderr.splitlines():
+        request = _REQUEST_LINE.match(line)
+        if request:
+            current = request.group(1)
+            continue
+        error = _ERROR_LINE.search(line)
+        # A missing robots.txt is routine, not a failed page.
+        if error and current and not current.endswith("/robots.txt"):
+            failed.append(WgetFailure(current, int(error.group(1))))
+    return failed
+
+
+def format_failures(failed: List[WgetFailure], verbose: bool) -> List[str]:
+    """Summary lines for the failed URLs: first MAX_SHOWN_FAILURES, all with verbose."""
+    if not failed:
+        return []
+    shown = failed if verbose else failed[:MAX_SHOWN_FAILURES]
+    note = "" if len(shown) == len(failed) else f" (first {len(shown)} shown)"
+    lines = [f"Failed: {len(failed)} URLs{note}"]
+    lines.extend(neutralize_controls(f"  {redact_url(f.url)}: {f.status}") for f in shown)
+    return lines
 
 def run_wget_mirror(
     url: str,
@@ -121,12 +169,14 @@ def run_wget_mirror(
     stdout_output = ""
     stderr_output = ""
     errors = []
+    failed: List[WgetFailure] = []
 
     while attempt < max_retries and not success:
         attempt += 1
         logger.info(f"Running wget (attempt {attempt}/{max_retries}): {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                errors="replace", env=_WGET_ENV)
         stdout_output += result.stdout
         stderr_output += result.stderr
         
@@ -136,6 +186,7 @@ def run_wget_mirror(
             logger.warning("wget returned 8 (Server error). Treating as partial success.")
             success = True
             errors.append("Server error on some URLs (exit code 8)")
+            failed = parse_failed_urls(result.stderr)
         else:
             logger.error(f"wget failed with exit code {result.returncode}")
             errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
@@ -154,7 +205,8 @@ def run_wget_mirror(
         success=success,
         output_dir=output_dir,
         files_downloaded=files_downloaded,
-        errors=errors
+        errors=errors,
+        failed=failed,
     )
 
 
@@ -208,6 +260,7 @@ def run_wget_urls(
         attempt = 0
         success = False
         errors: List[str] = []
+        failed: List[WgetFailure] = []
 
         while attempt < max_retries and not success:
             attempt += 1
@@ -215,13 +268,15 @@ def run_wget_urls(
                 f"Running wget -i (attempt {attempt}/{max_retries}) "
                 f"on {len(urls)} URLs: {' '.join(cmd)}"
             )
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    errors="replace", env=_WGET_ENV)
             if result.returncode == 0:
                 success = True
             elif result.returncode == 8:
                 logger.warning("wget -i returned 8 (Server error). Treating as partial success.")
                 success = True
                 errors.append("Server error on some URLs (exit code 8)")
+                failed = parse_failed_urls(result.stderr)
             else:
                 logger.error(f"wget -i failed with exit code {result.returncode}")
                 errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
@@ -239,6 +294,7 @@ def run_wget_urls(
             output_dir=output_dir,
             files_downloaded=files_downloaded,
             errors=errors,
+            failed=failed,
         )
     finally:
         try:
