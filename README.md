@@ -335,6 +335,13 @@ recording mirrored files with SHA-256 hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
 changed on the server.
 
+Each entry's `url` is rebuilt from the saved path as
+`<scheme>://<host dir>/<path>`, with the scheme of the seed URL; `pack
+--context-header` copies it into the chunks. A `.html` added by
+`--adjust-extension` stays in the URL (on disk it looks like a real `.html`
+page), and a saved name containing `?` (a query page) gets `"url": null`
+because wget decodes the query when it names the file.
+
 #### Examples
 
 ```bash
@@ -503,8 +510,8 @@ Schema (required fields in **bold**, optional in italics):
 - **`content`** — extracted text
 - **`schema_version`** — `"v1"`
 - *`breadcrumb`, `chunk_index`, `total_chunks`* (with `--context-header` or `--score`)
-- *`url`* (with `--context-header` **and** a matching manifest entry — `--score`
-  alone never populates it)
+- *`url`* (with `--context-header` **and** a matching manifest entry that has a
+  `url` — `--score` alone never populates it)
 - *`readiness_grade`* (with `--score`)
 
 Field names diverge from the header format for word count, breadcrumb and

@@ -372,7 +372,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                     for key, entry in manifest_data.files.items():
                         local = entry.local_path or key
                         if local == rel or key == rel:
-                            url_map[rel] = entry.url
+                            if entry.url:
+                                url_map[rel] = entry.url
                             break
         except Exception:
             pass
