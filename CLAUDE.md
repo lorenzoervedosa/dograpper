@@ -47,8 +47,9 @@ src/dograpper/
 │   │   ├── crawl.py        # fetch_url_list() — lista semeada: cada URL é start URL (navigate), robots, /cdn-cgi/ fora de escopo, redirects same-host (até 5), só 2xx não-desafio é escrito (atômico), front_failed; ThreadPool com Fetcher e NameRegistry compartilhados
 │   │   ├── escape.py       # escape_unsafe()/request_target() — percent-escape do HTTrack (htslib.c escape_check_url); fonte única para o alvo no fio (fetcher), o Referer (policy) e as regras do robots.txt
 │   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, corpo curto = IncompleteRead retentado, alvo percent-encoded e Host IDNA como o HTTrack, robots com redirects same-host; same_host() — escopo de redirect (fonte única para robots, crawl e descoberta)
+│   │   ├── links.py        # page_links()/css_links() — links do HTTrack (href + tabela de atributos de htsparse.c, srcset, <base href>, meta refresh, CSS url()/@import; nunca action; meta robots nofollow), cada um com o FetchMeta de htsfetch.c; url_key() — chave de dedup -%u (sem fragmento, // colapsado, query ordenada); rewrite_links() — -K0: link salvo vira caminho relativo, o resto absoluto, <base href> esvaziado, demais bytes intactos. Tokenizer HTML5 próprio e linear (o html.parser do 3.10 é quadrático em tag não fechada). Sem varredura de JS/-%P por ora (lacuna temporária, #122)
 │   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path> (IPv6 literal → [addr] com ':' → _), index.html, .html por content-type (substitui extensão conhecida pelo HTTrack — tabela MIME, dinâmica .php/.cgi…, .txt/.pdf —, anexa às desconhecidas), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão (comparação casefold, sem caixa), thread-safe; None se o caminho escapa de output_dir (essas três regras vêm de utils/portable_names.py)
-│   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA e referer; Referer sem userinfo nem fragmento, escapado como o alvo) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
+│   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA, referer e FetchMeta do link — Sec-Fetch-Dest/Mode/User; Referer sem userinfo nem fragmento, escapado como o alvo) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
 │   │   ├── report.py       # RunReport (contagens por status, challenged, robots_blocked, out_of_scope, filtered, errors, partial) + format_report() — URLs já redigidas, caracteres de controle neutralizados via utils/redact.py
 │   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap); regras percent-escapadas com escape.py, como o alvo no fio
 │   ├── ignore_parser.py    # filter_files() com pathspec
@@ -131,6 +132,7 @@ tests/
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
 ├── test_httrack_crawl.py   # fetch_url_list: só 2xx não-desafio escrito, robots, redirects, front_failed, max_links, filtro de extensão, conflito de escrita, format_report
 ├── test_httrack_fetcher.py # Fetcher: retries, gate de Retry-After, pacing com relógio fake, decode gzip/deflate, ordem dos headers, robots_for, is_challenge
+├── test_httrack_links.py   # page_links/css_links: tabela de atributos, base href, meta refresh, nofollow, placeholders, FetchMeta por tag; url_key; rewrite_links: relativo/absoluto, base vazio, bytes preservados; linearidade em páginas hostis
 ├── test_httrack_naming.py  # NameRegistry: index.html, extensão .html, hash de query, colisão -N (inclusive só de caixa) e estabilidade, host IPv6, traversal/symlink rejeitados, thread-safety
 ├── test_httrack_policy.py  # Policy: clamps, headers vs fixture httrack_wire, Accept-Encoding, contexto TLS, ClientHello (OpenSSL >= 3.5)
 ├── test_httrack_robots.py  # parse_robots: grupos, longest-match, Allow vence empate, wildcard/$, Crawl-delay, Sitemap, caps, corpo HTML sem regras
@@ -211,6 +213,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_heading_extractor.py` | Antes de alterar `utils/heading_extractor.py` ou a lógica de context-header em `commands/pack.py` |
 | `tests/test_httrack_crawl.py` | Antes de alterar `lib/httrack/crawl.py` ou `lib/httrack/report.py` |
 | `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py`, `utils/challenge.py` ou `lib/httrack/escape.py` |
+| `tests/test_httrack_links.py` | Antes de alterar `lib/httrack/links.py` (extração de links, chave de dedup, reescrita -K0) |
 | `tests/test_httrack_naming.py` | Antes de alterar `lib/httrack/naming.py` ou `utils/portable_names.py` |
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |
