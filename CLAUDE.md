@@ -45,7 +45,7 @@ src/dograpper/
 │   │   ├── crawl.py        # fetch_url_list() — lista semeada: cada URL é start URL (navigate), robots, /cdn-cgi/ fora de escopo, redirects same-host (até 5), só 2xx não-desafio é escrito (atômico), front_failed; ThreadPool com Fetcher e NameRegistry compartilhados
 │   │   ├── escape.py       # escape_unsafe()/request_target() — percent-escape do HTTrack (htslib.c escape_check_url); fonte única para o alvo no fio (fetcher), o Referer (policy) e as regras do robots.txt
 │   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, corpo curto = IncompleteRead retentado, alvo percent-encoded e Host IDNA como o HTTrack, robots com redirects same-host; same_host() — escopo de redirect (fonte única para robots, crawl e descoberta)
-│   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path> (IPv6 literal → [addr] com ':' → _), index.html, .html por content-type (substitui extensão conhecida pelo HTTrack — tabela MIME, dinâmica .php/.cgi…, .txt/.pdf —, anexa às desconhecidas), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão (comparação casefold, sem caixa), thread-safe; None se o caminho escapa de output_dir
+│   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path> (IPv6 literal → [addr] com ':' → _), index.html, .html por content-type (substitui extensão conhecida pelo HTTrack — tabela MIME, dinâmica .php/.cgi…, .txt/.pdf —, anexa às desconhecidas), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão (comparação casefold, sem caixa), thread-safe; None se o caminho escapa de output_dir (essas três regras vêm de utils/portable_names.py)
 │   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA e referer; Referer sem userinfo nem fragmento, escapado como o alvo) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
 │   │   ├── report.py       # RunReport (contagens por status, challenged, robots_blocked, out_of_scope, filtered, errors, partial) + format_report() — URLs já redigidas, caracteres de controle neutralizados via utils/redact.py
 │   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap); regras percent-escapadas com escape.py, como o alvo no fio
@@ -77,6 +77,7 @@ src/dograpper/
     ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML
     ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs()
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
+    ├── portable_names.py   # FORBIDDEN (caracteres proibidos pelo HTTrack → _), claim_unique() (colisão casefold → -N), resolve_under() (caminho real contido na raiz) — regras de nome compartilhadas por lib/httrack/naming.py e o layout por página do pack (ADR-0010)
     ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
     ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
@@ -184,7 +185,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_heading_extractor.py` | Antes de alterar `utils/heading_extractor.py` ou a lógica de context-header em `commands/pack.py` |
 | `tests/test_httrack_crawl.py` | Antes de alterar `lib/httrack/crawl.py` ou `lib/httrack/report.py` |
 | `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py`, `utils/challenge.py` ou `lib/httrack/escape.py` |
-| `tests/test_httrack_naming.py` | Antes de alterar `lib/httrack/naming.py` |
+| `tests/test_httrack_naming.py` | Antes de alterar `lib/httrack/naming.py` ou `utils/portable_names.py` |
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |
 | `tests/test_init_wizard.py` | Antes de alterar `commands/init.py` ou os presets `TARGETS` |
