@@ -22,6 +22,27 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — Download-side terms picked for GLOSSARY.md (docs audit)
+
+- **Decision:** `GLOSSARY.md` gains a `Download` section: Mirror, Downloader,
+  fire-engine, Manifest, Update, Kept file, Link rewriting, Change report.
+  Where the repo used two words for one thing, one was picked: *downloader*
+  over "profile", *update* over "update mode", *kept file* over "cached file",
+  *link rewriting* over a bare `-K0`. Flags, summary lines and existing prose
+  were left as they are.
+- **Why:** the maintainer asked for the terms of batches 5 and 6. The
+  `--downloader` flag and the README's "Updates" section already use these
+  words, and "cached file" misdescribes a design that keeps no cache beside
+  the mirror (README, deviations from HTTrack). "Cache mode" stays out of
+  `GLOSSARY.md`: `docs/glossario.md` explains it as jargon, and a domain term
+  is never defined in both.
+- **Rejected:** "update mode" and "cached file" as terms of their own (two
+  names for one thing each); renaming "profile" across the README and the
+  code in a docs audit.
+- **Pending:** maintainer: confirm the picks, above all *downloader* against
+  "profile" (the README section "Downloader profiles", `PROFILE_OPTIONS` and
+  `run_profile` keep the old word) and *update* against "update mode".
+
 ## 2026-11-18 — HTTrack's change report ported with the payload MD5 (#132)
 
 Supersedes the "-%d is not ported" decision of the entry below: the maintainer

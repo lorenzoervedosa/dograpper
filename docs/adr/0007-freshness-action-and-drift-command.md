@@ -23,6 +23,14 @@ execuções, versionado no repositório do usuário.
 > valendo, agora por outro motivo. Ver
 > [ADR-0008](0008-delta-as-a-change-gate.md).
 
+> **Atualização (2026-11, #95)**: o `.dograpper-manifest.json` deixou de ser
+> resolvido contra o diretório de trabalho. O `download` o grava no próprio
+> diretório de saída (`-o`), então na Action ele mora em `input-dir`, é
+> versionado junto do mirror e fica fora da lista de drift de
+> arquivos-fonte; um manifest na raiz do repo, de execuções antigas, não é
+> mais lido. O parágrafo acima descreve o estado de quando a decisão foi
+> tomada; as decisões abaixo não mudam.
+
 **Limitação conhecida de `pack --delta`** (reproduzida empiricamente em
 review; issue própria a ser aberta): `pack --delta --score` escreve um
 `llm-readiness.json` PARCIAL — apenas os arquivos re-chunkados,
