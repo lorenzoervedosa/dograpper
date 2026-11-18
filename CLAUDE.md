@@ -385,12 +385,28 @@ consentimento.
 | `GLOSSARY.md` | Termo de domínio novo, renomeado ou com sentido mudado (skill `domain-modeling`) |
 | `docs/glossario.md` | Jargão técnico explicado ao mantenedor (seção "Glossário vivo" abaixo) |
 | `docs/superpowers/` | Spec ou plano de uma fase nova |
+| `docs/audits/structural.md` | Cada execução de `/structural-audit` acrescenta uma entrada datada no fim (append-only: nunca edite entrada antiga) |
 | `.claude/hooks/` | Muda o conjunto de arquivos de contrato: atualize o mapa de `harness-reminder.sh` e a regex de `commit-doc-check.sh` juntos |
 | Este `CLAUDE.md` | Módulo ou teste novo (árvore e tabela, guardadas por `tests/test_claude_md_inventory.py`), contrato novo ou alterado, comando ou fluxo novo |
 
 Regra prática: se o diff toca arquivo de contrato (o mapa de
 `.claude/hooks/harness-reminder.sh`) e nenhum documento acima mudou,
 justifique por que não era necessário antes de commitar.
+
+Skills e comando do projeto (`.claude/`), com fronteira explícita entre irmãs:
+
+- `.claude/skills/download-smoke/SKILL.md` — valida um `download` real
+  (cascade, wget, perfil httrack, manifest) contra servidor local primeiro e,
+  no máximo, um site público permitido, sem crawl pesado. Para o que um pack
+  responde a um cliente MCP, use a irmã abaixo.
+- `.claude/skills/mcp-serve-inspect/SKILL.md` — dirige `dograpper serve` por
+  JSON-RPC no stdio sobre um pack JSONL montado offline. Para buscar páginas,
+  use a irmã acima.
+- `.claude/commands/structural-audit.md` (`/structural-audit`) — auditoria
+  estrutural recorrente e read-only (tamanho, churn de 4 semanas, camadas,
+  3ª cópia de um molde, testes > 1000 linhas): no máximo 5 achados com
+  evidência, classificados fix-now / debt / ignore, registrados em
+  `docs/audits/structural.md`.
 
 ## Glossário vivo (`docs/glossario.md`)
 
