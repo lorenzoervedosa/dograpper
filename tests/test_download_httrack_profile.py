@@ -114,7 +114,7 @@ def test_profile_options_tuple_matches_download_and_sync():
 
 @pytest.mark.parametrize("flag", ["--no-robots", "--connections=2", "--user-agent=x",
                                   "--retries=2", "--no-parse-scripts",
-                                  "--no-extended-parsing"])  # explicit, even at its default
+                                  "--no-extended-parsing", "--cache=2"])  # explicit, even at its default
 def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     res = run(str(tmp_path / "o"), flag)
     assert res.exit_code == 2
@@ -318,6 +318,28 @@ def test_httrack_update_lists_the_files_it_did_not_reach(crawl):
     assert os.path.exists(os.path.join(out, "b.html"))  # never purged
 
 
+def test_httrack_cache_flag_reaches_the_policy(ht):
+    out, fu, _ = ht
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    assert fu.call_args.args[2].cache is None  # HTTrack's default: -C2 over a mirror, else -C1
+    res = run(out, "--downloader", "httrack", "--cache", "1")
+    assert res.exit_code == 0, res.output
+    assert fu.call_args.args[2].cache == 1
+    assert run(out, "--downloader", "httrack", "--cache", "3").exit_code == 2
+
+
+def test_httrack_cache_0_lists_no_unreached_file(crawl):
+    """-C0 opens no new.lst, so HTTrack's purge, which the list stands for, does not run
+    (htscore.c:2147)."""
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: _crawled(o, names=("index.html", "a.html", "b.html"))
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    ms.side_effect = lambda u, o, *a, **k: _updated(o, written=("index.html", "a.html"), kept=())
+    res = run(out, "--downloader", "httrack", "--cache", "0")
+    assert res.exit_code == 0, res.output
+    assert "Not reached" not in res.output
+
+
 def test_httrack_headless_fails_loud_playwright(ht):
     out, fu, _ = ht
     res = run(out, "--downloader", "httrack", "--headless")
@@ -386,6 +408,8 @@ def test_httrack_non_numeric_config_value_is_usage_error(ht, tmp_path):
     ("no-parse-scripts", True, "parse_scripts", False),
     ("no-extended-parsing", "true", "extended_parsing", False),
     ("no-extended-parsing", "false", "extended_parsing", True),
+    ("cache", "1", "cache", 1),
+    ("cache", 0, "cache", 0),
 ])
 def test_httrack_config_value_converted_like_cli(ht, tmp_path, key, value, attr, expected):
     out, fu, _ = ht
@@ -406,6 +430,7 @@ def test_httrack_config_string_false_keeps_security_limits(ht, tmp_path):
 @pytest.mark.parametrize("key, value", [
     ("max-links", 2.0), ("retries", 1.5), ("retries", True), ("retries", -1),
     ("max-retry-after", -5), ("timeout", 0), ("no-robots", "maybe"), ("connections", None),
+    ("cache", 3), ("cache", "update"),
 ])
 def test_httrack_bad_config_value_fails_like_cli(ht, tmp_path, key, value):
     out, fu, _ = ht

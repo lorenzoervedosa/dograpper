@@ -684,3 +684,66 @@ def test_file_time_failure_is_reported_and_the_file_kept(server, tmp_path, monke
     res = run([f"{base}/a"], tmp_path)
     assert open(res.files_downloaded[0], "rb").read() == b"<p>a</p>" and res.success
     assert res.report.errors == [(f"{base}/a", "file time not set: read-only", None)]
+
+
+# -- cache modes: --cache 0 | 1 | 2 (HTTrack -C0 | -C1 | -C2) --
+
+from dograpper.lib.manifest import RECORD_FIELDS  # noqa: E402
+
+
+def test_cache_1_loads_a_recorded_file_without_a_request(server, tmp_path):
+    """-C1 (htsback.c:2497-2556): a recorded file still on disk at its recorded size is
+    "immediately loaded from cache", with no request; one whose size changed is fetched
+    in full ("does not have the expected size", htscache.c:729-806)."""
+    base, script, seen = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>")
+    script["/b"] = validated('"b1"', b"<p>b</p>", log=log)
+    first = run([f"{base}/a", f"{base}/b"], tmp_path)
+    previous = again(first, base, tmp_path)
+    a, b = sorted(first.files_downloaded)
+    with open(b, "wb") as f:
+        f.write(b"<p>b, edited</p>")
+    seen.clear(), log.clear()
+    res = run_update([f"{base}/a", f"{base}/b"], tmp_path, previous, cache=1)
+    assert "/a" not in seen and log == [{}]  # a: no request; b: a plain one
+    assert res.kept == [a] and res.records[a] == first.records[a]
+    assert res.files_downloaded == [b] and open(b, "rb").read() == b"<p>b</p>"
+    assert res.report.from_cache == 1 and res.report.not_modified == 0
+    assert "Loaded from cache without a request: 1" in format_report(res.report, False)
+
+
+def test_cache_1_requests_a_redirect_but_not_its_recorded_target(server, tmp_path):
+    """The manifest never records a redirect target (spec 5.6): the redirecting URL is still
+    requested, and the hop whose name is the recorded file's is loaded without a request."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    first = run([f"{base}/old"], tmp_path)
+    seen.clear()
+    res = run_update([f"{base}/old"], tmp_path, again(first, base, tmp_path), cache=1)
+    assert "/old" in seen and "/new" not in seen
+    assert [os.path.basename(f) for f in res.kept] == ["new.html"] and res.success
+
+
+def test_cache_0_fetches_in_full_and_leaves_the_records_as_they_were(server, tmp_path):
+    """-C0 (htscache.c:59, 1174): no cache is read, so each request is plain and each
+    answer written; none is written, so a file keeps the record the previous run made for
+    its URL (the next -C2 run revalidates against it), and a file it did not record has
+    none."""
+    base, script, _ = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>", log=log)
+    first = run([f"{base}/a"], tmp_path)
+    script["/a"] = validated('"a2"', b"<p>a, new</p>", log=log)
+    script["/c"] = (200, {**HTML, "etag": '"c1"'}, b"<p>c</p>")
+    log.clear()
+    res = run_update([f"{base}/a", f"{base}/c"], tmp_path, again(first, base, tmp_path),
+                     cache=0)
+    a, c = sorted(res.files_downloaded)
+    assert log == [{}] and res.kept == [] and open(a, "rb").read() == b"<p>a, new</p>"
+    assert res.records[a] == first.records[a] and res.records[a]["etag"] == '"a1"'
+    assert res.records[c] == dict.fromkeys(RECORD_FIELDS)

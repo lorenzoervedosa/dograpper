@@ -31,7 +31,8 @@ _PLAYWRIGHT_MSG = ("httrack profile: Playwright fallback is not implemented yet 
 # The [httrack] options of `download` (single list; sync forwards these plus --downloader).
 PROFILE_OPTIONS = ('user_agent', 'no_robots', 'connections', 'max_conn_rate', 'max_bandwidth',
                    'timeout', 'retries', 'max_links', 'max_retry_after',
-                   'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing')
+                   'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
+                   'cache')
 # --no-X flags: the policy holds the positive switch
 _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
             'no_extended_parsing': 'extended_parsing'}
@@ -165,7 +166,7 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
         logger.info(f"[cascade] layer-3 {name} crawl: link-graph fallback")
         res = mirror_site(url, output, policy, include_extensions, depth=depth,
                           fetcher=fetcher, filters=filters, previous=previous)
-    if previous is not None:
+    if previous is not None and policy.cache != 0:  # -C0 keeps no file list (htscore.c:2147)
         res.report.unreached = _unreached(previous, output, [*res.files_downloaded, *res.kept])
     if res.front_failed or not res.success:
         for line in format_report(res.report, verbose):

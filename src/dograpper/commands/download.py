@@ -324,8 +324,14 @@ def _run_download_cascade(
 @click.option('--no-extended-parsing', is_flag=True, default=False,
               help="[httrack] Do not guess links from quoted strings in other attributes and "
                    "in scripts (HTTrack -%P0). Default: guessed, as HTTrack does")
+@click.option('--cache', type=click.IntRange(0, 2), default=None,
+              help="[httrack] Cache mode, as HTTrack -C: 0 ignores the manifest (every file "
+                   "fetched in full, its records left as they were), 1 trusts it (a recorded "
+                   "file still on disk at its recorded size is not requested, HTTrack "
+                   "--continue), 2 revalidates each recorded file (HTTrack --update). "
+                   "Default: 2 when -o holds a manifest, else 1")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -361,6 +367,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'disable_security_limits': disable_security_limits,
         'no_parse_scripts': no_parse_scripts,
         'no_extended_parsing': no_extended_parsing,
+        'cache': cache,
     }
     merged_params = load_config(config_path, 'download', cli_params, ctx)
 

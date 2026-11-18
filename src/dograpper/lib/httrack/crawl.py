@@ -15,7 +15,7 @@ from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.portable_names import resolve_under
 from dograpper.utils.progress import ProgressReporter
-from dograpper.utils.redact import redact_url
+from dograpper.utils.redact import recordable_url, redact_url
 
 from .escape import request_target
 from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
@@ -49,6 +49,7 @@ class Previous(NamedTuple):
     validators: tuple[tuple[str, str], ...]  # policy.conditional_headers
     redirected: bool                         # its URL reached it through a redirect
     record: dict                             # its manifest RECORD_FIELDS, kept with it
+    size: int | None = None                  # its recorded size_bytes (--cache 1 checks it)
 
 
 def _named(name: str | None, path: str) -> bool:
@@ -60,19 +61,26 @@ def _named(name: str | None, path: str) -> bool:
 
 
 def previous_files(previous: Manifest | None, names: NameRegistry,
-                   output_dir: str) -> dict[str, Previous]:
-    """url_key of the recorded URL -> Previous, for each file `previous` recorded from a
-    200 with a validator and still on disk, not empty: HTTrack revalidates a cached 200
-    only (htsback.c:2557-2607; 203 is stored as 200, 4224-4226) and fetches a file erased
-    or emptied since in full (2414-2492). A file not named as its URL would be (an edited
-    manifest) is left out, so a manifest never chooses where a page is written; one reached
-    through a redirect is checked against the hop that reaches it (sends)."""
+                   output_dir: str, cache: int | None = None) -> dict[str, Previous]:
+    """url_key of the recorded URL -> Previous, for each file `previous` recorded and still
+    on disk, not empty, as the cache mode (policy.cache) reads the cache: -C2 (None over a
+    previous run) revalidates a cached 200 with a validator only (htsback.c:2557-2607; 203
+    is stored as 200, 4224-4226), -C1 loads any recorded 2xx (2497-2556), -C0 reads nothing
+    (htscache.c:1174). A file erased or emptied since is fetched in full (2414-2492). A file
+    not named as its URL would be (an edited manifest) is left out, so a manifest never
+    chooses where a page is written; one reached through a redirect is checked against the
+    hop that reaches it (sends)."""
+    if cache == 0:
+        return {}
     root, out = os.path.realpath(output_dir), {}
     for key, e in sorted((previous.files if previous else {}).items()):
         validators = conditional_headers(e.etag, e.last_modified)
         path = resolve_under(root, e.local_path or key)
-        if not (e.url and e.status in (200, 203) and validators and path
-                and os.path.isfile(path) and os.path.getsize(path) > 0):
+        status = e.status if type(e.status) is int else None  # an edited manifest: no bool
+        usable = (status is not None and 200 <= status < 300) if cache == 1 else (
+            status in (200, 203) and bool(validators))
+        if not (e.url and usable and path and os.path.isfile(path)
+                and os.path.getsize(path) > 0):
             continue
         try:
             k = url_key(e.url)
@@ -81,8 +89,33 @@ def previous_files(previous: Manifest | None, names: NameRegistry,
         except ValueError:  # an unusable URL (an edited manifest)
             continue
         out.setdefault(k, Previous(e.url, path, validators, bool(e.redirected),
-                                   {f: getattr(e, f) for f in RECORD_FIELDS}))
+                                   {f: getattr(e, f) for f in RECORD_FIELDS}, e.size_bytes))
     return out
+
+
+def uncached(records: dict[str, dict], urls: Mapping[str, str], previous: Manifest | None,
+             output_dir: str) -> dict[str, dict]:
+    """The records of a -C0 run (file -> URL requested in `urls`): HTTrack writes no cache
+    then (htscache.c:59, 1174), and the previous one survives as it was, so each file keeps
+    the record the previous run made for its URL, and one it did not record gets none."""
+    root = os.path.realpath(output_dir)
+    old = {resolve_under(root, e.local_path or k): e
+           for k, e in (previous.files if previous else {}).items()}
+
+    def kept(f: str) -> dict:
+        e = old.get(f)
+        if e is None or e.url is None or e.url != recordable_url(urls[f]):
+            return dict.fromkeys(RECORD_FIELDS)
+        return {x: getattr(e, x) for x in RECORD_FIELDS}
+    return {f: kept(f) for f in records}
+
+
+def _fsize(path: str) -> int:
+    """htslib.c fsize: the file's size, -1 when it cannot be read."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return -1
 
 
 def reserve_names(names: NameRegistry, prev: Mapping[str, Previous]) -> None:
@@ -203,7 +236,8 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
     but a 2xx or a redirect keeps that file: ("kept", URL, result), as HTTrack masks it as a
     304 (htsback.c:4266-4280, 4437-4494); a challenge is also listed as challenged. A failed
     transfer is an error that keeps it too (htsback.c:1307-1321): ("kept", URL, result)
-    with result.error set."""
+    with result.error set. Without a request, a file -C1 (policy.cache 1) finds at its
+    recorded size is ("kept", URL, an empty result)."""
     via, hops = (redact_url(referer) if referer else None), 0
     while True:
         safe = redact_url(url)
@@ -228,7 +262,13 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 report.robots_blocked.append(safe)
             logger.info("robots.txt disallows %s", safe)
             return "refused", url, None
-        sent = prev.validators if sends(prev, url, hops > 0, names) else ()
+        mine = sends(prev, url, hops > 0, names)
+        if mine and fetcher.policy.cache == 1 and _fsize(prev.path) == prev.size:
+            with lock:  # -C1: "File immediately loaded from cache" (htsback.c:2497-2556)
+                report.from_cache += 1
+            return "kept", url, FetchResult(url)
+        # -C1 sends no validator: a file whose size changed is requested in full (2549-2554)
+        sent = prev.validators if mine and fetcher.policy.cache != 1 else ()
         res = fetcher.get(url, kind=kind, referer=referer, meta=meta,
                           **({"validators": sent} if sent else {}))
         # the fetcher keeps a 3xx's Location even when its body fails to decode
@@ -312,7 +352,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     (fetch_page) and a kept one is left byte-identical, relink included."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
-    prev = previous_files(previous, names, output_dir)
+    prev = previous_files(previous, names, output_dir, policy.cache)
     reserve_names(names, prev)
     kept: set[str] = set()
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
@@ -437,5 +477,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     front_failed = not files and bool(seeds) and refused[0] == len(seeds)
     chosen = {path: seed for path, (_, seed) in requested.items()}
     records = {path: {**fields[path], "redirected": r} for path, (r, _) in requested.items()}
+    if policy.cache == 0:
+        records = uncached(records, chosen, previous, output_dir)
     return HttrackResult(bool(files or kept), files, len(kept), report, front_failed, chosen,
                          sorted(kept), records)

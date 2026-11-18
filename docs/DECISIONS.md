@@ -24,6 +24,34 @@ Entry format:
 
 ## 2026-11-18 — HTTrack cache and update options in the httrack profile (#132)
 
+- **Decision:** HTTrack's cache mode is one flag, `--cache 0|1|2` (HTTrack's
+  `--cache=N`), default `None` meaning HTTrack's own (`2` over a manifest,
+  else `1`); no `--update` / `--continue` aliases.
+- **Why:** HTTrack's two aliases are `-iC2` and `-iC1`, and `-i` resumes the
+  command line saved in the cache, which dograpper has no use for (the URL is
+  required); one flag gives one config key and one precedence path.
+- **Rejected:** `--update` and `--continue` as extra flags; a `--cache` default
+  of `1` (an explicit `1` would then be indistinguishable from the default
+  that switches to `2` over a manifest).
+- **Pending:** none.
+
+- **Decision:** `--cache 0` neither reads nor writes the records: each file
+  keeps the record the previous run made for its URL.
+- **Why:** HTTrack `-C0` leaves `hts-cache/` untouched (`src/htscache.c:59`,
+  `1174`), so its next update revalidates against the previous cache.
+- **Rejected:** recording this run's validators (a deviation with no corpus
+  reason); dropping all records.
+- **Pending:** none.
+
+- **Decision:** under `--cache 1` every recorded file, a page included, is
+  loaded only when its size is the recorded one; otherwise it is fetched in
+  full. HTTrack writes a page again from its cache body instead.
+- **Why:** dograpper keeps no cache body; one rule for every type, and the
+  closest outcome to HTTrack's (the site's bytes on disk), at the cost of one
+  request. Recorded in spec §5.6 as a deviation.
+- **Rejected:** keeping an edited page as it is without a request.
+- **Pending:** none.
+
 - **Decision:** a file time that cannot be set (`os.utime` fails) is an error
   of the run report, and the file is kept; HTTrack ignores the return value of
   `set_filetime_rfc822`.

@@ -644,3 +644,49 @@ def test_a_relinked_stylesheet_is_stamped_after_its_links_are_rewritten(server, 
     a = next(f for f in res.files_downloaded if f.endswith("a.css"))
     assert os.stat(a).st_mtime == 1704067200
     assert open(a, "rb").read() != f'@import "{base}/b.css";'.encode()  # relinked
+
+
+# -- cache modes: --cache 0 | 1 (HTTrack -C0 | -C1) --
+
+def test_cache_1_crawls_a_previous_mirror_from_its_copies_without_requests(server, tmp_path):
+    """-C1 (htsback.c:2497-2556): each recorded page is loaded without a request and its
+    links are followed from the saved copy, as a 304 page's are."""
+    base, script, seen = server
+    log = []
+    vsite(script, {"/": page("a.html"), "/a.html": page()}, log)
+    first, _ = crawl(f"{base}/", tmp_path)
+    seen.clear(), log.clear()
+    res, _ = update(f"{base}/", tmp_path, first, cache=1)
+    assert log == [] and seen == ["/robots.txt"]
+    assert len(res.kept) == 2 and res.report.from_cache == 2 and res.success
+
+
+def test_cache_0_crawls_with_plain_requests(server, tmp_path):
+    base, script, _ = server
+    log = []
+    vsite(script, {"/": page("a.html"), "/a.html": page()}, log)
+    first, _ = crawl(f"{base}/", tmp_path)
+    log.clear()
+    res, _ = update(f"{base}/", tmp_path, first, cache=0)
+    assert sorted(log) == [("/", None), ("/a.html", None)]
+    assert rel(res, tmp_path) == ["a.html", "index.html"] and res.kept == []
+
+
+def test_cache_1_follows_a_loaded_stylesheet_from_its_relinked_copy(server, tmp_path):
+    """A stylesheet loaded under -C1 is no page: its links, which relink() rewrote (#133),
+    are read from the copy and mapped back through the manifest, with no request."""
+    base, script, seen = server
+    css = {"content-type": "text/css"}
+    site(script, {"/": page("p.html", extra='<link rel="stylesheet" href="a.css">'),
+                  "/p.html": page(),
+                  "/a.css": (css, f'@import "{base}/b.css";'.encode()),
+                  "/b.css": (css, b"p{}")})
+    policy = build_policy(retries=0)
+    first = mirror_site(f"{base}/", str(tmp_path), policy, "html,css", fetcher=Spy(policy))
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    seen.clear()
+    policy = build_policy(retries=0, cache=1)
+    res = mirror_site(f"{base}/", str(tmp_path), policy, "html,css", fetcher=Spy(policy),
+                      previous=previous)
+    assert seen == ["/robots.txt"] and res.report.from_cache == 4
+    assert res.kept == sorted(first.files_downloaded) and res.files_downloaded == []

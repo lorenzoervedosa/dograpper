@@ -429,3 +429,11 @@ def test_conditional_headers_go_first_and_leave_the_rest_identical():
     got = request_headers(p, "localhost:8443", kind="linked", referer="https://localhost:8443/",
                           scheme="https", validators=v)
     assert got == [*v, *plain]
+
+
+def test_cache_mode_defaults_as_in_httrack():
+    """-C: None is HTTrack's default, 2 over a finished mirror, else 1
+    (htscoremain.c:1263-1285); a mode HTTrack has not is refused."""
+    assert build_policy().cache is None and build_policy(cache=0).cache == 0
+    with pytest.raises(ValueError, match="cache"):
+        build_policy(cache=3)

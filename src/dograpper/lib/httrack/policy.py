@@ -65,6 +65,9 @@ class HttrackPolicy:
     obey_robots: bool
     parse_scripts: bool     # HTTrack -j: scan scripts and stylesheets for links
     extended_parsing: bool  # HTTrack -%P: guess links in strings and other attributes
+    # HTTrack -C: 0 no cache, 1 trust it, 2 revalidate; None is HTTrack's default, 2 over a
+    # finished mirror (a previous manifest), else 1 (htscoremain.c:1263-1285)
+    cache: int | None = None
 
 
 def _clamp(name, value, cap, disabled):
@@ -80,7 +83,7 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  timeout: float = 120.0, retries: int = 2, max_links: int = 100_000,
                  max_retry_after: int = 60, delay_ms: int = 0, obey_robots: bool = True,
                  disable_security_limits: bool = False, parse_scripts: bool = True,
-                 extended_parsing: bool = True) -> HttrackPolicy:
+                 extended_parsing: bool = True, cache: int | None = None) -> HttrackPolicy:
     # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
     for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
                         ("max_bandwidth", max_bandwidth), ("timeout", timeout),
@@ -91,6 +94,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                         ("delay_ms", delay_ms)):
         if not value >= 0:
             raise ValueError(f"{name} must not be negative, got {value!r}")
+    if cache not in (None, 0, 1, 2):
+        raise ValueError(f"cache must be 0, 1 or 2, got {cache!r}")
     if max_retry_after > MAX_RETRY_AFTER_CAP:
         logger.warning("max_retry_after=%s exceeds the hard maximum; clamped to %s",
                        max_retry_after, MAX_RETRY_AFTER_CAP)
@@ -109,6 +114,7 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         obey_robots=obey_robots,
         parse_scripts=parse_scripts,
         extended_parsing=extended_parsing,
+        cache=cache,
     )
 
 

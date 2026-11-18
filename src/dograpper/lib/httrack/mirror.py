@@ -26,7 +26,7 @@ from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, moved_request,
-                    previous_files, record_of, relink, reserve_names, sends, stamp)
+                    previous_files, record_of, relink, reserve_names, sends, stamp, uncached)
 from .fetcher import Fetcher, same_host
 from .links import JS_MIMES, css_links, page_links, script_links, url_key
 from .naming import NameRegistry, no_page, url_extension
@@ -114,7 +114,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     kept page, stylesheet or script are followed from that copy (_kept_links)."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
-    prev = previous_files(previous, names, output_dir)
+    prev = previous_files(previous, names, output_dir, policy.cache)
     reserve_names(names, prev)
     url_of = {e.local_path or k: e.url for k, e in (previous.files if previous else {}).items()
               if e.url}
@@ -331,6 +331,9 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     report.errors.sort(key=lambda e: (e[0], e[1]))
     files = sorted(set(saved.values()) - kept)
     front_failed = state["front_failed"] and not state["front_ok"]
-    return HttrackResult(bool(files or kept), files, len(kept), report, front_failed,
-                         {f: u for f, (_, u) in sorted(chosen.items())}, sorted(kept),
-                         {f: {**fields[f], "redirected": r} for f, (r, _) in sorted(chosen.items())})
+    urls = {f: u for f, (_, u) in sorted(chosen.items())}
+    records = {f: {**fields[f], "redirected": r} for f, (r, _) in sorted(chosen.items())}
+    if policy.cache == 0:
+        records = uncached(records, urls, previous, output_dir)
+    return HttrackResult(bool(files or kept), files, len(kept), report, front_failed, urls,
+                         sorted(kept), records)

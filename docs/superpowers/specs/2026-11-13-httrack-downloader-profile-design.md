@@ -415,6 +415,25 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
       the links of the kept pages.
     - robots.txt is fetched in full on every run. HTTrack caches and
       revalidates it too (`src/htsback.c:2396-2400`).
+- **Cache modes** (`--cache N`, HTTrack `-C`, `src/htsalias.c:194-195`; #132).
+  The default is HTTrack's: `2` when `-o` holds a manifest, else `1`
+  (`src/htscoremain.c:1263-1285`).
+  - `--cache 2` (HTTrack `--update`, `src/htsalias.c:271`) is the update above.
+  - `--cache 1` (HTTrack `--continue`, `src/htsalias.c:272`): a file recorded
+    from a 2xx, still on disk at its recorded size, is loaded without a
+    request, and a kept page's links are followed from it ("File immediately
+    loaded from cache", `src/htsback.c:2497-2556`). A file whose size changed
+    is requested in full, with no validator (`src/htscache.c:729-806`,
+    `src/htsback.c:2549-2554`).
+  - `--cache 0`: the manifest's records are neither read nor written, as
+    HTTrack touches no cache then (`src/htscache.c:59`, `1174`). Each file is
+    fetched in full and keeps the record the previous run made for its URL; no
+    file is listed as not reached (no `new.lst`, `src/htscore.c:2147`).
+  - **Deviations**, because dograpper keeps no cache beside the mirror: under
+    `--cache 1` the redirecting URL of a file reached through a redirect is
+    still requested (HTTrack loads the cached 3xx too), and a hypertext file
+    whose size changed is fetched in full, where HTTrack writes it again from
+    the body its cache holds (`src/htscache.c:264-272`).
 - **File times:** each saved file gets its recorded `Last-Modified` (else the
   `Date`) as access and modification time, once its links are rewritten, read
   as HTTrack reads the date (`src/htscore.c:451-452`, `src/htsback.c:2119-2128`,
@@ -474,10 +493,7 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- **HTTrack's other cache modes and update options** are not in PR 3:
-  - `-C0` (no cache) and `-C1`/`--continue` (trust the cache: no request for a
-    cached file, `src/htsback.c:2497-2556`); with a manifest the profile always
-    acts as `-C2`/`--update`;
+- **HTTrack's other update options** are not ported yet (#132):
   - `-%s` update hacks (off by default, `src/htsback.c:4281-4395`), `-%n`
     do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and `-%d`
     `--changes` (off, writes `hts-changes.json`);
