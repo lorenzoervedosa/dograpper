@@ -350,6 +350,8 @@ class MarkdownStripper(HTMLStripper):
         self.open = Counter()
         self.text = self.frames[0].parts
         self.link = None  # (frame, index of its "[" placeholder, destination)
+        self.code = 0       # open <code> elements
+        self.signature = 0  # <div> depth inside a Javadoc member signature
 
     def handle_starttag(self, tag, attrs):
         if not self.ignore and not self.pre.depth:
@@ -377,9 +379,16 @@ class MarkdownStripper(HTMLStripper):
         frame = self.frames[-1]
         if frame.tag == "li" and tag in _ITEM_BLOCKERS:
             frame.block = True
+        if tag == "code":
+            self.code += 1
+        elif tag == "div" and (self.signature
+                               or "member-signature" in (dict(attrs).get("class") or "").split()):
+            self.signature += 1
         if tag == "a":
             self.link = None  # an <a> inside an open one leaves the outer as text
-            dest = _link_destination(dict(attrs).get("href"), self.page)
+            # Inside code a link keeps only its text: a signature reads as the source shows it.
+            dest = (None if self.code or self.signature
+                    else _link_destination(dict(attrs).get("href"), self.page))
             if dest is not None:
                 self.link = (frame, len(frame.parts), dest)
                 frame.parts.append("")
@@ -412,7 +421,11 @@ class MarkdownStripper(HTMLStripper):
                     self._push(cell)
 
     def _close(self, tag):
-        if tag == "a":
+        if tag == "code":
+            self.code = max(self.code - 1, 0)
+        elif tag == "div" and self.signature:
+            self.signature -= 1
+        elif tag == "a":
             self._close_link()
         elif tag in _HEADING_LEVELS:
             self._close_to(_HEADING_LEVELS, ())

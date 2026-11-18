@@ -183,6 +183,11 @@ and fixes alone are a PATCH bump.
   maintenance box is removed from its section (the empty `## Navigation` that
   ended most wiki pages). A heading whose section still has content stays.
   ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
+- `pack --format md` writes a link inside code (`<code>`, `<pre>`, a Javadoc
+  `div.member-signature`) as its text, so a signature reads as the source
+  shows it and greps as a phrase (`rg 'ItemContainer getInventory'`); links in
+  prose are still written as links.
+  ([#117](https://github.com/lorenzoervedosa/dograpper/issues/117))
 - `download` and `pack --delta` exit 1 with the path in the message when the
   manifest (`.dograpper-manifest.json`) or `pack_state.json` cannot be written,
   instead of logging an error and exiting 0; both files are now written

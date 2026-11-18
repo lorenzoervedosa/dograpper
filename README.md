@@ -564,7 +564,9 @@ keep plain text, unchanged.
   `<`, `>`, `\` and control characters are percent-encoded. A link to the same
   page (`#anchor`, or `page.html#anchor` as mirrors rewrite it), with no
   target, or with a scheme other than `http`, `https` or `mailto`
-  (`javascript:`, `data:`...) keeps only its text.
+  (`javascript:`, `data:`...) keeps only its text. So does a link inside code
+  (`<code>`, `<pre>`, a Javadoc `div.member-signature`), so a signature reads
+  as the source shows it: `public ItemContainer getInventory()`.
 - `ul` / `ol` items become `-` / `N.` lines (an `ol`'s `start` is kept), with
   nested lists indented under their item. An item that holds a block (a
   heading, a `div`, a table or code, as Javadoc's member sections do) is

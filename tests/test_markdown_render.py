@@ -5,6 +5,7 @@
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -82,6 +83,38 @@ def test_link_whitespace_stays_outside_the_brackets():
 def test_link_without_text_or_around_a_block_is_not_written():
     assert md('<p>a<a href="u"><img src="i.png"></a>b</p>') == "ab"
     assert md('<a href="u"><h3>Title</h3></a>') == "### Title"
+
+
+# Javadoc 25 member signature, as IsoGameCharacter.html writes getInventory (#117).
+SIGNATURE = ('<div class="member-signature"><span class="modifiers">public</span>&nbsp;'
+             '<span class="return-type"><a href="../inventory/ItemContainer.html" '
+             'title="class in zombie.inventory">ItemContainer</a></span>&nbsp;'
+             '<span class="element-name">getInventory</span>()</div>')
+
+
+def test_links_inside_code_keep_only_their_text():
+    assert md(SIGNATURE) == "public ItemContainer getInventory()"
+    assert md('<pre>x = <a href="u.html">y</a>()</pre>') == "```\nx = y()\n```"
+    # A link around code is a prose link; prose links stay links.
+    out = md('<p><code><a href="Foo.html">Foo</a>.bar()</code> or '
+             '<a href="Foo.html"><code>Foo</code></a></p>')
+    assert out.startswith("Foo.bar() or [Foo]")
+
+
+def test_member_signature_ends_with_its_own_div():
+    out = md('<div class="member-signature"><div>a <a href="u">b</a></div> <a href="v">c</a></div>'
+             '<p><a href="w">d</a></p>').split("\n\n")
+    assert out[:2] == ["a b", "c"] and out[2].startswith("[d]")
+
+
+def test_pack_javadoc_signatures_read_as_the_source_shows_them(tmp_path):
+    out = tmp_path / "out"
+    javadoc = Path(__file__).parent / "fixtures" / "javadoc" / "html"
+    result = CliRunner().invoke(cli, ["pack", str(javadoc), "-o", str(out), "--layout", "page"])
+    assert result.exit_code == 0, result.output
+    lines = (out / "pages" / "fixture" / "api" / "Box.md").read_text().split("\n")
+    assert "public Box(String name)" in lines
+    assert "Box(String name)" in lines  # the constructor summary, a <code> cell
 
 
 # ---------------------------------------------------------------------------
