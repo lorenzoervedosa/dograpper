@@ -61,3 +61,8 @@ Entry format:
 - **Rejected:** merging both into `GLOSSARY.md` (two formats and two readers
   in one file).
 - **Pending:** none.
+
+- **Decision:** saved HTTP error pages (#121) are detected by `utils/error_page.py` (new module), not folded into `utils/challenge.py`; rule = `<title>` fully matches `[45]xx <reason>` AND file <= 16 KiB AND <= 40 visible words (scripts/styles dropped); wired as step 6a-1 of `pack`, a second copy of the 6a block.
+- **Why:** `challenge.py` is Cloudflare-specific and shared with the httrack fetcher; the error-page rule has no fetcher use. Both layouts and `--dry-run` run after 6a, so they inherit the skip. Second copy tolerated per the project rule; a third skip class should extract the shared block.
+- **Rejected:** matching "404" anywhere in the text; requiring an `<h1>` (not all servers emit one).
+- **Pending:** none.

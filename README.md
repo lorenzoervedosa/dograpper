@@ -572,6 +572,7 @@ Operation order (each stage reads the output of the previous one):
 
 ```
 list files → apply .docsignore → skip bot-challenge pages
+           → skip saved HTTP error pages
            → skip MediaWiki redirect aliases of packed pages
            → --api-records? split API reference pages into records
              (those pages skip extraction and dedup)
@@ -1608,6 +1609,7 @@ Conditional extra lines (per enabled flag):
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
 | bot-challenge pages found | `Challenge pages: N` |
+| saved HTTP error pages found | `Error pages: N` |
 | MediaWiki redirect aliases of packed pages found | `Redirect aliases: N` |
 | `--for-queries` | `Query packing: ...` |
 | `--context-header` or `--layout page` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
@@ -1620,6 +1622,12 @@ Warnings appear when:
   them once on stderr, leaves them out of the chunks and counts them (also
   in `--dry-run`); if every file is one, `pack` fails. A page that merely
   mentions the phrase in its text is not affected.
+- Input `.html`/`.htm` files are saved HTTP error pages: the `<title>` is a
+  status line such as `404 Not Found` and the whole file holds at most 40
+  words of text (scripts and styles excluded). `pack` lists them once on
+  stderr and leaves them out, in both layouts and in `--dry-run`; the pack
+  summary counts them (`Error pages: N`, and in `Files excluded`); if every file is one, `pack` fails. A page about HTTP
+  errors or one that merely mentions the status is not affected.
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
   into a chunk, overshooting the stated limit).
 - Total chunks exceed `--max-chunks` (nothing is discarded — every

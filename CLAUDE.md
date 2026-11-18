@@ -81,6 +81,7 @@ src/dograpper/
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
     ├── code_fence.py       # fence() / code_span() / split_blocks() / unfence() — bloco de código cercado (CommonMark): fonte única para o stripper (escreve), dedup e chunker (nunca partem um bloco em linha em branco), scorer e writers txt/jsonl (tiram a cerca)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
+    ├── error_page.py       # is_error_page() / find_error_page_files() — página de erro HTTP salva (<title> `404 Not Found` + ≤ 40 palavras de texto visível, arquivo ≤ 16 KiB; leitura linear); mesmo tratamento das páginas de challenge na etapa 6a-1 de pack (#121)
     ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy); nunca remove as definições de link do md e compara blocos pelo destino do link, não pelo número
     ├── dep_resolver.py     # resolve_wget()/resolve_browser_dir() — deps em DOGRAPPER_HOME (env lido no import)
     ├── dry_run_report.py   # generate_report() — relatório formatado para --dry-run
@@ -148,6 +149,7 @@ tests/
 ├── test_page_layout.py     # Layout por página: nomes portáveis e colisões, títulos (sufixo, h1 fora do container, stem), INDEX.md literal, exit 2 de flags só-chunk (CLI e config), posse de pages/ (rebuild, exit 1, falha preserva), delta/cross-refs/score/tokens/dry-run, sync
 ├── test_pack.py            # word_counter, ignore_parser, chunker, write_chunks, CLI integration
 ├── test_pack_challenge.py  # Pack: páginas de challenge (Cloudflare) detectadas, avisadas e fora dos chunks; falso positivo em prosa
+├── test_pack_error_pages.py # Pack: páginas de erro HTTP salvas (404…) puladas, avisadas e contadas nos dois layouts e no dry-run; falsos positivos (página sobre 404, corpo que cita o status, página longa) mantidos
 ├── test_pack_artifacts.py  # Sidecars: cross-refs, delta manifest, snapshot de readiness, contagem de tokens
 ├── test_pack_reader.py     # load_chunks: campos, linhas malformadas, ordem determinística entre arquivos
 ├── test_pack_scoring.py    # score_chunks: ids, report pages, overrides de texto, tolerância a falha
@@ -196,6 +198,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_page_layout.py` | Antes de alterar `lib/page_layout.py`, `commands/_page_layout.py` ou o despacho `--layout` de `commands/pack.py` (nomes, formato do `INDEX.md`, posse de `pages/`, flags rejeitadas) |
 | `tests/test_progress.py` | Antes de alterar `utils/progress.py` (formato e throttle das linhas `[progress]`) |
 | `tests/test_query_packer.py` | Antes de alterar `lib/query_packer.py` ou a integração `--for-queries` em `commands/pack.py` |
+| `tests/test_pack_error_pages.py` | Antes de alterar `utils/error_page.py` ou a etapa 6a-1 de `commands/pack.py` |
 | `tests/test_pack_challenge.py` | Antes de alterar `utils/challenge.py` ou a etapa 6a de `commands/pack.py` |
 | `tests/test_pack_scoring.py` | Antes de alterar `lib/pack_scoring.py` ou a etapa 9c de `commands/pack.py` |
 | `tests/test_pack_artifacts.py` | Antes de alterar `lib/pack_artifacts.py` ou as escritas de sidecar (10a-10e) de `commands/pack.py` |

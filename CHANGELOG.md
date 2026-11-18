@@ -198,6 +198,13 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack` skips a saved HTTP error page (a `<title>` such as `404 Not Found`
+  and almost no other text, as a mirror stores when a URL answered an error),
+  warns once with the affected files (also in `--dry-run` and `--layout page`),
+  reports `Error pages: N` in the pack summary (a `--dry-run` counts it in
+  `Files excluded`), and fails if every input file is one. A page that
+  documents or mentions the error, or a long page with that title, is kept.
+  ([#121])
 - `pack --dedup` no longer deduplicates a page recognised as an API reference
   (Javadoc), with or without `--api-records`: a member block repeated across
   pages, such as an override, stays on every page, and the summary and
@@ -429,5 +436,6 @@ and fixes alone are a PATCH bump.
 [#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
 [#88]: https://github.com/lorenzoervedosa/dograpper/issues/88
 [#110]: https://github.com/lorenzoervedosa/dograpper/issues/110
+[#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
