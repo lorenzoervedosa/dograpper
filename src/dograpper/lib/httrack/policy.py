@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from urllib.parse import urlsplit
 
+from ...utils.redact import drop_userinfo
+from .escape import escape_unsafe, request_target
+
 logger = logging.getLogger(__name__)
 
 # Deliberate second copy of cli.py's version lookup: lib must not import the CLI layer.
@@ -151,6 +154,20 @@ def _site_key(host: str) -> str:
     return ".".join(labels[-2:]) + host[len(name):]
 
 
+def _referer_value(page: str | None) -> str | None:
+    """Referer for a request from `page`, built as htslib.c:1136-1163 builds it: scheme, the
+    escaped host past any user:password, then the escaped path and query (no fragment).
+    None when `page` is empty, does not parse or cannot be escaped: it is dropped, never
+    raised."""
+    if not page:
+        return None
+    try:
+        p = drop_userinfo(urlsplit(page))
+        return f"{p.scheme}://{escape_unsafe(p.netloc)}{request_target(p)}"
+    except ValueError:  # "https://[bad/"; a lone surrogate UTF-8 cannot encode
+        return None
+
+
 def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
     """Sec-Fetch-Site of a request from page `referer` (R16, htsfetch.c hts_fetch_site_of)."""
     if not referer:
@@ -174,6 +191,7 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
     # htslib.c fetch_meta_sent: navigations only, to a trustworthy origin, with a browser UA
     meta = (kind != "robots" and _trustworthy(scheme, host)
             and policy.user_agent.startswith("Mozilla/5.0 "))
+    referer = _referer_value(referer)
     h: list[tuple[str, str]] = []
     if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
         h.append(("Referer", referer))  # never an https referer to an http URL
