@@ -18,6 +18,9 @@ class RunReport:
     out_of_scope: list[str] = field(default_factory=list)
     errors: list[tuple[str, str, str | None]] = field(default_factory=list)
     partial: bool = False
+    not_modified: int = 0  # update mode: 304 to a revalidation
+    kept: list[tuple[str, str]] = field(default_factory=list)  # update: (URL, error) kept over
+    unreached: list[str] = field(default_factory=list)  # previous run's files this one missed
 
 
 def format_report(r: RunReport, verbose: bool) -> list[str]:
@@ -30,6 +33,16 @@ def format_report(r: RunReport, verbose: bool) -> list[str]:
             lines.append(f"{label}: {len(urls)}")
             if verbose:
                 lines.extend(neutralize_controls(f"  {u}") for u in urls)
+    if r.not_modified:
+        lines.append(f"Not modified (304): {r.not_modified}")
+    if r.kept:  # HTTrack's "Kept existing file ... after error N on update" (htsback.c:4266)
+        lines.append(f"Kept the previous copy after an error: {len(r.kept)}")
+        if verbose:
+            lines.extend(neutralize_controls(f"  {u}: {why}") for u, why in r.kept)
+    if r.unreached:  # what HTTrack -X would purge (spec 5.6: never purged)
+        lines.append(f"Not reached this run, kept on disk: {len(r.unreached)}")
+        if verbose:
+            lines.extend(neutralize_controls(f"  {u}") for u in r.unreached)
     if r.errors:
         shown = r.errors if verbose else r.errors[:MAX_SHOWN_ERRORS]
         lines.append(f"Errors: {len(r.errors)}")

@@ -362,7 +362,9 @@ Precedence is unchanged: defaults < JSON < explicit CLI.
   discover URLs through the same identity, following up to 5 same-host
   redirects with a robots.txt check before every hop; the seeded URLs are
   then fetched by the new engine, which rewrites the links between the saved
-  pages as the crawl below does. When neither layer finds a list, the
+  pages as the crawl below does. Each seed is a start URL: it is requested
+  without `Referer`, and a redirect target as the crawl requests a start
+  URL's (the seed as `Referer` for a page target, `Sec-Fetch-Site: none`). When neither layer finds a list, the
   engine crawls the site from the start URL instead of `wget --mirror`
   (below).
 - **`fire-engine`** — the `httrack` crawl over a `curl_cffi` transport that
@@ -384,6 +386,19 @@ HTTrack's mirror loop:
   content="nofollow">` stops link extraction for the rest of that page
   (ignored with `--no-robots`). Each request carries the `Referer` and the
   `Sec-Fetch-*` values HTTrack sends for that kind of link.
+- **Scripts** (HTTrack `-j`, on): `<script>` and `<style>` bodies, `onXxx=`
+  and `style=` values, `javascript:` URLs and fetched scripts are scanned
+  statically, as HTTrack does, outside comments and strings, for
+  `x.src = "…"`, `location = "…"`, `.href`, `.open("…")`, `url(…)`,
+  `import "…"` and `from "…"` (nothing is executed). A script's links resolve
+  against the page that loaded it, a module specifier against the script, and
+  carry no `Sec-Fetch-*`. Scripts are fetched only when `js` is in
+  `--include-extensions`.
+- **Extended parsing** (HTTrack `-%P`, on): a quoted string after `=`, `(` or
+  `,`, in a script or in an attribute that is not a link one (`data-page="a.html"`,
+  `content="/og.png"`), is followed when it names a file (a known extension, or
+  a scheme), except in attributes that never hold one (`alt`, `class`, `title`,
+  `id`…) and framework bindings (`:x`, `v-x`, `@x`).
 - **Scope:** the start host only; under the start URL's directory
   (`/docs/index.html` → `/docs/`, `/modding` → `/`, `/modding/` →
   `/modding/`) unless a `--filter` rule decides; `--depth` counts link hops
@@ -413,9 +428,39 @@ HTTrack's mirror loop:
 - **Progress:** `[progress] httrack crawl: 142 files · 8.3 MB · 1m12s ·
   queued 41 · last: https://example.com/guide/`.
 - **Exit 1** when the start URL (or the redirect chain it starts) is refused,
-  challenged, blocked by robots.txt or leaves the host. A crawl that saves at
-  most one HTML page, or an SPA shell, would fall back to Playwright, which the
-  profile does not have yet (see below).
+  challenged, blocked by robots.txt or leaves the host; on an update, a start
+  URL whose previous copy was kept after an error is no failure (below). A
+  crawl that saves at most one HTML page, or an SPA shell, would fall back to
+  Playwright, which the profile does not have yet (see below).
+
+**Updates (`httrack`).** A run on an `-o` that already holds a manifest is an
+update, as HTTrack's `-C2` on a finished mirror: on both paths, each file the
+previous run recorded from a `200` with an `ETag` or a date, still on disk and
+not empty, is revalidated.
+
+- The request starts with `If-None-Match: <etag>` and `If-Modified-Since:
+  <date>` (or the one recorded), as HTTrack sends them. The date is the
+  response's `Last-Modified`, else its `Date`.
+- **304 Not Modified:** the file is left byte-identical (its links are not
+  rewritten again) and keeps its manifest record; the crawl follows the links
+  of a kept page from that copy.
+- **Any other answer but a 2xx or a redirect** (404, 500, 429, a challenge):
+  the previous copy is kept and the answer is not retried, as HTTrack does on
+  an update. The URL is listed as `Kept the previous copy after an error` (a
+  challenge under `Challenged`). A challenged start URL still exits 1.
+- **A failed transfer** (timeout, connection or decoding error) is retried,
+  reported as an error, and the previous copy and its record are kept (its
+  links are not followed).
+- **A 2xx** replaces the file and its record. A file erased or emptied since
+  is fetched again in full.
+- The summary counts the kept files as `Files skipped: N (cached)`, the 304s
+  as `Not modified (304): N`, and the files of the previous run this one did
+  not reach as `Not reached this run, kept on disk: N` (`--verbose` lists
+  them; nothing is deleted).
+- A file the update may keep keeps its name: a page added to the site never
+  takes it over. A manifest entry whose file is not named as its URL would be
+  (an edited manifest) is ignored, so the manifest never decides where a page
+  is written.
 
 `[httrack]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
@@ -434,6 +479,8 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--max-links` | `100000` | Max URLs fetched per run |
 | `--max-retry-after` | `60` | Max seconds honored from `Retry-After` / `Crawl-delay` (hard cap 3600) |
 | `--disable-security-limits` | off | Lift the connection, rate and bandwidth clamps |
+| `--no-parse-scripts` | off | Do not scan scripts, event handlers and stylesheets for links (HTTrack `-j4`, which stops CSS `url()` / `@import` too) |
+| `--no-extended-parsing` | off | Do not follow quoted strings that look like links (HTTrack `-%P0`, or `-j8`) |
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -451,6 +498,17 @@ protect the corpus:
 - A `--filter` rule never widens the crawl to another host.
 - No asset mirroring: the crawl does not request links whose extension is a
   known non-page type left out of `--include-extensions`.
+- Updates keep no cache beside the mirror (HTTrack's `hts-cache/`), so:
+  - the manifest never records a redirect target: the validators of a file
+    reached through a redirect go to the hop whose file name is that file's;
+  - the links of a kept page are read from the saved copy and mapped back
+    through the manifest: a file recorded with `"url": null` is not reached
+    from a kept page and never revalidated;
+  - a kept file is never renamed, and a kept page never rewritten;
+  - robots.txt is fetched in full on every run.
+- A `Retry-After` on a revalidation still pauses the whole queue, and a
+  challenged start URL still exits 1 on an update (HTTrack treats both as a
+  304).
 
 **OpenSSL >= 3.5.** The TLS handshake only matches HTTrack's on OpenSSL 3.5
 or newer; on older builds `dograpper` warns and some CDNs may reject the
@@ -465,11 +523,12 @@ is used when available. The release binary includes this extra.
 
 **Current gaps (temporary).** Under `httrack`, the Playwright fallback is
 not implemented yet and fails loud (exit 1); use `--downloader wget` for
-those sites. Until a follow-up PR under #78 ports them
-([#122](https://github.com/lorenzoervedosa/dograpper/issues/122)), the crawl
-does not scan JavaScript (HTTrack `-j`) or guess URLs in other attributes and
-script strings (HTTrack `-%P`), so a page that only a script links to is not
-fetched. Neither is a deviation from HTTrack.
+those sites. Links found in scripts, stylesheets and by extended parsing are
+followed but not rewritten to the saved files (HTTrack rewrites them too).
+With a manifest an update always revalidates (HTTrack `-C2`): the
+other cache modes (`-C0`, `-C1`/`--continue`), the `-%s`, `-%n` and
+`--changes` options and file times from `Last-Modified` are not ported yet.
+None of these is a deviation from HTTrack.
 
 ##### fire-engine
 
@@ -498,7 +557,14 @@ as under `httrack`.
 A `.dograpper-manifest.json` manifest is generated after each download,
 recording mirrored files with MD5 content hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
-changed on the server.
+changed on the server; under `--downloader httrack` they revalidate each
+file with the validators the manifest recorded (see "Updates" under
+[Downloader profiles](#downloader-profiles)). For the files it saves, the
+httrack profile also records the response's `status`, `content_type`, `etag`
+and `last_modified` (the `Date` when the server sent no `Last-Modified`), and
+`redirected` when the requested URL reached the file through a redirect; the
+other downloaders leave these `null`. A file a run did not touch keeps what
+an earlier run recorded.
 
 The manifest lives in the output directory: a relative `--manifest`
 resolves against `-o`, an absolute one is used as is, so a re-run from any
@@ -603,6 +669,7 @@ Operation order (each stage reads the output of the previous one):
 
 ```
 list files → apply .docsignore → skip bot-challenge pages
+           → skip saved HTTP error pages
            → skip MediaWiki redirect aliases of packed pages
            → --api-records? split API reference pages into records
              (those pages skip extraction and dedup)
@@ -1173,7 +1240,7 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1640,6 +1707,7 @@ Conditional extra lines (per enabled flag):
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
 | bot-challenge pages found | `Challenge pages: N` |
+| saved HTTP error pages found | `Error pages: N` |
 | MediaWiki redirect aliases of packed pages found | `Redirect aliases: N` |
 | `--for-queries` | `Query packing: ...` |
 | `--context-header` or `--layout page` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
@@ -1652,6 +1720,12 @@ Warnings appear when:
   them once on stderr, leaves them out of the chunks and counts them (also
   in `--dry-run`); if every file is one, `pack` fails. A page that merely
   mentions the phrase in its text is not affected.
+- Input `.html`/`.htm` files are saved HTTP error pages: the `<title>` is a
+  status line such as `404 Not Found` and the whole file holds at most 40
+  words of text (scripts and styles excluded). `pack` lists them once on
+  stderr and leaves them out, in both layouts and in `--dry-run`; the pack
+  summary counts them (`Error pages: N`, and in `Files excluded`); if every file is one, `pack` fails. A page about HTTP
+  errors or one that merely mentions the status is not affected.
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
   into a chunk, overshooting the stated limit).
 - Total chunks exceed `--max-chunks` (nothing is discarded — every

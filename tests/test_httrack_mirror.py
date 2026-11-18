@@ -348,3 +348,223 @@ def test_pack_cross_refs_resolve_links_of_a_crawled_tree(server, tmp_path):
     assert {(os.path.basename(l["source_file"]), l["target_file"].rsplit("/", 1)[-1])
             for l in resolved} >= {("index.html", "install.html")}
     assert refs["unresolved"] == []
+
+
+# -- update mode: a crawl over the previous run's manifest --
+
+from dograpper.lib.manifest import build_manifest  # noqa: E402
+
+LM = "Mon, 01 Jan 2024 00:00:00 GMT"
+
+
+def validated(etag, hdrs, body, log, path, then=None):
+    """`body` with `etag`; 304 (or `then`) when the request names that ETag."""
+    def reply(h):
+        log.append((path, h.get("If-None-Match")))
+        if h.get("If-None-Match") == etag:
+            return then or (304, {"etag": etag}, b"")
+        return (200, {**hdrs, "etag": etag, "last-modified": LM}, body)
+    return reply
+
+
+def vsite(script, pages, log):
+    script["/robots.txt"] = (404, {}, b"")
+    for path, (hdrs, body) in pages.items():
+        script[path] = validated(f'"{path}"', hdrs, body, log, path)
+
+
+def update(start, out, first, **kw):
+    previous = build_manifest(start, str(out), first.urls, records=first.records)
+    policy = build_policy(**{"retries": 0, **kw})
+    spy = Spy(policy)
+    return mirror_site(start, str(out), policy, "html", fetcher=spy, previous=previous), spy
+
+
+def test_unchanged_page_is_kept_and_its_links_followed_from_the_saved_copy(server, tmp_path):
+    """HTTrack re-parses a 304 page from its cache (htsback.c:4437-4494); dograpper reads
+    the kept copy, whose links relink() made local, back through the manifest."""
+    base, script, _ = server
+    log = []
+    vsite(script, {"/": page("guide/", "api?page=2", "/far", "t?token=s"),
+                   "/guide/": page("../"), "/api?page=2": page(), "/far": page(),
+                   "/t?token=s": page()}, log)
+    first, _ = crawl(f"{base}/", tmp_path)
+    host = tmp_path / f"127.0.0.1:{base.rsplit(':', 1)[1]}"
+    index = (host / "index.html").read_bytes()
+    assert b'href="guide/index.html"' in index
+    log.clear()
+    script["/far"] = validated('"far2"', HTML, b"<p>new</p>", log, "/far")
+    res, _ = update(f"{base}/", tmp_path, first)
+    # a file the manifest records no URL for (a query off the allowlist) is not followed
+    assert sorted(log) == [("/", '"/"'), ("/api?page=2", '"/api?page=2"'), ("/far", '"/far"'),
+                           ("/guide/", '"/guide/"')]
+    assert (host / "index.html").read_bytes() == index
+    assert rel(res, tmp_path) == ["far.html"] and len(res.kept) == 3
+    assert res.report.not_modified == 3 and res.report.errors == []
+    assert res.success and not res.front_failed
+    assert {f: u for f, u in res.urls.items() if "?token" not in u} == {
+        f: u for f, u in first.urls.items() if "?token" not in u}
+
+
+def test_start_url_error_on_update_keeps_the_mirror_and_goes_on(server, tmp_path):
+    base, script, _ = server
+    log = []
+    vsite(script, {"/": page("a"), "/a": page()}, log)
+    first, _ = crawl(f"{base}/", tmp_path)
+    script["/"] = validated('"/"', HTML, b"", log, "/", then=(503, HTML, b"<p>down</p>"))
+    log.clear()
+    res, _ = update(f"{base}/", tmp_path, first, retries=2)
+    assert log == [("/", '"/"'), ("/a", '"/a"')]
+    assert res.report.kept == [(f"{base}/", "HTTP 503")] and not res.front_failed
+
+
+def test_challenged_start_url_on_update_fails_the_front_and_keeps_the_copy(server, tmp_path):
+    base, script, _ = server
+    log = []
+    vsite(script, {"/": page("a"), "/a": page()}, log)
+    first, _ = crawl(f"{base}/", tmp_path)
+    before = open(first.files_downloaded[0], "rb").read()
+    script["/"] = validated('"/"', HTML, b"", log, "/",
+                            then=(403, {**HTML, "cf-mitigated": "challenge"}, b""))
+    script["/a"] = validated('"a2"', HTML, b"<p>a v2</p>", log, "/a")
+    res, _ = update(f"{base}/", tmp_path, first)
+    assert res.front_failed and res.report.challenged == [f"{base}/"]
+    assert open(first.files_downloaded[0], "rb").read() == before
+    assert res.files_downloaded == []  # the run fails before the manifest is saved: no write
+
+
+def test_redirected_start_url_revalidates_its_target(server, tmp_path):
+    base, script, _ = server
+    log = []
+    vsite(script, {"/new": page()}, log)
+    script["/old"] = (301, {"location": "/new"}, b"")
+    first, _ = crawl(f"{base}/old", tmp_path)
+    assert list(first.records.values())[0]["redirected"] is True
+    log.clear()
+    res, spy = update(f"{base}/old", tmp_path, first)
+    sent = {u.rsplit("/", 1)[1]: dict(kw.get("validators", ())) for u, kw in spy.calls
+            if not u.endswith("robots.txt")}
+    assert sent["old"] == {} and sent["new"]["If-None-Match"] == '"/new"'
+    assert [os.path.basename(f) for f in res.kept] == ["new.html"] and not res.front_failed
+
+
+def test_new_url_never_takes_the_name_of_a_kept_file(server, tmp_path):
+    """Names come in queue order; a page added to a changed site must not overwrite a kept
+    file whose URL now comes later (NameRegistry.reserve)."""
+    base, script, _ = server
+    log = []
+    vsite(script, {"/": page("b/x", "a/x"), "/a/x": page(), "/b/x": page()}, log)
+    script["/a/X"] = (200, HTML, b"<p>new page</p>")
+    first, _ = crawl(f"{base}/", tmp_path)
+    vsite(script, {"/": page("a/X", "b/x", "a/x"), "/a/x": page(), "/b/x": page()}, log)
+    script["/"] = (200, HTML, page("a/X", "b/x", "a/x")[1])  # the index changed
+    res, _ = update(f"{base}/", tmp_path, first)
+    host = tmp_path / f"127.0.0.1:{base.rsplit(':', 1)[1]}"
+    assert (host / "a" / "x.html").read_bytes() == page()[1]
+    assert sorted(os.listdir(host / "a")) == sorted(["x.html", "X-2.html"])
+
+
+def test_new_page_never_takes_the_name_of_a_redirected_file(server, tmp_path):
+    """/old -> /new was saved as new.html; a page /new.html linked first must not take it."""
+    base, script, _ = server
+    log = []
+    vsite(script, {"/": page("old"), "/new": page(extra="<p>new</p>")}, log)
+    script["/old"] = (301, {"location": "/new"}, b"")
+    first, _ = crawl(f"{base}/", tmp_path)
+    script["/"] = (200, HTML, page("new.html", "old")[1])
+    script["/new.html"] = (200, HTML, b"<p>another page</p>")
+    res, _ = update(f"{base}/", tmp_path, first)
+    host = tmp_path / f"127.0.0.1:{base.rsplit(':', 1)[1]}"
+    assert (host / "new.html").read_bytes() == page(extra="<p>new</p>")[1]
+    assert (host / "new-2.html").read_bytes() == b"<p>another page</p>"
+    kept = str((host / "new.html").resolve())
+    assert res.kept == [kept] and res.urls[kept] == f"{base}/old"
+    assert res.records[kept]["etag"] == '"/new"'
+
+
+def test_kept_page_follows_its_style_links_relink_left_as_written(server, tmp_path):
+    base, script, seen = server
+    log = []
+    vsite(script, {"/docs/": page("p", extra='<style>@import "/docs/s.css";</style>'),
+                   "/docs/p": page()}, log)
+    script["/docs/s.css"] = (200, {"content-type": "text/css"}, b"body{}")
+    first = mirror_site(f"{base}/docs/", str(tmp_path), build_policy(retries=0), "html,css",
+                        fetcher=Spy(build_policy(retries=0)))
+    previous = build_manifest(f"{base}/docs/", str(tmp_path), first.urls, records=first.records)
+    seen.clear()
+    mirror_site(f"{base}/docs/", str(tmp_path), build_policy(retries=0), "html,css",
+                fetcher=Spy(build_policy(retries=0)), previous=previous)
+    assert "/docs/s.css" in seen and "/docs/p" in seen
+
+
+def test_kept_pages_and_scripts_are_scanned_under_the_same_flags(server, tmp_path):
+    """A 304 page or script is re-parsed as a fetched one is (htsback.c:4437-4494), so -j
+    and -%P apply to kept copies too, and turning them off stops those links."""
+    base, script, seen = server
+    log = []
+    vsite(script, {"/": page(extra='<script src="app.js"></script>'
+                                   '<script>img.src = "a.html";</script>'),
+                   "/app.js": ({"content-type": "text/javascript"}, b'x.src = "c.html";'),
+                   "/a.html": page(), "/c.html": page()}, log)
+
+    def run(out, previous=None, **kw):
+        policy = build_policy(retries=0, **kw)
+        return mirror_site(f"{base}/", str(out), policy, "html,js", fetcher=Spy(policy),
+                           previous=previous)
+
+    first = run(tmp_path)
+    assert rel(first, tmp_path) == ["a.html", "app.js", "c.html", "index.html"]
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    seen.clear()
+    res = run(tmp_path, previous)
+    assert {"/a.html", "/c.html"} <= set(seen) and res.report.not_modified == 4
+    seen.clear()
+    run(tmp_path, previous, parse_scripts=False, extended_parsing=False)
+    assert "/a.html" not in seen and "/c.html" not in seen
+
+
+def test_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp_path):
+    base, script, _ = server
+    log = []
+    words = " ".join(["documentation"] * 40)
+    vsite(script, {"/docs/": page("a.html", extra=f"<h1>Home</h1><p>{words}</p>"),
+                   "/docs/a.html": page("./", extra=f"<h1>A</h1><p>{words}</p>")}, log)
+    out = tmp_path / "mirror"
+    args = ["download", f"{base}/docs/", "-o", str(out), "--downloader", "httrack"]
+    first = CliRunner().invoke(cli, args)
+    assert first.exit_code == 0, first.output
+    manifest = out / ".dograpper-manifest.json"
+    before = json.loads(manifest.read_text())["files"]
+    assert {e["status"] for e in before.values()} == {200}
+    files = {p: open(p, "rb").read() for p in (str(out / e["local_path"]) for e in before.values())}
+    log.clear()
+    second = CliRunner().invoke(cli, args)
+    assert second.exit_code == 0, second.output
+    assert sorted(log) == [("/docs/", '"/docs/"'), ("/docs/a.html", '"/docs/a.html"')]
+    assert "Files downloaded: 0" in second.output and "Files skipped:    2 (cached)" in second.output
+    assert "Not modified (304): 2" in second.output
+    assert {p: open(p, "rb").read() for p in files} == files
+    after = json.loads(manifest.read_text())["files"]
+    fields = ("url", "status", "content_type", "etag", "last_modified", "redirected", "content_hash")
+    assert {k: [e[f] for f in fields] for k, e in after.items()} == {
+        k: [e[f] for f in fields] for k, e in before.items()}
+
+
+def test_scripts_are_scanned_for_links_as_httrack_does(server, tmp_path):
+    # -j: inline scripts and a fetched script (a JavaScript type, htslib.h:893-897) are
+    # scanned; a script's links take the base of the page that loaded it
+    # (htsparse.c:1280-1285) and carry no fetch metadata (htsparse.c:819-820); -%P adds the
+    # strings of other attributes (htsparse.c:2160-2276)
+    base, script, _ = server
+    site(script, {"/": page(extra='<script src="static/app.js"></script>'
+                                  '<script>img.src = "a.html";</script><div data-p="b.html">'),
+                  "/static/app.js": ({"content-type": "text/javascript"}, b'x.src = "c.html";'),
+                  "/a.html": page(), "/b.html": page(), "/c.html": page()})
+    res, spy = crawl(f"{base}/", tmp_path, exts="html,js")
+    assert rel(res, tmp_path) == ["a.html", "b.html", "c.html", "index.html", "static/app.js"]
+    calls = {u: kw for u, kw in spy.calls if not u.endswith("/robots.txt")}
+    assert calls[f"{base}/c.html"]["referer"] == f"{base}/static/app.js"
+    assert calls[f"{base}/c.html"]["meta"] == FetchMeta("", "no-cors", False)
+    res, _ = crawl(f"{base}/", tmp_path / "off", exts="html,js", parse_scripts=False,
+                   extended_parsing=False)
+    assert rel(res, tmp_path / "off") == ["index.html", "static/app.js"]

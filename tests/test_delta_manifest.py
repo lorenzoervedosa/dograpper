@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from dograpper.lib.manifest import (
     Manifest, ManifestEntry, ManifestDiff,
-    diff_manifests, build_manifest, save_manifest, load_manifest,
+    diff_manifests, build_manifest, save_manifest, load_manifest, merge_manifests,
 )
 from dograpper.commands.pack import PACK_STATE_FILENAME, pack
 
@@ -545,6 +545,57 @@ def test_build_manifest_never_lists_itself_or_dograpper_state_files(tmp_path):
     manifest = build_manifest("https://h.example/", str(tmp_path),
                               manifest_path=str(tmp_path / "state" / "custom.json"))
     assert [e.local_path for e in manifest.files.values()] == ["h.example/a.html"]
+
+
+REC = {"status": 200, "content_type": "text/html", "etag": '"v1"',
+       "last_modified": "Mon, 01 Jan 2024 00:00:00 GMT", "redirected": False}
+
+
+def test_build_manifest_writes_the_engine_records(tmp_path):
+    """httrack records what its revalidation needs (spec 5.6); other files get none."""
+    _make_test_dir(str(tmp_path), {"h.example/a.html": "a", "h.example/w.html": "w"})
+    a, w = str(tmp_path / "h.example/a.html"), str(tmp_path / "h.example/w.html")
+    manifest = build_manifest("https://h.example/", str(tmp_path),
+                              {a: "https://h.example/a", w: "https://h.example/w"},
+                              records={a: REC})
+    by_path = {e.local_path: e for e in manifest.files.values()}
+    assert {k: getattr(by_path["h.example/a.html"], k) for k in REC} == REC
+    assert {k: getattr(by_path["h.example/w.html"], k) for k in REC} == dict.fromkeys(REC)
+
+
+def test_build_manifest_keeps_the_record_of_a_file_this_run_left_alone(tmp_path):
+    """HTTrack keeps the cache entry of a copy a run did not replace (htsback.c:1306-1321)."""
+    _make_test_dir(str(tmp_path), {"h.example/a.html": "a", "h.example/b.html": "b"})
+    previous = Manifest("https://h.example/", "", {
+        "a.html": ManifestEntry("https://h.example/a", 1, local_path="h.example/a.html", **REC),
+        "b.html": ManifestEntry("https://h.example/b", 1, local_path="h.example/b.html", **REC)})
+    manifest = build_manifest("https://h.example/", str(tmp_path),
+                              {str(tmp_path / "h.example/b.html"): "https://h.example/b"},
+                              previous=previous)
+    by_path = {e.local_path: e for e in manifest.files.values()}
+    assert by_path["h.example/a.html"].etag == '"v1"' and by_path["h.example/a.html"].status == 200
+    assert by_path["h.example/b.html"].etag is None and by_path["h.example/b.html"].status is None
+
+
+def test_merge_never_replaces_the_validators_of_an_engine_record():
+    old = Manifest("https://h.example/", "", {"a.html": ManifestEntry("u", 5, **REC)})
+    new = Manifest("https://h.example/", "", {
+        "a.html": ManifestEntry("u", 5, **{**REC, "etag": None, "last_modified": None})})
+    merged = merge_manifests(old, new)
+    assert merged.files["a.html"].etag is None and merged.files["a.html"].last_modified is None
+
+
+def test_manifest_without_the_record_fields_still_loads(tmp_path):
+    """A manifest from before the httrack records, and one with fields a newer version adds."""
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps({"base_url": "https://h.example/", "last_run": "", "files": {
+        "a.html": {"url": "https://h.example/a", "size_bytes": 1, "etag": None,
+                   "last_modified": None, "local_path": "h.example/a.html", "mtime": 0,
+                   "future_field": 1}}}))
+    entry = load_manifest(str(path)).files["a.html"]
+    assert (entry.status, entry.content_type, entry.redirected) == (None, None, None)
+    save_manifest(load_manifest(str(path)), str(path))
+    assert json.loads(path.read_text())["files"]["a.html"]["status"] is None
 
 
 def test_context_header_uses_recorded_urls_and_skips_missing_ones(tmp_path):

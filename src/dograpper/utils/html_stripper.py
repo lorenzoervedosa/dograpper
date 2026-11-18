@@ -27,6 +27,9 @@ BLOCK_TAGS = frozenset({
 # What <br> leaves in the text until the prose is rendered: \s does not match it, so
 # whitespace collapsing keeps it. A page's own U+E000 is replaced by U+FFFD on the way in.
 _BR = "\ue000"
+# Same for the start of a table cell in plain text (#125): a tab, which text.split()
+# does not count as a word, where " | " would be one. md writes pipe tables instead.
+_TAB = "\ue001"
 
 # Classes naming a code block's language: MediaWiki (mw-highlight-lang-*),
 # Prism / highlight.js (language-*), lang-* and Sphinx (highlight-*). The name
@@ -120,6 +123,8 @@ class PreCapture:
 
 
 class HTMLStripper(HTMLParser):
+    cell_separator = True
+
     def __init__(self):
         super().__init__()
         self.reset()
@@ -135,6 +140,11 @@ class HTMLStripper(HTMLParser):
             self.ignore = True
         elif tag == "br" and not self.ignore and not self.pre.depth:
             self.text.append(_BR)
+        elif tag in ("td", "th") and self.cell_separator and not self.ignore and not self.pre.depth:
+            # at the start, not the end: </td> may be omitted. The leading one is stripped.
+            self.text.append(_TAB)
+        elif tag == "tr" and self.cell_separator and not self.ignore and not self.pre.depth:
+            self.text.append("\n\n")  # </tr> may be omitted too
         self.pre.starttag(tag, attrs)
 
     def handle_endtag(self, tag):
@@ -153,7 +163,7 @@ class HTMLStripper(HTMLParser):
         if self.pre.depth:
             self.pre.data(d)
         else:
-            self.text.append(d.replace(_BR, "\ufffd"))
+            self.text.append(d.replace(_BR, "\ufffd").replace(_TAB, "\ufffd"))
 
 
 def strip_html(text: str, markdown: bool = False, page: str = "") -> str:
@@ -218,12 +228,14 @@ def _flatten(parts: list):
 def _prose_blocks(data: str) -> list:
     # Unescape HTML entities that might be lingering
     # (an entity can decode to the marker here, so each piece is neutralized after decoding)
-    data = _BR.join(html.unescape(piece).replace(_BR, "\ufffd") for piece in data.split(_BR))
+    data = "".join(piece if i % 2 else html.unescape(piece).replace(_BR, "\ufffd").replace(_TAB, "\ufffd")
+                   for i, piece in enumerate(re.split(f"([{_BR}{_TAB}])", data)))
     # Collapse 3+ newlines into exactly 2 (preserve block separators)
     data = re.sub(r'\n{3,}', '\n\n', data)
     # Within each block, collapse whitespace (but not across \n\n boundaries)
     lines = data.split('\n\n')
-    lines = [re.sub(r' ?(?:\ue000 ?)+', '\n', re.sub(r'\s+', ' ', block)).strip() for block in lines]
+    lines = [re.sub(r' ?\ue001 ?', '\t', re.sub(r' ?(?:\ue000 ?)+', '\n', re.sub(r'\s+', ' ', block))).strip()
+             for block in lines]
     # Drop empty blocks
     return [block for block in lines if block]
 
@@ -235,6 +247,9 @@ def _prose_blocks(data: str) -> list:
 _HEADING_LEVELS = {f"h{n}": n for n in range(1, 7)}
 _LISTS = ("ul", "ol")
 _CELLS = ("td", "th")
+# Javadoc 25 summary grids (#120): <div class="summary-table N-column-summary"> whose
+# cells are its flat child divs, N to a row, the first N being the header.
+_GRID_COLUMNS = {"two-column-summary": 2, "three-column-summary": 3}
 # A list item holding one of these is a container, not an entry (Javadoc puts each
 # member's section in one): it is written as its blocks, without a marker.
 _ITEM_BLOCKERS = BLOCK_TAGS - {"p", "li", "ul", "ol"}
@@ -356,6 +371,9 @@ class _Frame:
         self.block = False     # li: holds a block, so it is no list entry
         self.number = 0        # ol: number of its last item
         self.rows = []         # table: one list of cell frames per row
+        self.cols = 0          # Javadoc grid (a table): cells per row
+        self.depth = 0         # Javadoc grid and its cells: open <div>s at its own <div>
+        self.closed = False
 
 
 class MarkdownStripper(HTMLStripper):
@@ -372,6 +390,8 @@ class MarkdownStripper(HTMLStripper):
     still open at the end of the page is closed, so no text is lost.
     """
 
+    cell_separator = False  # cells are pipe-table cells here
+
     def __init__(self, page: str = ""):
         super().__init__()
         self.page = page
@@ -381,6 +401,8 @@ class MarkdownStripper(HTMLStripper):
         self.link = None  # (frame, index of its "[" placeholder, destination)
         self.code = 0       # open <code> elements
         self.signature = 0  # <div> depth inside a Javadoc member signature
+        self.divs = 0       # open <div> elements
+        self.div_frames = {}  # <div> depth -> the grid or cell frame that div opened
         self.references = {}  # destination -> its number, in first-use order
 
     def handle_starttag(self, tag, attrs):
@@ -413,6 +435,9 @@ class MarkdownStripper(HTMLStripper):
         frame = self.frames[-1]
         if frame.tag == "li" and tag in _ITEM_BLOCKERS:
             frame.block = True
+        if tag == "div":
+            self._open_div(frame, dict(attrs).get("class") or "")
+            frame = self.frames[-1]
         if tag == "code":
             self.code += 1
         elif tag == "div" and (self.signature
@@ -454,7 +479,34 @@ class MarkdownStripper(HTMLStripper):
                     frame.rows[-1].append(cell)
                     self._push(cell)
 
+    def _open_div(self, frame, classes):
+        """Count the <div>; a Javadoc summary grid is a table, and its child divs are cells."""
+        cell = None
+        if frame.cols and frame.depth == self.divs:
+            cell = _Frame("td")
+            if not frame.rows or len(frame.rows[-1]) == frame.cols:
+                frame.rows.append([])
+            frame.rows[-1].append(cell)
+        elif frame.tag not in _HEADING_LEVELS and "summary-table" in classes.split():
+            cols = max((_GRID_COLUMNS.get(c, 0) for c in classes.split()), default=0)
+            if cols:
+                cell = _Frame("table")
+                cell.cols = cols
+        self.divs += 1
+        if cell:
+            cell.depth = self.divs
+            self.div_frames[self.divs] = cell
+            self._push(cell)
+
+    def _close_div(self):
+        frame = self.div_frames.pop(self.divs, None)
+        self.divs = max(self.divs - 1, 0)
+        while frame and not frame.closed:  # a cell or grid whose own </div> this is
+            self._end()
+
     def _close(self, tag):
+        if tag == "div":
+            self._close_div()
         if tag == "code":
             self.code = max(self.code - 1, 0)
         elif tag == "div" and self.signature:
@@ -488,6 +540,7 @@ class MarkdownStripper(HTMLStripper):
     def _end(self):
         """Close the innermost frame and place its output in the enclosing one."""
         frame = self.frames.pop()
+        frame.closed = True
         self.open[frame.tag] -= 1
         parent = self.frames[-1]
         self.text = parent.parts

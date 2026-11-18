@@ -74,17 +74,38 @@ def test_a_type_page_with_other_markup_is_not_split(old, new, problem):
         split_page(page.replace(old, new, 1))
 
 
+NEST, MEMBERS = 3000, 4000  # sized so a stack copy / a list scan per member trips the 7x bound
+
+
+def _assert_linear(build, run, n=10000):
+    # CPU time (not wall clock, so machine load does not count), best of 3, at n and 4n:
+    # linear work gives a ratio near 4, quadratic near 16.
+    # 7 sits above the worst clean ratio seen under load (~5.4) and below the weakest regression caught (~7.7).
+    def best(size):
+        page, times = build(size), []
+        for _ in range(3):
+            start = time.process_time()
+            run(page)
+            times.append(time.process_time() - start)
+        return min(times)
+    small, large = best(n), best(4 * n)
+    assert large < 7 * max(small, 0.01), f"4x input took {large / max(small, 0.01):.1f}x CPU time"
+
+
 def test_parsing_stays_linear_on_hostile_markup():
     head = '<meta name="generator" content="javadoc/ClassWriter"><h1 class="title" title="Class X">'
+    # Deep unclosed nesting with stray end tags, and (separately, so each stays cheap) many members.
+    def hostile(deep, members):
+        return (head + '<section class="class-description">' + "<p><b>" * deep
+                + "</i>" * deep + "</p>" * deep + '</section><section id="field-detail">'
+                + "".join(f'<section class="detail" id="f{i}"><h3>f{i}</h3>'
+                          f'<div class="member-signature">int f{i}</div></section>' for i in range(members)))
+
+    def run(page):
+        assert len(split_page(page)) == page.count('class="detail"') + 1
+    _assert_linear(lambda n: hostile(n, 0), run, n=NEST)
+    _assert_linear(lambda n: hostile(0, n), run, n=MEMBERS)
     n = 40000
-    # Deep unclosed nesting, stray end tags, then many members of one kind.
-    hostile = (head + '<section class="class-description">' + "<p><b>" * n
-               + "</i>" * n + "</p>" * n + '</section><section id="field-detail">'
-               + "".join(f'<section class="detail" id="f{i}"><h3>f{i}</h3>'
-                         f'<div class="member-signature">int f{i}</div></section>' for i in range(n)))
-    start = time.perf_counter()
-    assert len(split_page(hostile)) == n + 1
-    assert time.perf_counter() - start < 5.0  # ~1.2 s locally; a list scan per member name took 7 s
     with pytest.raises(NotSplit):
         split_page(head + '<section class="detail" id="x">' * n)
 
@@ -627,30 +648,35 @@ def test_a_sphinx_page_with_other_markup_is_not_split(old, new, problem):
 
 
 def test_sphinx_parsing_stays_linear_on_hostile_markup():
+    n = 20000
+
     def obj(i):
         return (f'<dl class="py function"><dt class="sig sig-object py" id="m.f{i}">'
-                f'<span class="sig-prename descclassname">m.</span>'
-                f'<span class="sig-name descname">f{i}</span>()</dt><dd><p>doc</p></dd></dl>')
-    n = 20000
-    # Deep unclosed nesting, stray end tags, nested name spans, then many objects.
-    hostile = ('<div role="main"><p>' + "<b>" * n + "</i>" * n + "</p>" * n
-               + '<dl class="py class"><dt class="sig sig-object py" id="m.C">'
-               + '<span class="sig-name descname">' * n + "C" + "</span>" * n + "</dt><dd>"
-               + "".join(obj(i) for i in range(n)))
-    start = time.perf_counter()
-    assert len(split_page(hostile)) == n + 2
-    assert time.perf_counter() - start < 5.0  # ~1 s locally
+                f'<span class="sig-name descname">f{i}</span></dt></dl>')
+    # Deep unclosed nesting, stray end tags, nested name spans; and (separately) many objects.
+    def hostile(deep, members):
+        return ('<div role="main"><p>' + "<b>" * deep + "</i>" * deep + "</p>" * deep
+                + '<dl class="py class"><dt class="sig sig-object py" id="m.C">'
+                + '<span class="sig-name descname">' * max(deep, 1) + "C" + "</span>" * max(deep, 1) + "</dt><dd>"
+                + "".join(obj(i) for i in range(members)))
+
+    def run(page):
+        assert len(split_page(page)) == page.count('<dl class="py function">') + 2
+    _assert_linear(lambda n: hostile(n, 0), run, n=NEST)
+    _assert_linear(lambda n: hostile(0, n), run, n=MEMBERS)
     with pytest.raises(NotSplit):
         split_page('<div role="main">' + '<dl class="py class"><dt class="sig sig-object py">' * n)
     # A chain of unclosed nested objects: each name repeats its ancestors', so output would be quadratic.
-    chain = '<div role="main">' + "".join(
-        f'<dl class="py class"><dt class="sig sig-object py" id="m.c{i}">'
-        f'<span class="sig-prename descclassname">m.</span>'
-        f'<span class="sig-name descname">c</span></dt><dd>' for i in range(n))
-    start = time.perf_counter()
-    with pytest.raises(NotSplit, match="a qualified name over 1000 characters"):
-        split_page(chain)
-    assert time.perf_counter() - start < 5.0
+    def chain(n):
+        return '<div role="main">' + "".join(
+            f'<dl class="py class"><dt class="sig sig-object py" id="m.c{i}">'
+            f'<span class="sig-prename descclassname">m.</span>'
+            f'<span class="sig-name descname">c</span></dt><dd>' for i in range(n))
+
+    def run_chain(page):
+        with pytest.raises(NotSplit, match="a qualified name over 1000 characters"):
+            split_page(page)
+    _assert_linear(chain, run_chain, n=1000)
 
 
 def _sphinx_corpus(tmp_path):
