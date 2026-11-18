@@ -1142,6 +1142,7 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
+| 2 | pack | `--output` is the same directory as `INPUT_DIR` | use a subdirectory or another path |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
@@ -1342,6 +1343,12 @@ Pack complete:
 Before the summary, when files outside `--include-extensions` were found, one
 line lists them: `Skipped non-documentation files: 15 (.css x1, .js x13, robots.txt x1)`.
 They are also counted in `Files excluded`.
+
+When `--output` lies inside `INPUT_DIR` (as with `sync`'s default
+`<output>/chunks`), `pack` never reads its own output: that subtree is left out
+of the input and one line reports it: `Excluded own output directory: 4
+file(s) under ./docs/chunks`. These files are not counted in `Files excluded`.
+`--output` equal to `INPUT_DIR` is a usage error.
 
 Conditional extra lines (per enabled flag):
 

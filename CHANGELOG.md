@@ -128,6 +128,12 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack` never reads its own output: when `-o` lies inside `INPUT_DIR` (the
+  default for `sync`, `<output>/chunks`), that subtree is left out of the input
+  and reported once as `Excluded own output directory: N file(s) under ...`,
+  so a second run no longer re-packs the first one's chunks and the delta gate
+  reports "no files changed". `-o` equal to `INPUT_DIR` is a usage error
+  (exit 2). ([#112](https://github.com/lorenzoervedosa/dograpper/issues/112))
 - `pack` zero-pads chunk file names, JSONL ids, `Chunk N of M` headers and sidecar
   chunk ids to one width per run (`max(2, digits of the chunk count)`), so
   100 or more chunks sort numerically; packs under 100 chunks keep their names

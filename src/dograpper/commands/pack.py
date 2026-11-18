@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..lib.config_loader import is_explicit, load_config
-from ..lib.ignore_parser import filter_files, normalize_extensions, split_by_extension
+from ..lib.ignore_parser import exclude_subtree, filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
 from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, read_source_text
 
@@ -291,6 +291,11 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     # 2f. Manifest for --context-header (and INDEX.md) URLs, loaded before any page is read
     manifest_data = _load_url_manifest(ctx, manifest_name, input_dir) if ctx_header or page_layout else None
 
+    if os.path.realpath(output_dir) == os.path.realpath(input_dir):
+        raise click.UsageError(
+            "--output is the same directory as INPUT_DIR; pack would read its own output. "
+            "Use a subdirectory or another path.")
+
     # 3. List all files
     # The queries file drives the ordering; it is never corpus content,
     # even when it lives inside INPUT_DIR.
@@ -302,7 +307,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             if queries_realpath and os.path.realpath(fpath) == queries_realpath:
                 continue
             all_files.append(fpath)
-            
+    all_files, own_output_files = exclude_subtree(all_files, output_dir)
+    if own_output_files:
+        click.echo(f"Excluded own output directory: {own_output_files} file(s) under {output_dir}")
+
     # 4. Check empty
     if not all_files:
         raise click.ClickException(f"No files found in {input_dir}. Did you run `download` first?")
