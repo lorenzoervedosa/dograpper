@@ -617,13 +617,15 @@ when it is per-page metadata. A MediaWiki version banner never reaches
 dedup: it is header metadata (see Smart extraction), so with
 `--context-header` every page keeps its `version`.
 
-On API reference corpora (Javadoc, TypeDoc, rustdoc, Doxygen) `--dedup`
-can remove real members: a signature and doc comment that several types
-declare, such as an override, is kept on the first page only, so the other
-pages lose a member they declare, with no trace
-([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). Pages split
-by [`--api-records`](#api-reference-records---api-records) bypass dedup;
-for any other API reference page, run without `--dedup`.
+A page recognised as an API reference (the generators
+[`--api-records`](#api-reference-records---api-records) supports) is never
+deduplicated, with or without that flag: its blocks are neither removed nor
+used as the first-seen copy that removes blocks elsewhere, so a signature
+that several types declare, such as an override, stays on every page
+([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). The summary
+and `--dry-run` report `Pages exempted: N (API reference)`. API reference
+pages from a generator without an adapter (TypeDoc, rustdoc, Doxygen) are
+still deduplicated: run without `--dedup` on those corpora.
 
 #### Context header (`--context-header`)
 
@@ -1484,7 +1486,7 @@ Conditional extra lines (per enabled flag):
 | Flag | Extra lines |
 |---|---|
 | `--show-tokens` | `Tokens per chunk`, `Total tokens`, `Encoding` |
-| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Matches kept`, `Words removed` |
+| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Matches kept`, `Pages exempted`, `Words removed` |
 | `--cross-refs` | `Cross-refs: ./chunks/cross_refs.json (N links, M unresolved)` |
 | `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, `Grade distribution` |
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |

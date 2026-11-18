@@ -87,6 +87,7 @@ def generate_report(data: DryRunData) -> str:
             f"{data.dedup_stats.blocks_kept_leading_token} leading-token, "
             f"{data.dedup_stats.blocks_kept_numbers} numbers-only"
         )
+        lines.append(f"  Dedup pages exempted:  {data.dedup_stats.pages_exempt} (API reference)")
 
     if data.show_tokens:
         total_tokens = sum(f.tokens for f in data.file_stats if f.tokens is not None)

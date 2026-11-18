@@ -384,3 +384,45 @@ def test_config_key_api_records(tmp_path):
     assert "--format jsonl" in rejected.output
     assert _pack(str(src), "-o", str(out), "--format", "jsonl").exit_code == 0
     assert any(r.get("symbol") == "fixture.api.Box" for r in _jsonl(out))
+
+
+# ---------------------------------------------------------------------------
+# --dedup never touches an API reference page, with or without --api-records (#68)
+# ---------------------------------------------------------------------------
+
+def _prose_corpus(tmp_path):
+    src = tmp_path / "prose"
+    src.mkdir()
+    shared = " ".join(f"word{i}" for i in range(30))
+    for name in ("a", "b"):
+        (src / f"{name}.html").write_text(
+            f"<html><body><h1>Page {name}</h1><p>unique {name} text here</p><p>{shared}</p></body></html>",
+            encoding="utf-8")
+    return src
+
+
+def test_dedup_keeps_a_shared_member_on_every_javadoc_page(tmp_path):
+    src, out = _corpus(tmp_path), tmp_path / "out"
+    shutil.copytree(src / "fixture", src / "copy")
+    result = _pack(str(src), "-o", str(out), "--format", "jsonl", "--dedup", "both")
+    assert result.exit_code == 0, result.output
+    by_id = {r["id"]: r for r in _jsonl(out)}
+    assert by_id["01_copy/api/Box.html"]["content"].replace("copy", "fixture") == \
+        by_id["01_fixture/api/Box.html"]["content"]
+    assert "Words removed:     0 (~0%)" in result.output
+    assert "Pages exempted:    14 (API reference)" in result.output
+
+
+def test_dedup_leaves_a_non_api_corpus_unchanged(tmp_path):
+    src, out = _prose_corpus(tmp_path), tmp_path / "out"
+    result = _pack(str(src), "-o", str(out), "--format", "jsonl", "--dedup", "both")
+    assert result.exit_code == 0, result.output
+    assert "Blocks removed:    1 (1 exact + 0 fuzzy)" in result.output
+    assert "Pages exempted:    0 (API reference)" in result.output
+
+
+def test_dry_run_reports_exempted_pages(tmp_path):
+    src, out = _corpus(tmp_path), tmp_path / "out"
+    result = _pack(str(src), "-o", str(out), "--dry-run", "--dedup", "both")
+    assert result.exit_code == 0, result.output
+    assert "Dedup pages exempted:  " in result.output

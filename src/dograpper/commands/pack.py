@@ -415,11 +415,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     if dedup_mode != "off":
         from ..utils.dedup import deduplicate
 
+        # API reference pages are never deduplicated, with or without --api-records:
+        # a repeated member block belongs to each page (#68).
+        from ..utils.api_reference import split_api_pages
+        api_pages = api_split or split_api_pages(filtered_paths, input_dir)
         processed_texts = {}
         for fpath in filtered_paths:
             rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
-            if api_split is not None and rel in api_split.records:
-                continue  # split pages bypass dedup (ADR-0009, #68)
+            if rel in api_pages.records:
+                continue
             try:
                 processed_texts[rel] = read_source_text(fpath, no_extract=no_ext, markdown=markdown)
             except Exception:
@@ -427,6 +431,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
         dedup_result = deduplicate(processed_texts, mode=dedup_mode, hamming_threshold=dedup_thresh)
         dedup_stats = dedup_result.stats
+        dedup_stats.pages_exempt = len(api_pages.records)
         dedup_word_counts = {
             rp: count_words(t, markdown and is_html(rp))
             for rp, t in dedup_result.texts.items()}
@@ -766,6 +771,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         click.echo(f"  Matches kept:      {dedup_stats.blocks_kept_same_page} same-page, "
                    f"{dedup_stats.blocks_kept_leading_token} leading-token, "
                    f"{dedup_stats.blocks_kept_numbers} numbers-only")
+        click.echo(f"  Pages exempted:    {dedup_stats.pages_exempt} (API reference)")
         if total_words + dedup_stats.words_removed > 0:
             pct = dedup_stats.words_removed * 100 // (total_words + dedup_stats.words_removed)
         else:

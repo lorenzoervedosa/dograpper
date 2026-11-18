@@ -168,6 +168,10 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack --dedup` no longer deduplicates a page recognised as an API reference
+  (Javadoc), with or without `--api-records`: a member block repeated across
+  pages, such as an override, stays on every page, and the summary and
+  `--dry-run` report `Pages exempted: N (API reference)`. ([#68])
 - `download` and `pack --delta` exit 1 with the path in the message when the
   manifest (`.dograpper-manifest.json`) or `pack_state.json` cannot be written,
   instead of logging an error and exiting 0; both files are now written
@@ -363,3 +367,4 @@ and fixes alone are a PATCH bump.
 [#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
 [#88]: https://github.com/lorenzoervedosa/dograpper/issues/88
 [#110]: https://github.com/lorenzoervedosa/dograpper/issues/110
+[#68]: https://github.com/lorenzoervedosa/dograpper/issues/68

@@ -44,6 +44,8 @@ class DedupStats:
     blocks_kept_same_page: int = 0
     blocks_kept_leading_token: int = 0
     blocks_kept_numbers: int = 0
+    # Pages the caller left out of dedup entirely; set by the caller, deduplicate() never sees them.
+    pages_exempt: int = 0
 
     @property
     def blocks_removed(self) -> int:
