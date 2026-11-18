@@ -72,6 +72,10 @@ and fixes alone are a PATCH bump.
   size matches but mtime disagrees, instead of trusting mtime alone; the
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
+- `pack --context-header --manifest PATH` exits 1 with a clear message when
+  PATH is missing or cannot be loaded, instead of silently packing without
+  URLs. A broken file at the default manifest path is reported as a note and
+  skipped. ([#90])
 
 ### Security
 
@@ -147,3 +151,4 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
