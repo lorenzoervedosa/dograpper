@@ -562,7 +562,8 @@ keep plain text, unchanged.
   ends with one `[n]: target` line per distinct target, numbered by first use
   in the page, so a line is as long as its visible text however long its
   targets are. The target is the `href` as the page wrote it: a
-  relative target names a file of the mirror (`Lua_(API).html`), an absolute
+  relative target names a file of the mirror (`Lua_(API).html`; in the
+  [page layout](#page-layout---layout-page), a packed page's file), an absolute
   one is kept. A target holding parentheses is written as `<...>`; spaces,
   `<`, `>`, `\` and control characters are percent-encoded. A link to the same
   page (`#anchor`, or `page.html#anchor` as mirrors rewrite it), with no
@@ -941,6 +942,12 @@ out/
   are neutralized and `\`, `[`, `]` are backslash-escaped. The URL comes from
   the manifest or the page marker, as for `--context-header`, and is left out
   when unknown. New fields are only ever appended to a line.
+- **Links.** In `md`, a link to a packed page points at that page's file,
+  relative to the linking file and written `<...>` as in `INDEX.md`
+  (`[1]: <../inventory/ItemContainer.md#getItems()>`), so it can be opened as
+  written; a link to a redirect alias that `pack` skipped points at its
+  target's file. A link to anything else (an absolute URL, a file outside the
+  pack) keeps its target as the page wrote it.
 - **Whole pages.** Pages are never split and lines never wrapped: a page
   larger than one `Read` call takes stays reachable with `grep -n` plus a
   `Read` with an offset. There is no word cap, no chunk cap and no size

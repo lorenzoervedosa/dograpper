@@ -678,7 +678,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             text_overrides=dedup_text_overrides,
             url_map=url_resolution.urls if url_resolution else None,
             readiness_map=readiness_map, annotate=annotate, with_header=ctx_header,
-            markdown=markdown, page_meta=page_meta)
+            markdown=markdown, page_meta=page_meta, aliases=alias_paths)
     else:
         write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate, api_records=api_split.records if api_split else None, page_meta=page_meta)
 

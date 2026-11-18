@@ -183,6 +183,12 @@ and fixes alone are a PATCH bump.
   maintenance box is removed from its section (the empty `## Navigation` that
   ended most wiki pages). A heading whose section still has content stays.
   ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
+- `pack --layout page --format md` points a link to a packed page at that
+  page's file, relative to the linking file (`[1]: <../inventory/ItemContainer.md>`),
+  instead of the source `.html` name, which the pack does not hold; a link to
+  a redirect alias that `pack` skipped points at its target's file. Links to
+  anything else keep their target.
+  ([#118](https://github.com/lorenzoervedosa/dograpper/issues/118))
 - `pack --format md` writes links as reference links: `[text][n]` in the line
   and one `[n]: target` line per distinct target at the end of each page,
   numbered by first use, instead of `[text](target)`, so a line is as long as

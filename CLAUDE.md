@@ -55,7 +55,7 @@ src/dograpper/
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
 │   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, read (levanta erro)/load (tolerante)/save/build, diff e narrow_diff_to_paths
 │   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
-│   ├── page_layout.py      # Layout por página (ADR-0010): assign_page_paths() (espelho do INPUT_DIR em pages/, regras de utils/portable_names.py + nomes reservados do Windows), page_chunks() (um Chunk por página), page_titles() (<title> sem sufixo do site → h1 cru → stem), write_pages() (pages/ montado em diretório temporário e trocado, INDEX.md atômico); owns_pages()
+│   ├── page_layout.py      # Layout por página (ADR-0010): assign_page_paths() (espelho do INPUT_DIR em pages/, regras de utils/portable_names.py + nomes reservados do Windows), page_chunks() (um Chunk por página), page_titles() (<title> sem sufixo do site → h1 cru → stem), write_pages() (pages/ montado em diretório temporário e trocado, INDEX.md atômico; no md, definição de link para página empacotada ou alias de redirect pulado aponta para o arquivo dela, relativo ao arquivo que linka); owns_pages()
 │   ├── pack_artifacts.py   # Sidecars do pack: cross_refs.json, delta_manifest.json, llm-readiness.json, report HTML, tokens
 │   ├── pack_reader.py      # load_chunks() — leitura tolerante dos chunks JSONL do pack em PackedChunk
 │   ├── pack_scoring.py     # score_chunks() — readiness por chunk + páginas do --report, lê cada fonte uma vez
