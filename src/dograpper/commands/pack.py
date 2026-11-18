@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from ..lib.config_loader import load_config
 from ..lib.ignore_parser import filter_files, normalize_extensions, split_by_extension
+from ..utils.challenge import find_challenge_files
 from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, format_chunk_index, read_source_text
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,18 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     # 6. Check empty after filter
     if not filtered_paths:
         raise click.ClickException("All files were excluded by ignore rules. Check your .docsignore or --ignore flags.")
+
+    # 6a. Bot-challenge interstitials saved instead of the real page: no content, so keep them out
+    challenge_paths = find_challenge_files(filtered_paths)
+    if challenge_paths:
+        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
+                           for p in challenge_paths)
+        click.echo(f"Warning: {len(challenge_paths)} bot-challenge page(s) skipped "
+                   f"(the source is missing their real content):\n{listed}", err=True)
+        challenge_set = set(challenge_paths)
+        filtered_paths = [p for p in filtered_paths if p not in challenge_set]
+        if not filtered_paths:
+            raise click.ClickException("Every input file is a bot-challenge page; nothing to pack.")
 
     # 6b. Delta gate (opt-in, after filter, before dedup)
     #
@@ -604,6 +617,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     click.echo("\nPack complete:")
     click.echo(f"  Files processed: {files_processed}")
     click.echo(f"  Files excluded:  {files_excluded}")
+    if challenge_paths:
+        click.echo(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
     click.echo(f"  Chunks generated: {generated_chunk_count} / {max_c} (max)")
     
     if generated_chunk_count > 0:

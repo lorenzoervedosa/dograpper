@@ -48,6 +48,10 @@ and fixes alone are a PATCH bump.
 
 ### Added
 
+- `pack` detects bot-challenge interstitial pages (Cloudflare "Just a
+  moment..." title) in its input, warns once with the affected files, keeps
+  them out of the chunks and reports `Challenge pages: N` in the summary; it
+  fails if every input file is one. ([#69])
 - `download --downloader httrack` (and the same flags on `sync`): a pure-Python
   fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
