@@ -288,6 +288,11 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 - **Layout:** as in §3.
 - **Naming:** a query string adds 4 hex digits of its MD5 to the filename
   (`page.html?x=1` → `page4B54.html`). Collisions get a `-2`, `-3` suffix.
+  Names are compared case-insensitively, as HTTrack's save-name hash does
+  (`src/htshash.c:65-78`, `strcasecmp`), so `/Page` and `/page` never share
+  a file on NTFS or default APFS. **Deviation:** the fold is Unicode
+  (`str.casefold`), not ASCII-only, so `/Été` and `/été` collide too; both
+  filesystems fold them, and an overwrite spoils the corpus.
 - **Manifest:** written from the engine's own per-URL records (real URL, final
   URL, status, content-type, ETag, Last-Modified), not derived from disk
   paths. `ManifestEntry` gains the missing fields in a backward-compatible
