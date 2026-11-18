@@ -409,3 +409,69 @@ def test_filter_mediawiki_category_members_with_real_wget(server, tmp_path):
     assert {p for p in seen if p.startswith(("/w/", "/wiki/"))} == {
         CATEGORY, "/wiki/OnTick", "/wiki/OnLoad"}  # refused links were never requested
     assert "Filtered by --filter: 3" in res.output
+
+
+# --- manifest url comes from the layer that wrote each file (#94) ---
+
+def _manifest_urls(d):
+    from dograpper.lib.manifest import read_manifest
+    m = read_manifest(os.path.join(d, "m.json"))
+    return {e.local_path: e.url for e in m.files.values()}
+
+
+def test_manifest_records_urls_from_wget_mirror_and_playwright():
+    """--mirror, then the shallow-mirror Playwright pass over the same tree:
+    a file Playwright rewrote takes its URL, the others keep wget's."""
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        a, b = _make_outdir(d, ["example.com/wiki/A.html", "example.com/q.html"])
+        with patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
+             patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
+             patch("dograpper.commands.download.run_wget_mirror") as mock_wget_mirror, \
+             patch("dograpper.commands.download.run_playwright_crawl") as mock_pw, \
+             patch("dograpper.commands.download.is_spa", return_value=True):
+            mock_wget_mirror.return_value = WgetResult(
+                True, d, [a, b], [], 0, [],
+                {a: "http://example.com/wiki/A", b: "http://example.com/q?page=2"})
+            mock_pw.return_value = CrawlResult(True, d, [a], [], 0,
+                                               {a: "http://example.com/wiki/A2"})
+            res = runner.invoke(download, ["http://example.com", "-o", d,
+                                           "--manifest", os.path.join(d, "m.json")])
+            assert res.exit_code == 0, res.output
+            assert _manifest_urls(d) == {
+                "example.com/wiki/A.html": "http://example.com/wiki/A2",
+                "example.com/q.html": "http://example.com/q?page=2",
+            }
+
+
+def test_manifest_records_urls_from_wget_i():
+    runner = CliRunner()
+    discovered = [f"http://example.com/p{i}" for i in range(3)]
+    with tempfile.TemporaryDirectory() as d:
+        files = _make_outdir(d, [f"example.com/p{i}.html" for i in range(3)])
+        with patch("dograpper.commands.download.fetch_llms_txt", return_value=discovered), \
+             patch("dograpper.commands.download.run_wget_urls") as mock_wget_urls, \
+             patch("dograpper.commands.download.is_spa", return_value=False):
+            mock_wget_urls.return_value = WgetResult(True, d, files, [], 0, [],
+                                                     dict(zip(files, discovered)))
+            res = runner.invoke(download, ["http://example.com", "-o", d,
+                                           "--manifest", os.path.join(d, "m.json")])
+            assert res.exit_code == 0, res.output
+            assert _manifest_urls(d) == {
+                f"example.com/p{i}.html": f"http://example.com/p{i}" for i in range(3)}
+
+
+def test_manifest_records_urls_from_headless_playwright():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        (a,) = _make_outdir(d, ["example.com/w/index.php.html"])
+        with patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
+             patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
+             patch("dograpper.commands.download.run_playwright_crawl") as mock_pw:
+            mock_pw.return_value = CrawlResult(True, d, [a], [], 0,
+                                               {a: "http://example.com/w/index.php?title=A"})
+            res = runner.invoke(download, ["http://example.com", "-o", d, "--headless",
+                                           "--manifest", os.path.join(d, "m.json")])
+            assert res.exit_code == 0, res.output
+            assert _manifest_urls(d) == {
+                "example.com/w/index.php.html": "http://example.com/w/index.php?title=A"}

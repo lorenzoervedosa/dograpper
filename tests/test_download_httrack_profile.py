@@ -153,6 +153,21 @@ def test_httrack_filter_scopes_discovered_urls_and_reaches_the_fetch(ht):
     assert "Filtered by --filter: 1" in res.output
 
 
+def test_httrack_manifest_records_the_urls_fetched(ht):
+    out, fu, _ = ht
+
+    def fetched(urls, o, *a, **k):
+        res = _res(o)
+        res.urls = {res.files_downloaded[0]: "http://example.com/p0?lang=en"}
+        return res
+    fu.side_effect = fetched
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: e["url"] for e in manifest["files"].values()} == {
+        "p0.html": "http://example.com/p0?lang=en"}
+
+
 def test_httrack_one_fetcher_shared_by_discovery_and_fetch(ht):
     out, fu, _ = ht
 

@@ -22,7 +22,7 @@ the comment; a JSON parser reads the original character back.
 |-------|------|----------|-------------|
 | title | string | no | Page title, first field. Written only in the page layout: the `<head>` `<title>` minus the site suffix that ends more than half of the run's titles, else the first `h1` of the raw page, else the file stem. |
 | source | string | yes | Relative path of the source file |
-| url | string | no | Original URL: the download manifest entry, else the page's HTTrack or saved-from marker (validated). Omitted when neither yields one. |
+| url | string | no | Original URL: the download manifest entry (the URL dograpper requested for the file; after a redirect still the requested one, never the redirect target, which may carry a signed token), else the page's HTTrack or saved-from marker (validated). Omitted when neither yields one. |
 | chunk_index | int | no | Sub-chunk position (1-based). Omitted if file is not split. |
 | total_chunks | int | no | Total sub-chunks for this file. Omitted if file is not split. |
 | word_count | int | no | Word count of this chunk's content (excluding header) |

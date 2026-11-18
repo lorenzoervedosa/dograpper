@@ -3,7 +3,7 @@
 import os
 import click
 import logging
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from ._httrack_profile import resolve_profile, run_httrack
 from ..lib.config_loader import is_explicit, load_config
@@ -134,9 +134,10 @@ def _run_download_cascade(
     report_lines: List[str],
     verbose: bool,
     filters: UrlFilters,
-) -> Tuple[int, int]:
-    """Orchestrate the 4-layer cascade. Returns (downloaded, skipped) counts;
-    wget's failed-URL summary lines are appended to `report_lines`."""
+) -> Tuple[int, int, Dict[str, str]]:
+    """Orchestrate the 4-layer cascade. Returns (downloaded, skipped) counts and
+    the URL each written file was fetched from; wget's failed-URL summary lines
+    are appended to `report_lines`."""
     is_incremental = bool(manifest_data)
 
     # Layers 1+2 — authoritative URL discovery (always, even under --headless).
@@ -159,7 +160,7 @@ def _run_download_cascade(
                 raise click.ClickException("Playwright seeded crawl failed.")
             skipped = result.files_skipped
             downloaded = max(0, len(result.files_downloaded) - skipped)
-            return downloaded, skipped
+            return downloaded, skipped, result.urls
 
         logger.info(
             f"[cascade] layer-3 wget -i: fetching {len(discovered_urls)} URLs from {winning_layer}"
@@ -195,9 +196,10 @@ def _run_download_cascade(
                 raise click.ClickException("Playwright seeded fallback failed.")
             skipped = result.files_skipped
             downloaded = max(0, len(result.files_downloaded) - skipped)
-            return downloaded, skipped
+            return downloaded, skipped, {**wget_res.urls, **result.urls}
 
-        return _compute_stats(wget_res.files_downloaded, pre_snapshot, is_incremental)
+        return (*_compute_stats(wget_res.files_downloaded, pre_snapshot, is_incremental),
+                wget_res.urls)
 
     # No discovery — legacy fallback path.
     if headless:
@@ -213,7 +215,7 @@ def _run_download_cascade(
             raise click.ClickException("Playwright crawl failed.")
         skipped = result.files_skipped
         downloaded = max(0, len(result.files_downloaded) - skipped)
-        return downloaded, skipped
+        return downloaded, skipped, result.urls
 
     logger.info("[cascade] layer-3 wget --mirror: link-graph fallback")
     pre_snapshot = _snapshot_dir(output) if is_incremental else {}
@@ -254,9 +256,9 @@ def _run_download_cascade(
             raise click.ClickException("Playwright fallback crawl failed.")
         skipped = result.files_skipped
         downloaded = max(0, len(result.files_downloaded) - skipped)
-        return downloaded, skipped
+        return downloaded, skipped, {**wget_res.urls, **result.urls}
 
-    return touched, unchanged
+    return touched, unchanged, wget_res.urls
 
 
 @click.command(
@@ -370,17 +372,17 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     manifest_data = load_manifest(manifest_path)
 
     if downloader == 'httrack':
-        files_downloaded, files_skipped, report_lines = run_httrack(
+        files_downloaded, files_skipped, report_lines, fetched = run_httrack(
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
         )
     else:
-        files_downloaded, files_skipped = _run_download_cascade(
+        files_downloaded, files_skipped, fetched = _run_download_cascade(
             url, output, depth, delay, include_extensions, manifest_data, headless,
             report_lines, bool(ctx.obj.get('VERBOSE')), filters,
         )
 
-    new_manifest = build_manifest(url, output)
+    new_manifest = build_manifest(url, output, fetched, previous=manifest_data)
     final_manifest = merge_manifests(manifest_data, new_manifest)
     save_manifest(final_manifest, manifest_path)
 

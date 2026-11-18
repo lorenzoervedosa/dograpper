@@ -179,6 +179,36 @@ def test_seeds_redirecting_to_one_target_write_one_file(server, tmp_path):
     script["/t"] = (200, HTML, b"<p>t</p>")
     res = run([f"{base}/a", f"{base}/b", f"{base}/t"], tmp_path)
     assert [os.path.basename(f) for f in res.files_downloaded] == ["t.html"]
+    assert list(res.urls.values()) == [f"{base}/t"]  # the seed that needed no redirect
+
+
+def test_seeds_redirecting_to_one_file_record_the_smallest_url(server, tmp_path):
+    """Whichever thread writes first, the manifest gets the same URL."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/b"] = (301, {"location": "/t"}, b"")
+    script["/a"] = (301, {"location": "/t"}, b"")
+    script["/t"] = (200, HTML, b"<p>t</p>")
+    res = run([f"{base}/b", f"{base}/a"], tmp_path)
+    assert list(res.urls.values()) == [f"{base}/a"]
+
+
+def test_each_written_file_maps_to_the_url_fetched(server, tmp_path):
+    """#94: the manifest records these instead of rebuilding a URL from the name."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/wiki/Category:En"] = (200, HTML, b"<p>c</p>")
+    script["/w/index.php?title=A"] = (200, HTML, b"<p>q</p>")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    script["/gone"] = (404, HTML, b"<p>x</p>")
+    res = run([f"{base}/wiki/Category:En", f"{base}/w/index.php?title=A", f"{base}/old",
+               f"{base}/gone"], tmp_path)
+    assert sorted(res.urls) == res.files_downloaded
+    by_name = {os.path.basename(f): u for f, u in res.urls.items()}
+    assert by_name.pop("Category_En.html") == f"{base}/wiki/Category:En"
+    assert by_name.pop("new.html") == f"{base}/old"  # named after the target, URL as requested
+    assert list(by_name.values()) == [f"{base}/w/index.php?title=A"]
 
 
 def test_malformed_seed_is_recorded_and_run_continues(server, tmp_path):

@@ -391,12 +391,30 @@ recording mirrored files with SHA-256 hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
 changed on the server.
 
-Each entry's `url` is rebuilt from the saved path as
-`<scheme>://<host dir>/<path>`, with the scheme of the seed URL; `pack
---context-header` copies it into the chunks. A `.html` added by
-`--adjust-extension` stays in the URL (on disk it looks like a real `.html`
-page), and a saved name containing `?` (a query page) gets `"url": null`
-because wget decodes the query when it names the file.
+Each entry's `url` is the URL dograpper requested for the file (the seed, a
+discovered or a listed URL), and `pack --context-header` copies it into the
+chunks. wget's log pairs each request with the file it saved or found up to
+date; the Playwright and httrack layers record the URL they requested for
+each file they write. After a redirect it is still the requested URL, never
+the one the server redirected to: that one can carry a secret (a presigned
+`X-Amz-Signature=...` link, a `token=`), and the manifest and every pack
+built from it are meant to be shared. When several httrack seeds redirect to
+one file, the one that needed no redirect wins, else the smallest URL.
+`user:password@` is dropped. A URL with a query is recorded only when every
+parameter name is a navigation name (`title`, `oldid`, `curid`, `diff`,
+`pagefrom`, `pageuntil`, `from`, `until`, `page`, `p`, `id`, `lang`,
+`uselang`, `hl`, `locale`, `v`, `version`, `section`, `tab`, `topic`, `view`,
+`ns`, `namespace`, `category`, `cat`, `tag`, `q`, `query`, `search`, any
+case); any other parameter gives `"url": null`. This fails closed on secrets
+at the cost of the URL of pages whose query has another parameter. Logs and
+failure reports keep such URLs but show the value of credential-like
+parameters (`token`, `secret`, `key`, `sig`, `jwt`, `X-Amz-*`, ...) as
+`REDACTED`.
+A file the current run did not fetch keeps the `url` recorded when it was; a
+file no run recorded gets `"url": null`. The saved path is never turned back
+into a URL: `--adjust-extension` adds `.html`, a directory URL is saved as
+`index.html`, and a query is decoded (wget), dropped (Playwright) or hashed
+(httrack) in the file name.
 
 #### Examples
 

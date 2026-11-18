@@ -7,8 +7,8 @@ import logging
 import time
 from html.parser import HTMLParser
 from urllib.parse import urlparse, urljoin
-from dataclasses import dataclass
-from typing import List, Any
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
 from pathlib import Path
 
 from dograpper.lib.url_filter import UrlFilters
@@ -22,6 +22,8 @@ class CrawlResult:
     files_downloaded: List[str]
     errors: List[str]
     files_skipped: int = 0
+    # Saved file -> URL requested for it (never where a redirect led).
+    urls: Dict[str, str] = field(default_factory=dict)
 
 
 class _Hrefs(HTMLParser):
@@ -75,6 +77,7 @@ def run_playwright_crawl(
             if seed != url:
                 to_visit.append((seed, 0))
     files_downloaded = []
+    urls: Dict[str, str] = {}
     errors = []
     files_skipped = 0
     
@@ -174,6 +177,7 @@ def run_playwright_crawl(
                     f.write(content)
                     
                 files_downloaded.append(full_path)
+                urls[full_path] = current_url
                 
                 # Extract links
                 links = page.evaluate('''() => {
@@ -192,5 +196,6 @@ def run_playwright_crawl(
         output_dir=output_dir,
         files_downloaded=files_downloaded,
         errors=errors,
-        files_skipped=files_skipped
+        files_skipped=files_skipped,
+        urls=urls,
     )

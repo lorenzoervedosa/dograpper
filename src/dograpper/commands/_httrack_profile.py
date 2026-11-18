@@ -4,7 +4,7 @@ download.py keeps the click options and the dispatch; this module owns the mode.
 """
 
 import logging
-from typing import Callable, List, Tuple
+from typing import Callable, Dict, List, Tuple
 from urllib.parse import urljoin, urlsplit
 
 import click
@@ -122,10 +122,10 @@ def discovery_fetch(fetcher) -> Callable[[str], bytes | None]:
 
 
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
-                policy_kw, from_config, discover, filters) -> Tuple[int, int, List[str]]:
+                policy_kw, from_config, discover, filters) -> Tuple[int, int, List[str], Dict[str, str]]:
     """Seeded fetch only. `discover` is download's layers 1+2 (`_discover_urls`);
     `filters` (--filter) scopes the discovered list and the redirect targets.
-    Returns (downloaded, skipped, report lines)."""
+    Returns (downloaded, skipped, report lines, written file -> URL fetched)."""
     warn_if_old_openssl()
     if headless:
         raise click.ClickException(_PLAYWRIGHT_MSG)
@@ -155,4 +155,4 @@ def run_httrack(url, output, depth, delay, include_extensions, headless, verbose
         raise click.ClickException("httrack fetch failed.")
     if is_spa(output):
         raise click.ClickException(_PLAYWRIGHT_MSG)
-    return len(res.files_downloaded), 0, format_report(res.report, verbose)
+    return len(res.files_downloaded), 0, format_report(res.report, verbose), res.urls

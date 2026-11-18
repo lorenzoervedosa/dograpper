@@ -123,11 +123,16 @@ and fixes alone are a PATCH bump.
   ([#92](https://github.com/lorenzoervedosa/dograpper/issues/92)).
 - `pack --score` no longer grades a chunk with empty extracted content as `A`;
   it is graded `C` with score 0. ([#69])
-- `download` manifest entries record `url` as `<scheme>://<host dir>/<saved
-  path>` instead of appending the path to the seed URL, which doubled a seed's
-  path segment (`.../PZ-API-Docs/PZ-API-Docs/index.html`) or glued paths onto a
-  page seed. A saved name with `?` (wget query pages) now gets `"url": null`,
-  and `pack --context-header` leaves `url` out for such sources. ([#94])
+- `download` manifest entries record `url` as the URL dograpper requested for
+  each file (never a redirect target, which may carry a signed token; without
+  userinfo; none at all when its query has a parameter other than a
+  navigation name such as `title`, `oldid`, `page` or `lang`) instead of
+  appending the saved path to the seed URL, which doubled a seed's path
+  segment (`.../PZ-API-Docs/PZ-API-Docs/index.html`), glued paths onto a page
+  seed and kept the `.html` that `--adjust-extension` added. Query pages such
+  as `index.php?title=...` get their real URL. A file no run recorded gets
+  `"url": null`, and `pack --context-header` leaves `url` out for such
+  sources. ([#94])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
@@ -191,6 +196,12 @@ and fixes alone are a PATCH bump.
 - URLs that `download` logs during llms.txt and sitemap discovery drop
   credentials and escape control characters, so a hostile sitemap or
   robots.txt cannot inject terminal escape sequences.
+- `download` never writes a credential from a URL's query into the manifest,
+  and so into a pack: a URL is recorded only when every query parameter is a
+  navigation name (`title`, `oldid`, `page`, `lang`, `q`, ... see README),
+  otherwise `"url": null`. Logs and failure reports show the value of
+  credential-like parameters (`token`, `secret`, `key`, `sig`, `jwt`,
+  `X-Amz-*`, ...) as `REDACTED`. ([#94])
 
 ## [0.4.0] - 2026-08-15
 

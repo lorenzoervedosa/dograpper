@@ -7,7 +7,7 @@ import logging
 import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List, Tuple
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -121,9 +121,18 @@ def _record_refused(log_path: str, filters: UrlFilters) -> None:
 MAX_SHOWN_FAILURES = 5
 
 # wget prints "--YYYY-MM-DD HH:MM:SS--  <URL>" per request and later
-# "YYYY-MM-DD HH:MM:SS ERROR <code>: <message>." when the server refuses it.
+# "YYYY-MM-DD HH:MM:SS ERROR <code>: <message>." when the server refuses it, or
+# a line naming the file it saved or found up to date. A redirect it follows
+# prints "Location: <URL> [following]" and, on the next line, a new request.
 _REQUEST_LINE = re.compile(r"^--\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}--\s+(\S+)")
 _ERROR_LINE = re.compile(r"\bERROR (\d{3}): ")
+_FOLLOWING_LINE = re.compile(r"^Location: .* \[following\]$")
+_FILE_LINE = re.compile(
+    r"^(?:Saving to: |File |Server file no newer than local file )(\u2018.*\u2019|'.*')"
+    r"(?: not modified on server\. Omitting download\.| -- not retrieving\.)?$")
+# gnulib quotearg: \\, the closing quote and, outside UTF-8 locales, every
+# non-ASCII byte (as \ooo) are backslash-escaped inside the quotes.
+_QUOTE_ESCAPE = re.compile(rb"\\([0-7]{3}|.)", re.DOTALL)
 
 # wget localizes these lines; LANGUAGE=C makes gettext return the untranslated msgid and leaves LC_CTYPE (IRI encoding) alone.
 _WGET_ENV = {**os.environ, "LANGUAGE": "C"}
@@ -143,22 +152,46 @@ class WgetResult:
     errors: List[str]
     files_skipped: int = 0
     failed: List[WgetFailure] = field(default_factory=list)
+    # Saved file, as wget printed its path -> URL requested for it.
+    urls: Dict[str, str] = field(default_factory=dict)
 
 
-def parse_failed_urls(stderr: str) -> List[WgetFailure]:
-    """Pair each ``ERROR <code>`` line of wget's stderr with its request URL."""
+def _unquote(quoted: str) -> str:
+    raw = _QUOTE_ESCAPE.sub(
+        lambda m: bytes([int(m.group(1), 8)]) if len(m.group(1)) == 3 else m.group(1),
+        quoted[1:-1].encode())
+    return os.fsdecode(raw)
+
+
+def parse_wget_log(stderr: str) -> Tuple[List[WgetFailure], Dict[str, str]]:
+    """Pair each request URL in wget's stderr with what became of it.
+
+    Returns the ``ERROR <code>`` failures and a map from each file wget saved,
+    or found up to date, to the URL requested for it: the first of a redirect
+    chain, never one a server handed back (it may carry a signed token).
+    """
     failed: List[WgetFailure] = []
-    current = None
+    saved: Dict[str, str] = {}
+    current = requested = None
+    following = False
     for line in stderr.splitlines():
         request = _REQUEST_LINE.match(line)
         if request:
             current = request.group(1)
+            if not following:
+                requested = current
+            following = False
+            continue
+        following = bool(_FOLLOWING_LINE.match(line))
+        kept = _FILE_LINE.match(line)
+        if kept and requested:
+            saved[_unquote(kept.group(1))] = requested
             continue
         error = _ERROR_LINE.search(line)
         # A missing robots.txt is routine, not a failed page.
         if error and current and not current.endswith("/robots.txt"):
             failed.append(WgetFailure(current, int(error.group(1))))
-    return failed
+    return failed, saved
 
 
 def format_failures(failed: List[WgetFailure], verbose: bool) -> List[str]:
@@ -228,6 +261,7 @@ def run_wget_mirror(
     stderr_output = ""
     errors = []
     failed: List[WgetFailure] = []
+    saved: Dict[str, str] = {}
 
     try:
         while attempt < max_retries and not success:
@@ -238,6 +272,8 @@ def run_wget_mirror(
                                     errors="replace", env=_WGET_ENV)
             stdout_output += result.stdout
             stderr_output += result.stderr
+            attempt_failed, attempt_saved = parse_wget_log(result.stderr)
+            saved.update(attempt_saved)  # a failed attempt's files are on disk too
         
             if result.returncode == 0:
                 success = True
@@ -245,7 +281,7 @@ def run_wget_mirror(
                 logger.warning("wget returned 8 (Server error). Treating as partial success.")
                 success = True
                 errors.append("Server error on some URLs (exit code 8)")
-                failed = parse_failed_urls(result.stderr)
+                failed = attempt_failed
             else:
                 logger.error(f"wget failed with exit code {result.returncode}")
                 errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
@@ -272,6 +308,7 @@ def run_wget_mirror(
         files_downloaded=files_downloaded,
         errors=errors,
         failed=failed,
+        urls=saved,
     )
 
 
@@ -326,6 +363,7 @@ def run_wget_urls(
         success = False
         errors: List[str] = []
         failed: List[WgetFailure] = []
+        saved: Dict[str, str] = {}
 
         while attempt < max_retries and not success:
             attempt += 1
@@ -335,13 +373,15 @@ def run_wget_urls(
             )
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                     errors="replace", env=_WGET_ENV)
+            attempt_failed, attempt_saved = parse_wget_log(result.stderr)
+            saved.update(attempt_saved)
             if result.returncode == 0:
                 success = True
             elif result.returncode == 8:
                 logger.warning("wget -i returned 8 (Server error). Treating as partial success.")
                 success = True
                 errors.append("Server error on some URLs (exit code 8)")
-                failed = parse_failed_urls(result.stderr)
+                failed = attempt_failed
             else:
                 logger.error(f"wget -i failed with exit code {result.returncode}")
                 errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
@@ -360,6 +400,7 @@ def run_wget_urls(
             files_downloaded=files_downloaded,
             errors=errors,
             failed=failed,
+            urls=saved,
         )
     finally:
         try:
