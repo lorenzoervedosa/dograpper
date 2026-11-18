@@ -22,6 +22,22 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — fire-engine sends only the request-specific httrack headers (#130)
+
+- **Decision:** `CurlCffiFetcher` forwards to curl only `Referer`,
+  `If-None-Match` and `If-Modified-Since` from the httrack header set; the
+  browser identity comes from the `--impersonate` profile (ADR-0011,
+  "Fatia 2").
+- **Why:** the validators must reach the server for the update mode, and
+  mixing HTTrack's identity headers with a Chrome TLS handshake is the
+  mismatch a WAF flags.
+- **Rejected:** forwarding the whole httrack set (breaks the fingerprint);
+  forwarding the per-link `Sec-Fetch-*` (no site in the project needs it yet).
+- **Pending:** `--user-agent` is accepted under `fire-engine` but not sent.
+  Reject it there (usage error, like the `[httrack]` flags under `wget`) or
+  send it over the profile's User-Agent? Left as is: either changes the
+  documented flag surface.
+
 ## 2026-11-18 — Anti-bot evasion is no longer an anti-goal
 
 - **Decision:** challenge or CAPTCHA solving, JavaScript challenge execution,

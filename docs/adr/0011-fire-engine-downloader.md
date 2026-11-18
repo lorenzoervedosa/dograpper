@@ -71,6 +71,25 @@ e cada fatia é um PR próprio, começando pelo caso observado:
    de proxy, persistência de sessão entre execuções, cache compartilhado,
    detecção de outros WAFs.
 
+## Fatia 2 (#130)
+
+- **Uma cascata só.** `run_fire_engine` deixou de ser cópia de
+  `run_httrack`: os dois chamam `run_profile()` em
+  `commands/_httrack_profile.py`, e só o transporte, as mensagens e a regra de
+  `--headless` diferem. Com isso o `fire-engine` herda o modo de atualização
+  (HTTrack `-C2`, `previous=`): revalida os arquivos da execução anterior e
+  grava os validadores no manifest.
+- **Headers no fio.** Do conjunto de headers do perfil `httrack`
+  (`policy.request_headers`), o `CurlCffiFetcher` repassa ao curl só os que
+  são do pedido: `Referer`, `If-None-Match` e `If-Modified-Since`. A
+  identidade (User-Agent, Accept, Accept-Language, Accept-Encoding,
+  Sec-Fetch-\*, client hints, ordem dos headers) vem do perfil
+  `--impersonate`, porque misturar a identidade do HTTrack com um handshake de
+  Chrome é exatamente a incoerência que um WAF detecta. Consequência
+  aceita: os `Sec-Fetch-*` são os fixos do perfil (navegação), não os do link
+  (`FetchMeta`), e `--user-agent` não é enviado (pendência em
+  `docs/DECISIONS.md`).
+
 ## Consequências
 
 - `download`/`sync` ganham `--downloader fire-engine` e as flags do perfil; o

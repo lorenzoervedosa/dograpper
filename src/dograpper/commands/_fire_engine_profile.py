@@ -7,6 +7,7 @@ headless rule.
 import click
 
 from ..lib.fire_engine.fetcher import CurlCffiFetcher, CurlCffiMissing
+from ..lib.manifest import Manifest
 from ._httrack_profile import run_profile
 
 _SPA_MSG = ("fire-engine: the content looks client-rendered (SPA); it runs no "
@@ -26,9 +27,10 @@ def _front_failed(discovered: bool, challenged: bool) -> str:
 
 
 def run_fire_engine(url, output, depth, delay, include_extensions, headless, verbose,
-                    policy_kw, from_config, discover, filters, *, proxy, impersonate):
-    """run_profile over a curl_cffi transport. Returns (downloaded, skipped, report lines,
-    file -> URL)."""
+                    policy_kw, from_config, discover, filters, previous: Manifest | None = None,
+                    *, proxy, impersonate):
+    """run_profile over a curl_cffi transport, an update when `previous` is given. Returns
+    (downloaded, kept unchanged, report lines, file -> URL fetched, file -> record)."""
     if headless:
         raise click.ClickException(
             "fire-engine: --headless is not supported (it runs its own "
@@ -38,6 +40,6 @@ def run_fire_engine(url, output, depth, delay, include_extensions, headless, ver
             "fire-engine",
             lambda policy: CurlCffiFetcher(policy, proxy=proxy, impersonate=impersonate),
             url, output, depth, delay, include_extensions, verbose, policy_kw, from_config,
-            discover, filters, None, front_failed=_front_failed, fallback=_SPA_MSG)[:4]
+            discover, filters, previous, front_failed=_front_failed, fallback=_SPA_MSG)
     except CurlCffiMissing as e:
         raise click.ClickException(str(e))

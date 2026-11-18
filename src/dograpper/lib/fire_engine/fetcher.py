@@ -12,6 +12,10 @@ from urllib.parse import urlunsplit
 
 from ..httrack.fetcher import CHUNK, MAX_BODY_BYTES, Fetcher, wire_host
 
+# Of the httrack request headers, only the request-specific ones go to curl; the
+# impersonated browser sends its own identity (User-Agent, Accept*, Sec-Fetch-*) (ADR-0011).
+_FORWARDED = frozenset({"referer", "if-none-match", "if-modified-since"})
+
 _MISSING = (
     "curl_cffi is required for --downloader fire-engine. "
     "Install it with: uv sync --extra fire-engine"
@@ -57,8 +61,7 @@ class CurlCffiFetcher(Fetcher):
         # wire, so curl targets exactly what the scope/robots checks validated.
         netloc = wire_host(parts)  # the port included; ValueError on a host the checks reject
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
-        referer = next((v for k, v in headers if k.lower() == "referer"), None)
-        req_headers = {"Referer": referer} if referer else {}
+        req_headers = {k: v for k, v in headers if k.lower() in _FORWARDED}
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
         # Stream and bound the decoded body: curl decompresses on the fly, so a tiny

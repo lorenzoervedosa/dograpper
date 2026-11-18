@@ -411,10 +411,10 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
             previous=manifest_data,
         )
     elif downloader == 'fire-engine':
-        files_downloaded, files_skipped, report_lines, fetched = run_fire_engine(
+        files_downloaded, files_skipped, report_lines, fetched, records = run_fire_engine(
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
-            proxy=proxy, impersonate=impersonate,
+            previous=manifest_data, proxy=proxy, impersonate=impersonate,
         )
     else:
         files_downloaded, files_skipped, fetched = _run_download_cascade(

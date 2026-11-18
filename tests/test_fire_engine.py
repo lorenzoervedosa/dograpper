@@ -20,6 +20,9 @@ from dograpper.lib.fire_engine.fetcher import (CurlCffiFetcher, _MISSING,
 from dograpper.lib.httrack.policy import build_policy
 
 
+LM = "Mon, 01 Jan 2024 00:00:00 GMT"
+
+
 class FakeResp:
     def __init__(self, status=200, headers=None, content=b"<html>ok</html>", chunks=None):
         self.status_code = status
@@ -91,6 +94,21 @@ def test_no_proxy_means_no_proxies_kwarg_value():
 
     _m, _u, kw = session.calls[0]
     assert kw["proxies"] is None
+
+
+def test_only_the_referer_and_the_validators_reach_curl():
+    """The impersonated browser sends its own identity (User-Agent, Accept*, Sec-Fetch-*);
+    of the httrack header set only what is specific to this request goes to curl."""
+    fetcher, session, _ = make_fetcher(FakeResp(status=304, content=b""))
+    validators = (("If-None-Match", '"v1"'), ("If-Modified-Since", LM))
+
+    res = fetcher.get("https://example.com/a", kind="linked", referer="https://example.com/",
+                      validators=validators)
+
+    assert res.status == 304
+    _m, _u, kw = session.calls[0]
+    assert kw["headers"] == {"If-None-Match": '"v1"', "If-Modified-Since": LM,
+                             "Referer": "https://example.com/"}
 
 
 def test_cloudflare_challenge_is_detected_from_header():
@@ -196,9 +214,9 @@ def test_impersonate_without_fire_engine_is_a_usage_error(tmp_path):
     assert "--impersonate requires --downloader fire-engine" in result.output
 
 
-def test_fire_engine_dispatch_forwards_proxy_and_impersonate(tmp_path):
+def test_fire_engine_dispatch_forwards_proxy_impersonate_and_the_previous_manifest(tmp_path):
     with patch("dograpper.commands.download.run_fire_engine",
-               return_value=(2, 0, [], {})) as stub:
+               return_value=(2, 0, [], {}, {})) as stub:
         result = CliRunner().invoke(
             cli, ["download", "http://example.com/", "-o", str(tmp_path / "o"),
                   "--downloader", "fire-engine",
@@ -207,6 +225,7 @@ def test_fire_engine_dispatch_forwards_proxy_and_impersonate(tmp_path):
     assert stub.call_count == 1
     assert stub.call_args.kwargs["proxy"] == "http://p:1"
     assert stub.call_args.kwargs["impersonate"] == "chrome124"
+    assert stub.call_args.kwargs["previous"] is None  # first run: no manifest yet
 
 
 # -- smoke tests over the real curl_cffi (skipped without the fire-engine extra) --
@@ -295,3 +314,41 @@ def test_real_download_mirrors_the_site(server, tmp_path):
     assert "Files downloaded: 2" in result.output
     files = json.loads((out / ".dograpper-manifest.json").read_text())["files"]
     assert sorted(e["url"] for e in files.values()) == [f"{base}/docs/", f"{base}/docs/a.html"]
+
+
+def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp_path):
+    """The update mode of the httrack profile (HTTrack -C2), over curl: the validators the
+    first run recorded go on the wire, and a 304 keeps each file byte-identical."""
+    pytest.importorskip("curl_cffi")
+    base, script, _ = server
+    _docs_site(script)
+    log = []
+    for path in ("/docs/", "/docs/a.html"):
+        _status, hdrs, body = script[path]
+        etag = f'"{path}"'
+
+        def reply(h, etag=etag, hdrs=hdrs, body=body, path=path):
+            log.append((path, h.get("If-None-Match"), h.get("If-Modified-Since")))
+            if h.get("If-None-Match") == etag:
+                return 304, {"ETag": etag}, b""
+            return 200, {**hdrs, "ETag": etag, "Last-Modified": LM}, body
+        script[path] = reply
+    out = tmp_path / "mirror"
+    args = ["download", f"{base}/docs/", "-o", str(out), "--downloader", "fire-engine"]
+    first = CliRunner().invoke(cli, args)
+    assert first.exit_code == 0, first.output
+    manifest = out / ".dograpper-manifest.json"
+    before = json.loads(manifest.read_text())["files"]
+    assert {(e["status"], e["etag"], e["last_modified"]) for e in before.values()} == {
+        (200, '"/docs/"', LM), (200, '"/docs/a.html"', LM)}
+    files = {p: open(p, "rb").read() for p in (str(out / e["local_path"]) for e in before.values())}
+    log.clear()
+
+    second = CliRunner().invoke(cli, args)
+
+    assert second.exit_code == 0, second.output
+    assert sorted(log) == [("/docs/", '"/docs/"', LM), ("/docs/a.html", '"/docs/a.html"', LM)]
+    assert "Files downloaded: 0" in second.output and "Files skipped:    2 (cached)" in second.output
+    assert "Not modified (304): 2" in second.output
+    assert {p: open(p, "rb").read() for p in files} == files
+    assert json.loads(manifest.read_text())["files"] == before

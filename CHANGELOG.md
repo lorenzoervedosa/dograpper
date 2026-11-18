@@ -53,8 +53,10 @@ and fixes alone are a PATCH bump.
   behind a WAF that rejects the stdlib handshake. Adds `--proxy` and
   `--impersonate`; needs the optional `fire-engine` extra (`curl_cffi`), and
   fails loud with an install hint when it is missing. Same discovery, scope,
-  pacing, robots.txt and link rewriting as `httrack`; automatic challenge/CAPTCHA
-  solving is a non-goal. ([ADR-0011](docs/adr/0011-fire-engine-downloader.md))
+  pacing, robots.txt, link rewriting and update mode (a re-run revalidates the
+  previous run's files, and the manifest records their validators) as
+  `httrack`; automatic challenge/CAPTCHA solving is a non-goal.
+  ([ADR-0011](docs/adr/0011-fire-engine-downloader.md), [#130])
 
 - `dograpper docs`: serves a self-contained, offline reference page for every
   command and option on `127.0.0.1` (`--port`, default 8000; `--no-browser`),
@@ -467,3 +469,4 @@ and fixes alone are a PATCH bump.
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
 [#133]: https://github.com/lorenzoervedosa/dograpper/issues/133
+[#130]: https://github.com/lorenzoervedosa/dograpper/issues/130

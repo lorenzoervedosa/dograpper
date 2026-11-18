@@ -438,7 +438,7 @@ HTTrack's mirror loop:
   crawl that saves at most one HTML page, or an SPA shell, would fall back to
   Playwright, which the profile does not have yet (see below).
 
-**Updates (`httrack`).** A run on an `-o` that already holds a manifest is an
+**Updates (`httrack`, `fire-engine`).** A run on an `-o` that already holds a manifest is an
 update, as HTTrack's `-C2` on a finished mirror: on both paths, each file the
 previous run recorded from a `200` with an `ETag` or a date, still on disk and
 not empty, is revalidated.
@@ -557,18 +557,24 @@ has its own transport). If the site still challenges the request after the
 browser fingerprint, the run exits 1 and suggests `--proxy` with a different
 IP or `--downloader wget`; a manual-login browser solver is planned
 ([ADR-0011](docs/adr/0011-fire-engine-downloader.md)). Automatic challenge or
-CAPTCHA solving is a non-goal. robots.txt and the pacing flags apply exactly
-as under `httrack`.
+CAPTCHA solving is a non-goal. robots.txt, the pacing flags and the update
+mode ("Updates" above) apply exactly as under `httrack`.
+
+On the wire, the browser profile sends its own identity headers
+(`User-Agent`, `Accept`, `Accept-Language`, `Accept-Encoding`, `Sec-Fetch-*`,
+client hints) in its own order; of the `httrack` header set only the
+request-specific ones are sent: `Referer` and, on an update, `If-None-Match` /
+`If-Modified-Since`. `--user-agent` therefore has no effect under this profile.
 
 #### Incremental
 
 A `.dograpper-manifest.json` manifest is generated after each download,
 recording mirrored files with MD5 content hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
-changed on the server; under `--downloader httrack` they revalidate each
+changed on the server; under `--downloader httrack` or `fire-engine` they revalidate each
 file with the validators the manifest recorded (see "Updates" under
 [Downloader profiles](#downloader-profiles)). For the files it saves, the
-httrack profile also records the response's `status`, `content_type`, `etag`
+httrack and fire-engine profiles also record the response's `status`, `content_type`, `etag`
 and `last_modified` (the `Date` when the server sent no `Last-Modified`), and
 `redirected` when the requested URL reached the file through a redirect; the
 other downloaders leave these `null`. A file a run did not touch keeps what
