@@ -132,6 +132,15 @@ def test_userinfo_is_stripped_from_the_url_sent_to_curl():
     assert url == "https://example.com/docs?q=1"
 
 
+def test_an_explicit_port_reaches_curl_once():
+    fetcher, session, _ = make_fetcher(FakeResp())
+
+    fetcher.get("http://u:p@127.0.0.1:8080/docs?q=1", kind="navigate")
+
+    _m, url, _kw = session.calls[0]
+    assert url == "http://127.0.0.1:8080/docs?q=1"
+
+
 def test_default_factory_without_curl_cffi_raises_friendly_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "curl_cffi", None)  # forces ImportError
     with pytest.raises(RuntimeError) as exc:
@@ -193,3 +202,4 @@ def test_fire_engine_dispatch_forwards_proxy_and_impersonate(tmp_path):
     assert stub.call_count == 1
     assert stub.call_args.kwargs["proxy"] == "http://p:1"
     assert stub.call_args.kwargs["impersonate"] == "chrome124"
+

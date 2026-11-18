@@ -55,8 +55,7 @@ class CurlCffiFetcher(Fetcher):
         self._acquire(conn=True)  # connection-rate pacing, as the stdlib path does
         # Rebuild the URL from the IDNA host (no userinfo), as the stdlib path puts on the
         # wire, so curl targets exactly what the scope/robots checks validated.
-        host = wire_host(parts)  # raises ValueError on a host http.client/the checks reject
-        netloc = host if parts.port is None else f"{host}:{parts.port}"
+        netloc = wire_host(parts)  # the port included; ValueError on a host the checks reject
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
         referer = next((v for k, v in headers if k.lower() == "referer"), None)
         req_headers = {"Referer": referer} if referer else {}
