@@ -163,35 +163,57 @@ def _unquote(quoted: str) -> str:
     return os.fsdecode(raw)
 
 
-def parse_wget_log(stderr: str) -> Tuple[List[WgetFailure], Dict[str, str]]:
-    """Pair each request URL in wget's stderr with what became of it.
+class WgetLog:
+    """wget's stderr, parsed one line at a time as wget prints it.
 
-    Returns the ``ERROR <code>`` failures and a map from each file wget saved,
-    or found up to date, to the URL requested for it: the first of a redirect
-    chain, never one a server handed back (it may carry a signed token).
+    Pairs each request URL with what became of it: ``failed`` holds the
+    ``ERROR <code>`` failures and ``saved`` maps each file wget saved, or found
+    up to date, to the URL requested for it: the first of a redirect chain,
+    never one a server handed back (it may carry a signed token).
     """
-    failed: List[WgetFailure] = []
-    saved: Dict[str, str] = {}
-    current = requested = None
-    following = False
-    for line in stderr.splitlines():
+
+    def __init__(self):
+        self.failed: List[WgetFailure] = []
+        self.saved: Dict[str, str] = {}
+        self._current = self._requested = None
+        self._following = False
+
+    def feed(self, line: str) -> None:
         request = _REQUEST_LINE.match(line)
         if request:
-            current = request.group(1)
-            if not following:
-                requested = current
-            following = False
-            continue
-        following = bool(_FOLLOWING_LINE.match(line))
+            self._current = request.group(1)
+            if not self._following:
+                self._requested = self._current
+            self._following = False
+            return
+        self._following = bool(_FOLLOWING_LINE.match(line))
         kept = _FILE_LINE.match(line)
-        if kept and requested:
-            saved[_unquote(kept.group(1))] = requested
-            continue
+        if kept and self._requested:
+            self.saved[_unquote(kept.group(1))] = self._requested
+            return
         error = _ERROR_LINE.search(line)
         # A missing robots.txt is routine, not a failed page.
-        if error and current and not current.endswith("/robots.txt"):
-            failed.append(WgetFailure(current, int(error.group(1))))
-    return failed, saved
+        if error and self._current and not self._current.endswith("/robots.txt"):
+            self.failed.append(WgetFailure(self._current, int(error.group(1))))
+
+
+def parse_wget_log(stderr: str) -> Tuple[List[WgetFailure], Dict[str, str]]:
+    """``WgetLog`` over a whole log: the failures and saved file -> URL requested."""
+    log = WgetLog()
+    for line in stderr.splitlines():
+        log.feed(line)
+    return log.failed, log.saved
+
+
+def _run_wget(cmd: List[str], log: WgetLog) -> int:
+    """Run wget, feeding its stderr to ``log`` line by line while it runs. wget prints
+    nothing on stdout here (no ``-O -``), so stdout goes to DEVNULL: the only pipe is
+    read to EOF and cannot fill up and stall wget."""
+    with subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                          errors="replace", env=_WGET_ENV) as proc:
+        for line in proc.stderr:
+            log.feed(line)
+    return proc.returncode
 
 
 def format_failures(failed: List[WgetFailure], verbose: bool) -> List[str]:
@@ -257,8 +279,6 @@ def run_wget_mirror(
     max_retries = 3
     attempt = 0
     success = False
-    stdout_output = ""
-    stderr_output = ""
     errors = []
     failed: List[WgetFailure] = []
     saved: Dict[str, str] = {}
@@ -268,23 +288,20 @@ def run_wget_mirror(
             attempt += 1
             logger.info(f"Running wget (attempt {attempt}/{max_retries}): {' '.join(cmd)}")
         
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                    errors="replace", env=_WGET_ENV)
-            stdout_output += result.stdout
-            stderr_output += result.stderr
-            attempt_failed, attempt_saved = parse_wget_log(result.stderr)
-            saved.update(attempt_saved)  # a failed attempt's files are on disk too
+            log = WgetLog()
+            returncode = _run_wget(cmd, log)
+            saved.update(log.saved)  # a failed attempt's files are on disk too
         
-            if result.returncode == 0:
+            if returncode == 0:
                 success = True
-            elif result.returncode == 8:
+            elif returncode == 8:
                 logger.warning("wget returned 8 (Server error). Treating as partial success.")
                 success = True
                 errors.append("Server error on some URLs (exit code 8)")
-                failed = attempt_failed
+                failed = log.failed
             else:
-                logger.error(f"wget failed with exit code {result.returncode}")
-                errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
+                logger.error(f"wget failed with exit code {returncode}")
+                errors.append(f"Attempt {attempt} failed with exit code {returncode}")
                 if attempt < max_retries:
                     backoff_time = 2 ** attempt
                     logger.info(f"Retrying in {backoff_time} seconds...")
@@ -371,20 +388,19 @@ def run_wget_urls(
                 f"Running wget -i (attempt {attempt}/{max_retries}) "
                 f"on {len(urls)} URLs: {' '.join(cmd)}"
             )
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                    errors="replace", env=_WGET_ENV)
-            attempt_failed, attempt_saved = parse_wget_log(result.stderr)
-            saved.update(attempt_saved)
-            if result.returncode == 0:
+            log = WgetLog()
+            returncode = _run_wget(cmd, log)
+            saved.update(log.saved)
+            if returncode == 0:
                 success = True
-            elif result.returncode == 8:
+            elif returncode == 8:
                 logger.warning("wget -i returned 8 (Server error). Treating as partial success.")
                 success = True
                 errors.append("Server error on some URLs (exit code 8)")
-                failed = attempt_failed
+                failed = log.failed
             else:
-                logger.error(f"wget -i failed with exit code {result.returncode}")
-                errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
+                logger.error(f"wget -i failed with exit code {returncode}")
+                errors.append(f"Attempt {attempt} failed with exit code {returncode}")
                 if attempt < max_retries:
                     time.sleep(2 ** attempt)
 

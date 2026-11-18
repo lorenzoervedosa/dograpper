@@ -1,6 +1,8 @@
+import io
 import os
 import json
 import tempfile
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 import click
 import pytest
@@ -9,6 +11,25 @@ from dograpper.lib.wget_mirror import run_wget_mirror
 from dograpper.lib.spa_detector import is_spa
 from dograpper.lib.manifest import Manifest, ManifestEntry, load_manifest, save_manifest, merge_manifests
 from dograpper.lib.config_loader import load_config
+
+
+def _wget_proc(stderr="", returncode=0):
+    """A running wget as subprocess.Popen returns it: stderr is read line by line."""
+    proc = MagicMock(returncode=returncode,
+                     stderr=io.StringIO(stderr) if isinstance(stderr, str) else stderr)
+    proc.__enter__.return_value = proc
+    proc.__exit__.return_value = False
+    return proc
+
+
+@contextmanager
+def _fake_wget(stderr="", returncode=0):
+    """wget stand-in: the --version probe passes, then every run streams `stderr` and
+    exits with `returncode`. Yields the Popen mock, which records each command."""
+    with patch('subprocess.run'), \
+            patch('subprocess.Popen', side_effect=lambda *a, **kw: _wget_proc(stderr, returncode)) as popen:
+        yield popen
+
 
 def test_merge_manifests_basic():
     old = Manifest("http://localhost", "2020", {
@@ -48,15 +69,10 @@ def test_merge_manifests_none_old():
     assert "A.md" in merged.files
 
 def test_wget_mirror_command_build():
-    with patch('subprocess.run') as mock_run:
-        # Mock successful wget
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-        
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out', depth=2, delay=1500, include_extensions="html,md")
         
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
         assert os.path.basename(args[0]) == "wget"
         assert "--mirror" in args
         assert "--timestamping" not in args
@@ -68,11 +84,9 @@ def test_wget_mirror_command_build():
         assert "http://example.com" in args
 
 def test_wget_incremental_flag():
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out', incremental=True)
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
 
         assert os.path.basename(args[0]) == "wget"
         assert "--timestamping" in args
@@ -82,22 +96,16 @@ def test_wget_incremental_flag():
         assert "--convert-links" in args
 
 def test_wget_non_incremental():
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out', incremental=False)
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
         
         assert "--mirror" in args
         assert "--timestamping" not in args
 
 def test_wget_urls_uses_input_file_and_flags():
     from dograpper.lib.wget_mirror import BROWSER_UA, run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-
+    with _fake_wget() as mock_popen:
         with tempfile.TemporaryDirectory() as d:
             res = run_wget_urls(
                 ["https://site.io/a", "https://site.io/b"],
@@ -109,7 +117,7 @@ def test_wget_urls_uses_input_file_and_flags():
 
         # Last call must be the actual wget invocation (not the --version probe).
         # Find the call whose argv starts with wget (basename check tolerates full paths).
-        wget_calls = [c for c in mock_run.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget" and "-i" in c[0][0]]
+        wget_calls = [c for c in mock_popen.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget" and "-i" in c[0][0]]
         assert wget_calls, "no wget -i invocation captured"
         args = wget_calls[-1][0][0]
 
@@ -137,32 +145,19 @@ def test_wget_urls_uses_input_file_and_flags():
 
 def test_wget_urls_empty_list_noops():
     from dograpper.lib.wget_mirror import run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
+    with _fake_wget() as mock_popen:
         with tempfile.TemporaryDirectory() as d:
             res = run_wget_urls([], d)
         assert res.success
         assert res.files_downloaded == []
         # No wget call should have been made at all
-        wget_calls = [c for c in mock_run.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget"]
+        wget_calls = [c for c in mock_popen.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget"]
         assert not wget_calls
 
 
 def test_wget_urls_partial_success_on_exit_8():
     from dograpper.lib.wget_mirror import run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        def side_effect(*args, **kwargs):
-            result = MagicMock()
-            # first call is --version probe, subsequent are the real run
-            if "--version" in args[0]:
-                result.returncode = 0
-            else:
-                result.returncode = 8
-            result.stdout = ""
-            result.stderr = ""
-            return result
-        mock_run.side_effect = side_effect
-
+    with _fake_wget(returncode=8):
         with tempfile.TemporaryDirectory() as d:
             res = run_wget_urls(["https://site.io/a"], d)
         assert res.success is True
@@ -171,11 +166,9 @@ def test_wget_urls_partial_success_on_exit_8():
 
 def test_wget_mirror_passes_browser_ua():
     from dograpper.lib.wget_mirror import BROWSER_UA
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out')
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
 
         assert f"--user-agent={BROWSER_UA}" in args
         assert any(a.startswith("--header=Accept-Language:") for a in args)
@@ -250,18 +243,15 @@ def test_wget_mirror_counts_only_urls_a_rule_refused(tmp_path):
         ("REGEX", "https%3A//pzwiki.net/w/index.php?title=Special%3ARandom"),
     ]
 
-    def fake_run(cmd, **kw):
-        log = next((a.split("=", 1)[1] for a in cmd if a.startswith("--rejected-log=")), None)
-        if log:  # not the --version probe
-            with open(log, "w", encoding="utf-8") as f:
-                f.write("REASON\tU_URL\tU_SCHEME\n")
-                f.writelines(f"{reason}\t{url}\tSCHEME_HTTPS\n" for reason, url in rows)
-        result = MagicMock()
-        result.returncode, result.stdout, result.stderr = 0, "", ""
-        return result
+    def fake_popen(cmd, **kw):
+        log = next(a.split("=", 1)[1] for a in cmd if a.startswith("--rejected-log="))
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("REASON\tU_URL\tU_SCHEME\n")
+            f.writelines(f"{reason}\t{url}\tSCHEME_HTTPS\n" for reason, url in rows)
+        return _wget_proc()
 
     filters = UrlFilters(["-*", "+pzwiki.net/wiki/On*"])
-    with patch("subprocess.run", side_effect=fake_run):
+    with patch("subprocess.run"), patch("subprocess.Popen", side_effect=fake_popen):
         res = run_wget_mirror(SEED, str(tmp_path), filters=filters)
     assert res.success
     assert filters.excluded == {"https://pzwiki.net/wiki/Category:En",
@@ -273,14 +263,7 @@ def test_wget_mirror_removes_the_rejected_log_when_wget_cannot_run(tmp_path, mon
     from dograpper.lib.url_filter import UrlFilters
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
 
-    def fake_run(cmd, **kw):
-        if any(a.startswith("--rejected-log=") for a in cmd):  # the mirror run, not the --version probe
-            raise OSError("exec failed")
-        result = MagicMock()
-        result.returncode, result.stdout, result.stderr = 0, "", ""
-        return result
-
-    with patch("subprocess.run", side_effect=fake_run):
+    with patch("subprocess.run"), patch("subprocess.Popen", side_effect=OSError("exec failed")):
         with pytest.raises(OSError):
             run_wget_mirror(SEED, str(tmp_path / "out"), filters=UrlFilters(["-*Special:*"]))
     assert not list(tmp_path.glob("*.rejected.tsv"))
@@ -288,10 +271,9 @@ def test_wget_mirror_removes_the_rejected_log_when_wget_cannot_run(tmp_path, mon
 
 def test_wget_mirror_without_rules_adds_no_rejected_log():
     from dograpper.lib.url_filter import UrlFilters
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out', filters=UrlFilters())
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
     assert "--no-parent" in args
     assert not any(a.startswith(("--rejected-log", "--accept-regex", "--reject-regex")) for a in args)
 
@@ -339,13 +321,9 @@ def test_content_filter_args_empty_is_noop():
 def test_wget_mirror_default_extensions_reject_not_accept():
     """Regression: a default mirror must reject binaries (denylist) so that
     pretty URLs like .../README and .../01-Test_Name are followed."""
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out')  # default include_extensions
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
 
         assert not any(a.startswith("--accept=") for a in args)
         assert any(a.startswith("--reject=") and "png" in a for a in args)
@@ -353,16 +331,12 @@ def test_wget_mirror_default_extensions_reject_not_accept():
 
 def test_wget_urls_default_extensions_reject_not_accept():
     from dograpper.lib.wget_mirror import run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-
+    with _fake_wget() as mock_popen:
         with tempfile.TemporaryDirectory() as d:
             run_wget_urls(["https://site.io/a"], d)  # default include_extensions
 
         wget_calls = [
-            c for c in mock_run.call_args_list
+            c for c in mock_popen.call_args_list
             if c[0] and os.path.basename(c[0][0][0]) == "wget" and "-i" in c[0][0]
         ]
         assert wget_calls
@@ -970,13 +944,7 @@ def test_parse_failed_urls_ignores_success_only_output():
 
 
 def _run_exit_8(fn, first_arg):
-    def side_effect(*args, **kwargs):
-        result = MagicMock()
-        result.returncode = 0 if "--version" in args[0] else 8
-        result.stdout = ""
-        result.stderr = _wget_stderr()
-        return result
-    with patch('subprocess.run', side_effect=side_effect), \
+    with _fake_wget(_wget_stderr(), returncode=8), \
             tempfile.TemporaryDirectory() as d:
         return fn(first_arg, d)
 
@@ -1063,17 +1031,23 @@ def test_parse_wget_log_undoes_quoting_escapes():
 def test_both_wget_paths_report_saved_urls():
     from dograpper.lib.wget_mirror import parse_wget_log, run_wget_mirror, run_wget_urls
     stderr = _fixture("wget_mirror_stderr.txt")
-
-    def side_effect(*args, **kwargs):
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = ""
-        result.stderr = stderr
-        return result
     for fn, arg in ((run_wget_mirror, H + "/"), (run_wget_urls, [H + "/"])):
-        with patch('subprocess.run', side_effect=side_effect), \
-                tempfile.TemporaryDirectory() as d:
+        with _fake_wget(stderr), tempfile.TemporaryDirectory() as d:
             assert fn(arg, d).urls == parse_wget_log(stderr)[1]
+
+
+def test_both_wget_paths_read_stderr_while_stdout_is_discarded():
+    """wget's stderr is read line by line while it runs; its stdout (empty here) goes
+    to DEVNULL, so no second pipe can fill up and stall wget."""
+    import subprocess
+    from dograpper.lib.wget_mirror import run_wget_urls
+    for fn, arg in ((run_wget_mirror, H + "/"), (run_wget_urls, [H + "/"])):
+        with _fake_wget() as mock_popen, tempfile.TemporaryDirectory() as d:
+            fn(arg, d)
+        kw = mock_popen.call_args.kwargs
+        assert kw["stdout"] is subprocess.DEVNULL and kw["stderr"] is subprocess.PIPE
+        assert kw["text"] is True and kw["errors"] == "replace"
+        assert kw["env"]["LANGUAGE"] == "C"
 
 
 def test_redirect_to_a_signed_url_never_reaches_the_manifest_or_the_pack(tmp_path):
@@ -1098,11 +1072,8 @@ def test_redirect_to_a_signed_url_never_reaches_the_manifest_or_the_pack(tmp_pat
         "HTTP request sent, awaiting response... 200 OK",
         f"Saving to: \u2018{page}\u2019",
     ])
-
-    def wget(*args, **kwargs):
-        return MagicMock(returncode=0, stdout="", stderr=stderr)
     manifest = tmp_path / "manifest.json"
-    with patch('subprocess.run', side_effect=wget), \
+    with _fake_wget(stderr), \
             patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
             patch('dograpper.commands.download.is_spa', return_value=False):
         res = CliRunner().invoke(download, ['https://h.example/', '-o', str(out),
