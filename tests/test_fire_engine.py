@@ -1,8 +1,13 @@
-"""fire-engine downloader (ADR-0011): curl_cffi transport, mocked.
+"""fire-engine downloader (ADR-0011): curl_cffi transport.
 
-The real curl_cffi is an optional native dependency; these tests inject a fake
-session so they run without it (and without network).
+The real curl_cffi is an optional native dependency: most tests inject a fake
+session so they run without it, and the smoke tests at the end run the real
+library against the local `server` fixture, skipped when the extra is absent.
+No test touches the network.
 """
+import base64
+import gzip
+import json
 import sys
 from unittest.mock import patch
 
@@ -203,3 +208,90 @@ def test_fire_engine_dispatch_forwards_proxy_and_impersonate(tmp_path):
     assert stub.call_args.kwargs["proxy"] == "http://p:1"
     assert stub.call_args.kwargs["impersonate"] == "chrome124"
 
+
+# -- smoke tests over the real curl_cffi (skipped without the fire-engine extra) --
+# The `server` fixture (conftest.py) stands in for the site, and for the proxy.
+
+class _Clock:
+    """Pacing without real sleeps: each sleep advances the clock it reads."""
+    def __init__(self):
+        self.now = 0.0
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def real_fetcher(**kw):
+    pytest.importorskip("curl_cffi")
+    clock = _Clock()
+    return CurlCffiFetcher(build_policy(retries=0), clock=clock.clock, sleep=clock.sleep, **kw)
+
+
+def recorded(log, reply):
+    def answer(headers):
+        log.append(headers)
+        return reply
+    return answer
+
+
+def test_real_get_sends_the_impersonated_browser_identity(server):
+    base, script, _ = server
+    log = []
+    script["/p"] = recorded(log, (200, {"Content-Type": "text/html"}, b"<html>hi</html>"))
+
+    res = real_fetcher().get(base + "/p", kind="linked", referer=base + "/")
+
+    assert (res.status, res.body, res.error) == (200, b"<html>hi</html>", None)
+    assert res.headers["content-type"] == "text/html"
+    assert "Chrome/" in log[0]["User-Agent"] and "dograpper" not in log[0]["User-Agent"]
+    assert log[0]["Referer"] == base + "/"
+
+
+def test_real_get_decodes_a_gzip_body(server):
+    base, script, _ = server
+    body = b"<html>" + b"word " * 5000 + b"</html>"
+    script["/gz"] = (200, {"Content-Encoding": "gzip"}, gzip.compress(body))
+
+    res = real_fetcher().get(base + "/gz", kind="navigate")
+
+    assert (res.status, res.body, res.error) == (200, body, None)
+
+
+def test_real_get_goes_through_the_proxy_with_its_credentials(server):
+    base, script, seen = server
+    log = []
+    script["http://docs.example.invalid/page"] = recorded(log, (200, {}, b"via proxy"))
+
+    res = real_fetcher(proxy=base.replace("http://", "http://user:pw@")).get(
+        "http://docs.example.invalid/page", kind="navigate")
+
+    assert (res.status, res.body) == (200, b"via proxy")
+    assert seen == ["http://docs.example.invalid/page"]  # absolute URI: a forward proxy
+    assert log[0]["Proxy-Authorization"] == "Basic " + base64.b64encode(b"user:pw").decode()
+
+
+def _docs_site(script):
+    words = " ".join(["documentation"] * 40)
+    script["/robots.txt"] = (404, {}, b"")
+    for path, link in (("/docs/", "a.html"), ("/docs/a.html", "./")):
+        script[path] = (200, {"Content-Type": "text/html"},
+                        f'<html><body><h1>{path}</h1><p>{words}</p>'
+                        f'<a href="{link}">{link}</a></body></html>'.encode())
+
+
+def test_real_download_mirrors_the_site(server, tmp_path):
+    pytest.importorskip("curl_cffi")
+    base, script, _ = server
+    _docs_site(script)
+    out = tmp_path / "mirror"
+
+    result = CliRunner().invoke(
+        cli, ["download", f"{base}/docs/", "-o", str(out), "--downloader", "fire-engine"])
+
+    assert result.exit_code == 0, result.output
+    assert "Files downloaded: 2" in result.output
+    files = json.loads((out / ".dograpper-manifest.json").read_text())["files"]
+    assert sorted(e["url"] for e in files.values()) == [f"{base}/docs/", f"{base}/docs/a.html"]

@@ -103,7 +103,7 @@ src/dograpper/
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
     └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora, bloco de definições de link no fim) e count_words_file()
 tests/
-├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl, test_httrack_mirror e test_download_cascade); a resposta pode ser um callable dos headers do pedido (GET condicional)
+├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl, test_httrack_mirror, test_download_cascade e os smoke tests de test_fire_engine); a resposta pode ser um callable dos headers do pedido (GET condicional)
 ├── linearity.py            # assert_linear()/cpu_time() — razão de tempo de CPU entre n e 4n (best of 3, GC desligado), fonte única dos testes de linearidade em entrada hostil (#126, #131, #135)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
 ├── test_api_reference.py   # --api-records: detecção/despacho, registros contêiner e membro sobre as fixtures javadoc 25 (tests/fixtures/javadoc) e Sphinx 9.2 autodoc (tests/fixtures/sphinx), markup não suportada, linearidade, CLI (erros de uso, dedup, --for-queries, --delta, serve)
@@ -131,7 +131,7 @@ tests/
 ├── test_drift.py           # Drift: compare_readiness, renders markdown/text (literais), CLI (first run, fail-on-drift, --output)
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
-├── test_fire_engine.py     # Perfil `--downloader fire-engine` (ADR-0011): CurlCffiFetcher com curl_cffi mockado (body, proxy, challenge, content-encoding, lib ausente), guards de --proxy/--impersonate e despacho na CLI
+├── test_fire_engine.py     # Perfil `--downloader fire-engine` (ADR-0011): CurlCffiFetcher com curl_cffi mockado (body, proxy, challenge, content-encoding, porta explícita, lib ausente inclusive sob --no-robots), guards de --proxy/--impersonate e despacho na CLI; smoke tests com o curl_cffi real contra o fixture `server` (identidade do navegador, gzip, proxy com credencial, download ponta a ponta), pulados sem o extra `fire-engine`
 ├── test_eval_command.py    # Integração do `dograpper eval` sobre um pack JSONL (--json, erros de pré-requisito)
 ├── test_eval_harness.py    # evaluate(): hit-rate, MRR por rank, breakdown por grade, pares vazios
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain
