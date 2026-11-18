@@ -306,6 +306,24 @@ pages carry Cloudflare's injected `jsd` beacon. Use only `cf-mitigated` and the
     - a file the crawl left alone is `unchanged` (`189-206`);
     - a file of `old.lst` absent from `new.lst` and still on disk is `gone`, unless the crawl tried it while the purge is off (`src/htscore.c:2186-2210`).
     - The report is written only for a completed run (`src/htscore.c:2360-2367`).
+  - **`-%d` in detail** (read on 2026-11-18, for #132):
+    - **Where.** `hts-changes.json` goes in the log folder (`src/htschanges.c:573-574`), which is the mirror folder unless `-O` names a second path (`src/htscoremain.c:944-945`). It replaces any report a previous run left. A write failure is logged as an error, and the run goes on (`src/htschanges.c:575-586`).
+    - **When.** The report is written only when the crawl loop reached its end (`completed = !aborted`, `src/htscore.c:2346`). A stopped run skips it, and so does a session rolled back because no file was saved and under 32 KiB came in (`src/htscore.c:2123-2138`, `2360-2367`). Its one-line summary is logged at NOTICE level, in three wordings (`src/htschanges.c:588-606`):
+      - "Change report: no mirror index (the cache is off), N files mirrored, deletions not detected (hts-changes.json)";
+      - "Change report: first crawl, N files mirrored, nothing to compare against (hts-changes.json)";
+      - "Change report: N new, N changed, N unchanged, N gone (hts-changes.json)".
+    - **Format** (`src/htschanges.c:457-532`). It is a pretty-printed object: two-space indent, `"counts": { "new": N, "changed": N, "unchanged": N, "gone": N }` on one line, and each entry on its own line, `{ "url": ..., "file": ..., "size": N }`. An empty list is `[]`. `previous_size` appears in `changed` only, and only when known. An entry gets no `size` when its file is gone. Strings are escaped by `hts_json_string` (`src/htscharset.c:1268-1303`): `"` and `\` take a backslash, a C0 control or DEL is `\u00xx`, well-formed UTF-8 is written verbatim, and any other byte becomes `\ufffd`; `/` is not escaped.
+    - **Entries.** There is one entry per mirrored file, keyed by its mirror-relative path, so a redirect and its target that share a save name count once (`src/htschanges.c:58-60`). The first call for a file sets its URL and samples its previous state (`227-297`).
+      - `file_notify` is the hook (`src/htscore.c:3133-3139`): `rewritten` is "created or modified", and `not_updated` is the 304 signal. A file saved from the wire is rewritten (`src/htscore.c:432`, `2006`). A file loaded from the cache, kept on a matching size, or not recaught is not (`src/htscache.c:796`, `src/htsback.c:3114`, `2690`).
+      - A parsed file is one of a hypertext type, with a body, below the depth limit (`src/htscore.c:1843-1850`). It is written by `hts_finish_html_file`, which also calls `hts_changes_html` (`src/htscore.c:429-433`, `src/htsparse.c:3849`).
+      - `url` is the absolute URL of the link the file was saved for. A file of `old.lst` that this run never wrote gets `""` (`src/htschanges.c:362-366`).
+    - **Buckets** (`src/htschanges.c:189-206`, `407-455`):
+      - a file left alone is `unchanged`;
+      - a file written that did not exist before is `new`. "Existed" means listed by the previous `old.lst` when one was read, else on disk when first notified;
+      - otherwise, for a file that is not parsed, a size that differs means `changed` without hashing, and equal sizes are compared by MD5 of the file before and after;
+      - a parsed file compares the MD5 of the payload received with that of the cache's previous body, if the cache holds an OK one (`src/htschanges.c:299-345`);
+      - with no digest to compare, the 304 signal decides, and for a 200 that means `changed`.
+    - **Dropped files.** Under a cache mode, after the crawl, each `old.lst` file that is absent from `new.lst` and still on disk is recorded (`src/htscore.c:2186-2210`). It is `gone`, unless the purge is off and the crawl named that file this run (`hash_read` of the save-name table): then it is `unchanged`, because "a failed transfer is not a deletion" (`src/htschanges.h`, `hts_changes_dropped`). `-C0` opens no `new.lst`, so nothing is dropped, and `first_crawl` is null.
   - **File times in detail.** `set_filetime_rfc822` sets the access and modification times (`src/htslib.c:2939-2950`, `2997-3005`) to the recorded `Last-Modified` (else the `Date`, "What is recorded" above). A parsed page is stamped once it is written (`src/htscore.c:451-452`), any other file when its transfer ends (`src/htsback.c:2119-2128`). The date is read leniently (`src/htsdate.c:53-157`, `200-208`):
     - tokens are split on spaces, `-`, `:` and `,`, and a whole three-letter name gives the month;
     - the first five numbers are the day, then the year, hour, minute and second, or the hour, minute, second and year when the fifth number has four digits;
