@@ -77,7 +77,7 @@ src/dograpper/
     ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs()
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
     ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
-    ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; neutralize_controls() — fonte única da neutralização C0/DEL/C1
+    ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
     └── word_counter.py     # count_words() e count_words_file()
