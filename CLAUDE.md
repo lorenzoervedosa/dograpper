@@ -51,7 +51,7 @@ src/dograpper/
 │   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap); regras percent-escapadas com escape.py, como o alvo no fio
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
-│   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build, diff e narrow_diff_to_paths
+│   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, read (levanta erro)/load (tolerante)/save/build, diff e narrow_diff_to_paths
 │   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
 │   ├── pack_artifacts.py   # Sidecars do pack: cross_refs.json, delta_manifest.json, llm-readiness.json, report HTML, tokens
 │   ├── pack_reader.py      # load_chunks() — leitura tolerante dos chunks JSONL do pack em PackedChunk
@@ -130,6 +130,7 @@ tests/
 ├── test_retrieval.py       # BM25: tokenize, ranking, top-k, determinismo e tie-break por doc_id
 ├── test_scorer.py          # LLM Readiness Score: noise_ratio, boundary, context_depth, grades, CLI
 ├── test_sitemap_parser.py  # fetch_sitemap: namespace, urlset, gzip, sitemapindex recursivo, cross-host reject, 404, UA
+├── test_source_urls.py     # URLs de origem do pack --context-header: manifest explícito ausente/quebrado = exit 1, default quebrado = nota
 ├── test_sync.py            # Pass-through de flags do sync para download/pack (sem precedência)
 ├── test_sync_precedence.py # Precedência de config através do ctx.invoke do sync (CLI explícita > JSON > defaults)
 ├── test_token_counter.py   # Token counting: fallback, tiktoken, format_summary, CLI integration
@@ -167,6 +168,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_pack_challenge.py` | Antes de alterar `utils/challenge.py` ou a etapa 6a de `commands/pack.py` |
 | `tests/test_pack_scoring.py` | Antes de alterar `lib/pack_scoring.py` ou a etapa 9c de `commands/pack.py` |
 | `tests/test_pack_artifacts.py` | Antes de alterar `lib/pack_artifacts.py` ou as escritas de sidecar (10a-10e) de `commands/pack.py` |
+| `tests/test_source_urls.py` | Antes de alterar a carga do manifest (`_load_url_manifest`) ou a resolução de URLs (passo 7c) de `commands/pack.py` |
 | `tests/test_sync_precedence.py` | Antes de alterar `commands/sync.py` ou `lib/config_loader.py` (mecanismo CLI_EXPLICIT_PARAMS) |
 | `tests/test_download.py` | Antes de alterar qualquer coisa em `lib/wget_mirror.py`, `lib/spa_detector.py`, `lib/playwright_crawl.py` ou `commands/download.py` |
 | `tests/test_download_cascade.py` | Antes de alterar a orquestração de `commands/download.py` ou o threshold `MIN_URLS_TO_CONSIDER_DISCOVERED` |

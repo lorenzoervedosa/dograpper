@@ -5,7 +5,7 @@ import click
 import logging
 from datetime import datetime, timezone
 
-from ..lib.config_loader import load_config
+from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
 from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, format_chunk_index, read_source_text
@@ -60,6 +60,29 @@ def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
         click.echo("--report implies --score: enabling readiness scoring.")
 
     return query_list, is_score
+
+
+def _load_url_manifest(ctx, manifest_path):
+    """Download manifest for source URLs, or None.
+
+    A manifest named with --manifest must load. The default path is optional:
+    absent is the normal case for mirrors made by other tools, and a file
+    there that cannot be loaded is reported and skipped.
+    """
+    from ..lib.manifest import read_manifest
+
+    explicit = is_explicit(ctx, 'manifest')
+    if not os.path.exists(manifest_path):
+        if explicit:
+            raise click.ClickException(f"manifest not found: {manifest_path}")
+        return None
+    try:
+        return read_manifest(manifest_path)
+    except (OSError, ValueError, TypeError, AttributeError) as e:
+        if explicit:
+            raise click.ClickException(f"cannot load manifest {manifest_path}: {e}")
+        click.echo(f"Note: ignoring manifest {manifest_path}: {e}", err=True)
+        return None
 
 
 def _query_packing_summary(query_list, query_pack_result) -> str:
@@ -235,6 +258,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     # 2c-2e. Flag validation, fail fast and with no silent fallback
     query_list, is_score = _validate_flags(
         ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score)
+    # 2f. Manifest for --context-header URLs, loaded before any page is read
+    manifest_data = _load_url_manifest(ctx, manifest_path) if ctx_header else None
 
     # 3. List all files
     # The queries file drives the ordering; it is never corpus content,
@@ -361,22 +386,16 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     # 7c. Build url_map from manifest (for context-header URLs)
     url_map = None
-    if ctx_header:
-        try:
-            from ..lib.manifest import load_manifest
-            manifest_data = load_manifest(manifest_path)
-            if manifest_data and manifest_data.files:
-                url_map = {}
-                for fpath in filtered_paths:
-                    rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
-                    for key, entry in manifest_data.files.items():
-                        local = entry.local_path or key
-                        if local == rel or key == rel:
-                            if entry.url:
-                                url_map[rel] = entry.url
-                            break
-        except Exception:
-            pass
+    if manifest_data and manifest_data.files:
+        url_map = {}
+        for fpath in filtered_paths:
+            rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
+            for key, entry in manifest_data.files.items():
+                local = entry.local_path or key
+                if local == rel or key == rel:
+                    if entry.url:
+                        url_map[rel] = entry.url
+                    break
 
     # 7d. Query-oriented ordering (opt-in, after delta/dedup, before chunking)
     query_pack_result = None

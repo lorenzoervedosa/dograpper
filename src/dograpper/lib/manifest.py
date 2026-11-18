@@ -37,27 +37,36 @@ class Manifest:
 _ENTRY_FIELDS = {f.name for f in fields(ManifestEntry)}
 
 
+def read_manifest(path: str) -> Manifest:
+    """Read a manifest, tolerating unknown fields from older versions.
+
+    Raises OSError, ValueError (bad JSON or encoding), TypeError or
+    AttributeError (wrong shape) when the file cannot be loaded.
+    """
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    files = {}
+    for k, v in data.get('files', {}).items():
+        # Drop any fields the current dataclass doesn't know about so we
+        # stay forward/backwards compatible with manifest schema changes.
+        payload = {kk: vv for kk, vv in v.items() if kk in _ENTRY_FIELDS}
+        files[k] = ManifestEntry(**payload)
+
+    return Manifest(
+        base_url=data.get('base_url', ''),
+        last_run=data.get('last_run', ''),
+        files=files
+    )
+
+
 def load_manifest(path: str) -> Optional[Manifest]:
-    """Load manifest from disk, tolerating unknown fields from older versions."""
+    """Load manifest from disk; a missing or unreadable file reads as None."""
     if not os.path.exists(path):
         return None
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        files = {}
-        for k, v in data.get('files', {}).items():
-            # Drop any fields the current dataclass doesn't know about so we
-            # stay forward/backwards compatible with manifest schema changes.
-            payload = {kk: vv for kk, vv in v.items() if kk in _ENTRY_FIELDS}
-            files[k] = ManifestEntry(**payload)
-
-        return Manifest(
-            base_url=data.get('base_url', ''),
-            last_run=data.get('last_run', ''),
-            files=files
-        )
+        return read_manifest(path)
     except Exception as e:
         logger.warning(f"Failed to parse manifest at {path}, treating as missing: {e}")
         return None

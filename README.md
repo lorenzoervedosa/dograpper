@@ -387,7 +387,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON) |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` |
 | `--delta` | — | `false` | Skip the run entirely when nothing changed since the last pack; pack in full when something did |
-| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header` |
+| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`. Given explicitly, it must exist and load (exit 1 otherwise); at the default path a missing file is skipped and a broken one is skipped with a note |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
@@ -895,6 +895,7 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
+| 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |

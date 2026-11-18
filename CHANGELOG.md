@@ -120,6 +120,10 @@ and fixes alone are a PATCH bump.
   identifier (`pkg.AttachedItems [-> docs_chunk_01].AttachedItems`), and
   large corpora no longer stall (each link text's pattern is compiled once
   per run). ([#67])
+- `pack --context-header --manifest PATH` exits 1 with a clear message when
+  PATH is missing or cannot be loaded, instead of silently packing without
+  URLs. A broken file at the default manifest path is reported as a note and
+  skipped. ([#90])
 
 ### Security
 
@@ -202,3 +206,4 @@ and fixes alone are a PATCH bump.
 [#89]: https://github.com/lorenzoervedosa/dograpper/issues/89
 [#67]: https://github.com/lorenzoervedosa/dograpper/issues/67
 [#94]: https://github.com/lorenzoervedosa/dograpper/issues/94
+[#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
