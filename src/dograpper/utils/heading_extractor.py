@@ -5,11 +5,12 @@ clean text output, tracking heading positions in the stripped text
 for hierarchical context injection into chunks.
 """
 
+import os
 from html.parser import HTMLParser
 from dataclasses import dataclass
 from typing import List, Dict
 
-from .html_stripper import BLOCK_TAGS, PreCapture, render_text
+from .html_stripper import BLOCK_TAGS, PreCapture, render_markdown, render_text
 
 
 @dataclass
@@ -96,16 +97,23 @@ class _HeadingExtractorParser(HTMLParser):
         return render_text(self._output + self._pre.close()), self._headings
 
 
-def extract_with_headings(html: str, source_path: str = "") -> ExtractedDocument:
+def extract_with_headings(html: str, source_path: str = "", markdown: bool = False) -> ExtractedDocument:
     """Extract clean text and headings from an HTML document.
 
     Args:
         html: Raw HTML (may be pre-filtered by content_extractor).
         source_path: Relative path of the source file.
+        markdown: Text as ``strip_html(html, markdown=True)``, with a link to
+            ``source_path`` as a same-page link; each heading's offset is then
+            the exact start of its ``#`` line.
 
     Returns:
         ExtractedDocument with text, headings, and source_path.
     """
+    if markdown:
+        text, found = render_markdown(html, os.path.basename(source_path))
+        return ExtractedDocument(text=text, headings=[Heading(*h) for h in found],
+                                 source_path=source_path)
     parser = _HeadingExtractorParser()
     parser.feed(html)
     text, headings = parser.get_result()

@@ -427,7 +427,9 @@ def test_cross_refs_text_formats_annotate_only_the_linking_page(fmt, extra):
         text = _pack_repro(d, fmt, *extra)
 
     assert "- Item.html (15 words)" in text
-    assert "call the getter on Item [-> docs_chunk_01] and check" in text
+    # md writes the link (#87); the marker follows it instead of entering its label.
+    link = {"md": "[Item](Item.html)", "txt": "Item"}[fmt]
+    assert f"call the getter on {link} [-> docs_chunk_01] and check" in text
     assert text.count("[-> ") == 1
 
 

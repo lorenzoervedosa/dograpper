@@ -12,11 +12,23 @@ import re
 _OPENER = re.compile(r"^ {0,3}(`{3,})[^`\n]*$", re.MULTILINE)
 
 
+def _ticks(code: str, minimum: int) -> str:
+    """A backtick run longer than any inside ``code``, so none of them closes it."""
+    longest = max((len(run) for run in re.findall(r"`+", code)), default=0)
+    return "`" * max(minimum, longest + 1)
+
+
 def fence(code: str, lang: str = "") -> str:
     """Wrap ``code`` in a backtick fence that no backtick run inside it can close."""
-    longest = max((len(run) for run in re.findall(r"`+", code)), default=0)
-    ticks = "`" * max(3, longest + 1)
+    ticks = _ticks(code, 3)
     return f"{ticks}{lang}\n{code}\n{ticks}"
+
+
+def code_span(code: str) -> str:
+    """One line of ``code`` as an inline code span (a table cell holds no fence)."""
+    ticks = _ticks(code, 1)
+    pad = " " if code.startswith("`") or code.endswith("`") else ""
+    return f"{ticks}{pad}{code}{pad}{ticks}"
 
 
 def _spans(text: str) -> list:

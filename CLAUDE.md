@@ -74,14 +74,14 @@ src/dograpper/
     ├── atomic_write.py     # atomic_write_bytes() — arquivo temporário no mesmo diretório + os.replace; modo padrão do umask
     ├── challenge.py        # is_challenge() / is_challenge_page() / find_challenge_files() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/); fonte única do fetcher httrack e do pack
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
-    ├── code_fence.py       # fence() / split_blocks() / unfence() — bloco de código cercado (CommonMark): fonte única para o stripper (escreve), dedup e chunker (nunca partem um bloco em linha em branco), scorer e writers txt/jsonl (tiram a cerca)
+    ├── code_fence.py       # fence() / code_span() / split_blocks() / unfence() — bloco de código cercado (CommonMark): fonte única para o stripper (escreve), dedup e chunker (nunca partem um bloco em linha em branco), scorer e writers txt/jsonl (tiram a cerca)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
     ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy)
     ├── dep_resolver.py     # resolve_wget()/resolve_browser_dir() — deps em DOGRAPPER_HOME (env lido no import)
     ├── dry_run_report.py   # generate_report() — relatório formatado para --dry-run
     ├── generator.py        # page_generator() — conteúdo do <meta name="generator"> (javadoc/…, MediaWiki …) nos primeiros 64 KiB; fonte única da detecção de gerador dos adaptadores (ADR-0009)
     ├── heading_extractor.py # extract_with_headings(), get_active_headings(), format_context_header() — formato dograpper-context-v1 (`title` só no layout page; `>` escrito como \u003e)
-    ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML; <pre> verbatim em bloco cercado com a linguagem das classes mw-highlight-lang-*/language-*/lang-*/highlight-* do <pre>, <code> ou div mais próxima que declare (PreCapture, render_text() compartilhados com heading_extractor)
+    ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML; <pre> verbatim em bloco cercado com a linguagem das classes mw-highlight-lang-*/language-*/lang-*/highlight-* do <pre>, <code> ou div mais próxima que declare (PreCapture, render_text() compartilhados com heading_extractor); markdown=True (md): MarkdownStripper/render_markdown() escrevem títulos #, links [texto](href) (sem âncora da própria página nem esquema fora de http/https/mailto), listas -/N. aninhadas (item com bloco sai sem marcador) e tabelas pipe uma linha por linha, em tempo linear; escape_link_text() compartilhado com o INDEX.md
     ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs() (marcador depois de um link Markdown, nunca no destino)
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
     ├── portable_names.py   # FORBIDDEN (caracteres proibidos pelo HTTrack → _), claim_unique() (colisão casefold → -N), resolve_under() (caminho real contido na raiz) — regras de nome compartilhadas por lib/httrack/naming.py e o layout por página do pack (ADR-0010)
@@ -89,7 +89,7 @@ src/dograpper/
     ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
-    └── word_counter.py     # count_words() e count_words_file()
+    └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora) e count_words_file()
 tests/
 ├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl e test_download_cascade)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
@@ -130,6 +130,7 @@ tests/
 ├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, registros de API, CLI
 ├── test_link_extractor.py  # Link extraction, cross-ref index, annotation, CLI integration
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
+├── test_markdown_render.py # Markdown do md (#87): títulos, links, listas, tabelas, tempo linear, offsets de título, contagem sem marcação, pack md/txt/jsonl/page
 ├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
 ├── test_page_layout.py     # Layout por página: nomes portáveis e colisões, títulos (sufixo, h1 fora do container, stem), INDEX.md literal, exit 2 de flags só-chunk (CLI e config), posse de pages/ (rebuild, exit 1, falha preserva), delta/cross-refs/score/tokens/dry-run, sync
 ├── test_pack.py            # word_counter, ignore_parser, chunker, write_chunks, CLI integration
@@ -201,6 +202,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |
 | `tests/test_init_wizard.py` | Antes de alterar `commands/init.py` ou os presets `TARGETS` |
+| `tests/test_markdown_render.py` | Antes de alterar o modo `markdown` de `utils/html_stripper.py`, `count_words(markdown=True)` em `utils/word_counter.py` ou a escolha md/plain em `lib/chunker.py`, `lib/page_layout.py`, `lib/pack_scoring.py` e `commands/pack.py` |
 | `tests/test_link_extractor.py` | Antes de alterar `utils/link_extractor.py` ou a lógica de cross-refs em `commands/pack.py` |
 | `tests/test_scorer.py` | Antes de alterar `utils/scorer.py` ou a lógica de score em `commands/pack.py` |
 | `tests/test_readiness_report.py` | Antes de alterar `utils/readiness_report.py` ou a lógica de `--report` em `commands/pack.py` |

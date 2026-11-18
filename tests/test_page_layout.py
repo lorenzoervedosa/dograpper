@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from dograpper.cli import cli
 from dograpper.lib import page_layout
 from dograpper.lib.page_layout import assign_page_paths, page_titles
+from dograpper.utils.word_counter import count_words
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +203,8 @@ def test_index_lists_every_page_once_in_the_adr_format(tmp_path):
     result = _pack("docs", "-o", "out", "--layout", "page")
     assert result.exit_code == 0, result.output
     lines = _read("out/INDEX.md").split("\n")
-    words = {rel: len(_read(f"out/pages/{rel}").split()) for rel in
+    # md pages are Markdown: their "##" heading markers are not words (#87).
+    words = {rel: count_words(_read(f"out/pages/{rel}"), markdown=True) for rel in
              ("ActionGroup.md", "Help_Style_guide.md", "Modding.md", "Modding/vi.md")}
     assert lines == [
         "# Index",
@@ -402,8 +404,9 @@ def test_cross_refs_point_at_page_paths(tmp_path):
     })
     result = _pack("docs", "-o", "out", "--layout", "page", "--cross-refs")
     assert result.exit_code == 0, result.output
-    assert "Beta page [-> pages/sub/b.md]" in _read("out/pages/a.md")
-    assert "Alpha [-> pages/a.md]" in _read("out/pages/sub/b.md")
+    # md keeps the link as written (#87); the marker names the page file.
+    assert "[Beta page](sub/b.html) [-> pages/sub/b.md]" in _read("out/pages/a.md")
+    assert "[Alpha](../a.html) [-> pages/a.md]" in _read("out/pages/sub/b.md")
     refs = json.loads(_read("out/cross_refs.json"))
     assert refs["pages/a.md"]["references_to"] == ["pages/sub/b.md"]
     assert "[->" not in _read("out/INDEX.md")
@@ -479,7 +482,7 @@ def test_context_header_is_written_once_at_the_top_of_each_page(tmp_path):
                              "schema_version"}, data
         assert f"), {data['word_count']} words" in index
         body = text.split("\n-->\n\n", 1)[1]
-        assert data["word_count"] == len(body.split())
+        assert data["word_count"] == count_words(body, markdown=True)
     data = _header("out/pages/Help_Style_guide.md")
     assert data["title"] == "Help:Style guide"  # " - PZwiki" suffix stripped
     assert data["source"] == "Help_Style_guide.html"

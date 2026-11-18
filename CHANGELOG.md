@@ -139,6 +139,15 @@ and fixes alone are a PATCH bump.
   in a note. The GitHub Action's manifest moves into `input-dir` and is left
   out of the source-file drift list; a repo-root one from earlier runs is no
   longer read. ([#95])
+- `pack --format md` (the default) writes each HTML page's structure as
+  Markdown: `#`–`######` headings, `[text](target)` links with the `href` as
+  the page wrote it, `-` / `N.` list items with nesting, and pipe tables with
+  one line per row. A link to the same page, or with a scheme other than
+  `http`, `https` or `mailto`, keeps only its text; a list item holding a
+  block is written as its blocks. Counts leave the markup out (context
+  headers, `INDEX.md`, `llm-readiness.json`), and `--max-words-per-chunk`
+  measures each page's plain text, as for `txt`. `--dedup` compares a table
+  or a list as one block. `txt` and `jsonl` output is unchanged. ([#87])
 
 ### Fixed
 

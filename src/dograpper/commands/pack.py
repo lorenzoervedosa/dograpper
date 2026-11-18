@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import exclude_subtree, filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
-from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, read_source_text
+from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, is_html, read_source_text
+from ..utils.word_counter import count_words
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +392,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         api_split = split_api_pages(filtered_paths, input_dir)
         for line in format_kept_whole(api_split, bool(ctx.obj.get('VERBOSE'))):
             click.echo(line, err=True)
+    # md renders HTML as Markdown (#87); every count below leaves its markup out.
+    markdown = fmt == 'md'
 
     # 7. Deduplication (opt-in, before chunking)
     dedup_stats = None
@@ -406,13 +409,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             if api_split is not None and rel in api_split.records:
                 continue  # split pages bypass dedup (ADR-0009, #68)
             try:
-                processed_texts[rel] = read_source_text(fpath, no_extract=no_ext)
+                processed_texts[rel] = read_source_text(fpath, no_extract=no_ext, markdown=markdown)
             except Exception:
                 continue
 
         dedup_result = deduplicate(processed_texts, mode=dedup_mode, hamming_threshold=dedup_thresh)
         dedup_stats = dedup_result.stats
-        dedup_word_counts = {rp: len(t.split()) for rp, t in dedup_result.texts.items()}
+        dedup_word_counts = {
+            rp: count_words(t, markdown and is_html(rp))
+            for rp, t in dedup_result.texts.items()}
         dedup_text_overrides = dedup_result.texts
 
     # 7a. A split page's text is its records: it sizes the chunks and feeds ranking and scoring
@@ -442,7 +447,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                         raw = fh.read()
                     if not no_ext:
                         raw = _extract_ctx(raw)
-                    doc = extract_with_headings(raw, source_path=rel)
+                    doc = extract_with_headings(raw, source_path=rel, markdown=markdown)
                     heading_map[rel] = doc.headings
                     # Use doc.text for consistent offsets (only if dedup didn't override)
                     if rel not in dedup_text_overrides:
@@ -620,6 +625,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             heading_map=heading_map,
             text_overrides=dedup_text_overrides,
             with_report=is_report,
+            markdown=markdown,
         )
         readiness_scores = scoring.scores
         report_pages = scoring.report_pages
@@ -650,7 +656,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             chunks, input_dir=input_dir, output_dir=output_dir, no_extract=no_ext,
             text_overrides=dedup_text_overrides,
             url_map=url_resolution.urls if url_resolution else None,
-            readiness_map=readiness_map, annotate=annotate, with_header=ctx_header)
+            readiness_map=readiness_map, annotate=annotate, with_header=ctx_header,
+            markdown=markdown)
     else:
         write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate, api_records=api_split.records if api_split else None)
 

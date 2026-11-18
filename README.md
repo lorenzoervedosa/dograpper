@@ -469,7 +469,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--include-extensions` | — | `html,htm,md,txt` | Extensions packed as documentation (csv). Other files are skipped and counted by extension in the summary. `robots.txt` and dograpper's own manifests are always skipped |
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
-| `--format` | — | `md` | Output format: `txt`, `md`, `jsonl`, `xml` (deprecated — errors, use `md`) |
+| `--format` | — | `md` | Output format: `md` (Markdown: `#` headings, `[text](target)` links, `-` / `N.` lists, pipe tables, fenced code; see [Markdown structure](#markdown-structure-md)), `txt` (plain text), `jsonl` (plain text records), `xml` (deprecated — errors, use `md`) |
 | `--layout` | — | `chunk` | `chunk`: numbered chunk files. `page`: one file per page under `pages/` plus `INDEX.md` (see [Page layout](#page-layout---layout-page)) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
@@ -530,6 +530,37 @@ none is declared or the class is a placeholder (`highlight-default`,
 `highlight-none`, `language-none`). The fence grows past any backtick run in
 the code. `txt` and `jsonl` carry the code without the fence. Dedup and
 chunking treat a code block as one unit, blank lines included.
+
+#### Markdown structure (`md`)
+
+`md` writes the structure of each HTML page as Markdown. `txt` and `jsonl`
+keep plain text, unchanged.
+
+- `h1`–`h6` become `#`–`######` lines.
+- A link becomes `[text](target)`, with the `href` as the page wrote it: a
+  relative target names a file of the mirror (`Lua_(API).html`), an absolute
+  one is kept. A target holding parentheses is written as `<...>`; spaces,
+  `<`, `>`, `\` and control characters are percent-encoded. A link to the same
+  page (`#anchor`, or `page.html#anchor` as mirrors rewrite it), with no
+  target, or with a scheme other than `http`, `https` or `mailto`
+  (`javascript:`, `data:`...) keeps only its text.
+- `ul` / `ol` items become `-` / `N.` lines (an `ol`'s `start` is kept), with
+  nested lists indented under their item. An item that holds a block (a
+  heading, a `div`, a table or code, as Javadoc's member sections do) is
+  written as its blocks, without a marker.
+- A table becomes a pipe table with one line per row. Its first row is the
+  header, and `|` inside a cell is escaped. A one-line `<pre>` in a cell
+  becomes a code span, and a list in a cell is written inline. A table whose
+  cell holds multi-line code, a heading or another table is written one cell
+  per paragraph instead, so the code block keeps its lines.
+- Word counts leave the markup out: heading and list markers, table pipes and
+  the delimiter row are not words (context headers, `INDEX.md`,
+  `llm-readiness.json`). `--max-words-per-chunk` measures each page's plain
+  text, as for `txt`, so both formats put pages in the same chunks.
+- Dedup and chunking treat a list or a table as one block, so `--dedup`
+  removes a table repeated on several pages as a whole.
+- `--cross-refs` writes its marker after the link it labels:
+  `[Item](Item.html) [-> docs_chunk_02]`.
 
 #### Deduplication (`--dedup`)
 
@@ -1296,7 +1327,7 @@ longer read and can be deleted once `input-dir` holds the new one.
 
 | Artifact | Flag | Description |
 |----------|------|-----------|
-| `docs_chunk_*.md` | (default) | Markdown chunks |
+| `docs_chunk_*.md` | (default) | Markdown chunks (headings, links, lists, tables, code) |
 | `docs_chunk_*.jsonl` | `--format jsonl` | One JSON line per source file |
 | `pages/**/*.md` | `--layout page` | One file per page, mirroring the input tree (`.txt` with `--format txt`) |
 | `INDEX.md` | `--layout page` | One line per page: title, path, word count, URL |
