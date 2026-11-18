@@ -22,7 +22,7 @@ from ..utils.atomic_write import atomic_write_bytes
 from ..utils.generator import SCAN_CHARS
 from ..utils.heading_extractor import format_context_header
 from ..utils.html_stripper import DEFINITION, escape_link_text, split_definitions
-from ..utils.mediawiki import _CONFIG, is_mediawiki
+from ..utils.mediawiki import page_config
 from ..utils.portable_names import FORBIDDEN, claim_unique, resolve_under
 from ..utils.redact import neutralize_controls
 from ..utils.word_counter import count_words, count_words_file
@@ -180,11 +180,9 @@ def _link_pages(text: str, rel: str, page_of: dict) -> str:
 
 def _page_name(path: str):
     """The MediaWiki page name (``wgPageName``) of the page at ``path``, or None."""
-    # shortcut: a second read of the JS config that utils/mediawiki.find_redirect_aliases
-    # parses; move this there once that module is free to change.
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
         head = fh.read(SCAN_CHARS)
-    return dict(_CONFIG.findall(head)).get("wgPageName") if is_mediawiki(head) else None
+    return page_config(head).get("wgPageName")
 
 
 def _alias_pages(aliases, input_dir: str, page_of: dict) -> dict:

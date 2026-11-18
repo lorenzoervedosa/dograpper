@@ -68,6 +68,11 @@ def page_metadata(html: str) -> dict:
     return {"version": scan.category_versions[0]} if scan.category_versions else {}
 
 
+def page_config(head: str) -> dict:
+    """``wgPageName`` / ``wgRedirectedFrom`` from a MediaWiki page head; ``{}`` for any other page."""
+    return dict(_CONFIG.findall(head)) if is_mediawiki(head) else {}
+
+
 def find_redirect_aliases(paths) -> list:
     """The redirect aliases among ``paths`` whose content another of ``paths`` already holds.
 
@@ -83,7 +88,7 @@ def find_redirect_aliases(paths) -> list:
                 head = fh.read(SCAN_CHARS)
         except OSError:
             continue  # unreadable files are reported by the stage that reads them
-        config = dict(_CONFIG.findall(head)) if is_mediawiki(head) else {}
+        config = page_config(head)
         name = config.get("wgPageName")
         if name and "wgRedirectedFrom" in config:
             aliases.setdefault(name, []).append(path)
