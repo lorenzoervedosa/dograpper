@@ -5,6 +5,7 @@ from dograpper.utils import dep_resolver  # noqa: F401 — triggers ensure_playw
 import os
 import logging
 import time
+from html.parser import HTMLParser
 from urllib.parse import urlparse, urljoin
 from dataclasses import dataclass
 from typing import List, Any
@@ -21,6 +22,20 @@ class CrawlResult:
     files_downloaded: List[str]
     errors: List[str]
     files_skipped: int = 0
+
+
+class _Hrefs(HTMLParser):
+    """``<a href>`` values of a page saved by an earlier run."""
+
+    def __init__(self):
+        super().__init__()
+        self.hrefs: List[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        href = dict(attrs).get("href") if tag == "a" else None
+        if href:
+            self.hrefs.append(href)
+
 
 def run_playwright_crawl(
     url: str,
@@ -64,6 +79,22 @@ def run_playwright_crawl(
     files_skipped = 0
     
     extensions = [ext.strip().lower() for ext in include_extensions.split(',') if ext.strip()]
+
+    def follow(links, current_url, current_depth):
+        for link in links:
+            parsed_link = urlparse(link)
+            if parsed_link.netloc == base_domain or not parsed_link.netloc:
+                absolute_link = urljoin(current_url, link)
+                
+                # Strip fragments
+                absolute_link = urlparse(absolute_link)._replace(fragment="").geturl()
+                
+                # a link past --depth is dropped later anyway: not a filter decision
+                within_depth = depth == 0 or current_depth < depth
+                if absolute_link not in visited and not (
+                        within_depth and filters is not None
+                        and filters.decide(absolute_link) is False):
+                    to_visit.append((absolute_link, current_depth + 1))
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -100,6 +131,11 @@ def run_playwright_crawl(
                             files_skipped += 1
                             files_downloaded.append(expected_full_path)
                             skip_download = True
+                            # its links still lead on, or the crawl would end here
+                            hrefs = _Hrefs()
+                            with open(expected_full_path, encoding='utf-8', errors='replace') as f:
+                                hrefs.feed(f.read())
+                            follow(hrefs.hrefs, current_url, current_depth)
                         break
                         
             if skip_download:
@@ -143,21 +179,7 @@ def run_playwright_crawl(
                 links = page.evaluate('''() => {
                     return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
                 }''')
-                
-                for link in links:
-                    parsed_link = urlparse(link)
-                    if parsed_link.netloc == base_domain or not parsed_link.netloc:
-                        absolute_link = urljoin(current_url, link)
-                        
-                        # Strip fragments
-                        absolute_link = urlparse(absolute_link)._replace(fragment="").geturl()
-                        
-                        # a link past --depth is dropped later anyway: not a filter decision
-                        within_depth = depth == 0 or current_depth < depth
-                        if absolute_link not in visited and not (
-                                within_depth and filters is not None
-                                and filters.decide(absolute_link) is False):
-                            to_visit.append((absolute_link, current_depth + 1))
+                follow(links, current_url, current_depth)
                             
             except Exception as e:
                 logger.error(f"Error crawling {current_url}: {e}")

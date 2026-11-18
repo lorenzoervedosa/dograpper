@@ -514,6 +514,33 @@ def test_playwright_skips_cached():
         del sys.modules['playwright']
         del sys.modules['playwright.sync_api']
 
+def test_playwright_follows_the_links_of_a_cached_page():
+    """A page skipped as cached still leads to the pages it links to; otherwise
+    an incremental crawl would stop at its first cached page."""
+    import sys
+    mock_sync_api = MagicMock()
+    mock_p = mock_sync_api.sync_playwright.return_value.__enter__.return_value
+    mock_page = mock_p.chromium.launch.return_value.new_context.return_value.new_page.return_value
+    mock_page.content.return_value = "<html><body>next</body></html>"
+    mock_page.evaluate.return_value = []
+    sys.modules['playwright'] = MagicMock()
+    sys.modules['playwright.sync_api'] = mock_sync_api
+    try:
+        m = Manifest("http://target.com", "", {
+            "index.html": ManifestEntry("http://target.com", 100)})
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "index.html"), "w") as f:
+                f.write('<html><body><a href="/next#top">n</a>'
+                        '<a href="http://other.com/x">o</a></body></html>')
+            from dograpper.lib.playwright_crawl import run_playwright_crawl
+            res = run_playwright_crawl("http://target.com", d, manifest_data=m)
+            assert [c.args[0] for c in mock_page.goto.call_args_list] == ["http://target.com/next"]
+            assert res.files_skipped == 1
+    finally:
+        del sys.modules['playwright']
+        del sys.modules['playwright.sync_api']
+
+
 def test_playwright_bounded_hydration_uses_selector_wait():
     """Verify bounded-hydration ordering: goto → wait_for_selector('a[href]') → 500ms grace."""
     import sys

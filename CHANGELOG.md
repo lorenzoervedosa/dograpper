@@ -183,6 +183,8 @@ and fixes alone are a PATCH bump.
   longer split a code block at a blank line, and `--score` counts a fenced
   block as intact even when its code holds backticks or a `<pre>` sample.
   ([#86])
+- `download`'s Playwright layer follows the links of a page it skips as
+  cached on an incremental run, instead of ending the crawl there. ([#94])
 
 ### Security
 
