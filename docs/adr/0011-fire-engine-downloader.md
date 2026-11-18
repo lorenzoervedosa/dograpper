@@ -117,6 +117,18 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   status, o `Content-Type` e o `Content-Length` que o curl leu (`CURLINFO`), e
   o writer aborta a transferência sem guardar nem cobrar o corpo.
 
+## Estado da decisão (2026-11-18)
+
+Entregue pelas fatias 1 e 2: itens 1 e 2 da decisão, com um proxy único vindo
+de `--proxy` (ou da chave `proxy` do `.dograpper.json`), sem escalonamento.
+**O item 3, a resolução manual de desafio em navegador real, ainda não foi
+implementado**, embora a fatia 1 o listasse:
+quando o start URL (ou toda URL semeada) continua desafiado mesmo com o
+fingerprint de navegador, a execução falha alto (exit 1) e a mensagem manda
+tentar `--proxy` com outro IP ou `--downloader wget`; uma página desafiada no
+meio do crawl só entra no relatório. A decisão continua valendo; falta a fatia
+que a entrega.
+
 ## Consequências
 
 - `download`/`sync` ganham `--downloader fire-engine` e as flags do perfil; o
