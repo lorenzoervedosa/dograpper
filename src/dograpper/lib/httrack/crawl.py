@@ -259,6 +259,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     # written file -> (redirected?, seed): of several seeds reaching one file, the one
     # that needed no redirect, else the smallest, whichever thread wrote first
     requested: dict[str, tuple[bool, str]] = {}
+    writing: dict[str, threading.Event] = {}  # file -> set once its write ended, either way
     pages: dict[str, str] = {}  # written HTML file -> URL it came from, for relink
     reached: list[tuple[str, str]] = []  # (seed or final URL, file it reached)
     seeds = list(dict.fromkeys(urls))
@@ -311,13 +312,20 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 report.filtered.append(safe)
             return "scoped"
         key = (url != seed, seed)
-        with lock:
-            if path in written or path in kept:  # same final URL reached from several seeds
-                requested[path] = min(requested[path], key)
-                reached.append((seed, path))
-                return "written"
-            written.add(path)
-            requested[path] = key
+        while True:
+            with lock:
+                if path in kept or (path in written and path not in writing):
+                    # same final URL reached from several seeds
+                    requested[path] = min(requested[path], key)
+                    reached.append((seed, path))
+                    return "written"
+                if path not in writing:
+                    written.add(path)
+                    writing[path] = threading.Event()
+                    requested[path] = key
+                    break
+                pending = writing[path]
+            pending.wait()  # another seed is writing this file: count as written only if it lands
         try:
             atomic_write_bytes(path, res.body)
         except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
@@ -326,6 +334,9 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 del requested[path]
                 report.errors.append((safe, f"write failed: {exc}", None))
             return "refused"
+        finally:
+            with lock:
+                writing.pop(path).set()
         with lock:
             size[0] += len(res.body)
             fields[path] = record_of(res)

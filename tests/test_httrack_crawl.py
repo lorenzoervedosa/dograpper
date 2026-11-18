@@ -582,3 +582,34 @@ def test_seed_redirect_target_is_requested_as_htsmirror_c_requests_it(server, tm
     assert "Referer" not in spy.sent["/old"] and "Referer" not in spy.sent["/doc"]
     # the report names the referrer of the failed request, as htsmirror.c:462-482 logs it
     assert [e for e in res.report.errors] == [(f"{base}/missing", "HTTP 404", f"{base}/gone")]
+
+
+def test_failed_write_leaves_no_seed_counted_for_the_shared_file(server, tmp_path, monkeypatch):
+    """Two seeds reaching one file: the write fails, so neither counts as written (#134)."""
+    from dograpper.lib.httrack import crawl
+
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (301, {"location": "/t"}, b"")
+    script["/b"] = (301, {"location": "/t"}, b"")
+    script["/t"] = (200, HTML, b"<p>t</p>")
+    second_seed_done, first = threading.Event(), threading.Event()
+    real_reporter = crawl.ProgressReporter
+
+    class Reporter(real_reporter):
+        def update(self, *a, **kw):  # run() calls it when a seed has an outcome
+            second_seed_done.set()
+            super().update(*a, **kw)
+
+    def failing_write(path, body):
+        if not first.is_set():  # the first writer holds the claim until the other seed
+            first.set()         # has an outcome; a seed that must wait for the write never
+            second_seed_done.wait(1)  # does, so the bound only ends the wait
+        raise OSError("disk full")
+
+    monkeypatch.setattr(crawl, "ProgressReporter", Reporter)
+    monkeypatch.setattr(crawl, "atomic_write_bytes", failing_write)
+    res = run([f"{base}/a", f"{base}/b"], tmp_path, connections=2)
+    assert res.files_downloaded == [] and res.urls == {} and res.records == {}
+    assert res.front_failed
+    assert [e[1].startswith("write failed") for e in res.report.errors] == [True, True]
