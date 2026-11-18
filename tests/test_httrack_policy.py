@@ -181,6 +181,20 @@ def test_referer_is_sent_without_userinfo_or_fragment_and_escaped(page, want):
     assert got["Referer"] == want
 
 
+@pytest.mark.parametrize("page,site", [
+    ("https://h.test:99999/", "same-origin"),
+    ("https://h.test:x/", "same-origin"),
+    ("https://h.test:0/", "same-origin"),
+    ("https://docs.h.test:99999/", "same-site"),
+])
+def test_referer_with_unusable_port_keeps_the_scheme_default(page, site):
+    # htsfetch.c origin_of: "a port out of range keeps the scheme default"; never a ValueError
+    assert policy._fetch_site(page, "https", "h.test") == site
+    got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
+                               scheme="https"))
+    assert got["Sec-Fetch-Site"] == site and got["Referer"] == page
+
+
 @pytest.mark.parametrize("page", ["https://[bad/a", "https://h.test/\ud800"])
 def test_unusable_referer_is_dropped_not_raised(page):
     got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
