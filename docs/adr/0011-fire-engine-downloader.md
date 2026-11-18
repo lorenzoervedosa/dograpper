@@ -100,6 +100,13 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   do curl_cffi, o `--timeout` vira opções do curl com a semântica do timeout de
   socket da stdlib: para conectar, depois sem receber nada por `--timeout`
   segundos (nunca a duração total da transferência).
+- **Credenciais do proxy fora da URL.** O curl cita na mensagem de erro a URL
+  de proxy que não consegue usar ("Unsupported proxy scheme for '...'"), e a
+  mensagem vai para o relatório. Por isso `user:senha` sai da URL do `--proxy`
+  (autoridade lida como o curl lê: esquema opcional, até o primeiro `/`, `?`
+  ou `#`; percent-decode) e vai ao curl como opções próprias (`proxy_auth` do
+  curl_cffi): nenhuma mensagem do curl pode conter a credencial, e a URL do
+  proxy que aparece no erro ainda passa por `redact_url`.
 
 ## Consequências
 

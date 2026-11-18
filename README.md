@@ -547,7 +547,7 @@ request. All `[httrack]` flags above apply, plus:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--proxy` | — | One proxy URL for every request (`http://user:pass@host:port`) |
+| `--proxy` | — | One proxy URL for every request (`http://user:pass@host:port`); its credentials go to curl apart from the URL, so no error or report line shows them |
 | `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`) |
 
 Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install

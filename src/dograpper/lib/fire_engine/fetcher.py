@@ -13,8 +13,9 @@ compressed body meets the same limits as on the stdlib path.
 imported lazily, only when a session is first created.
 """
 import math
-from urllib.parse import urlunsplit
+from urllib.parse import unquote, urlunsplit
 
+from ...utils.redact import redact_url
 from ..httrack.fetcher import MAX_BODY_BYTES, Fetcher, wire_host
 
 # Of the httrack request headers, only the request-specific ones go to curl; the
@@ -27,6 +28,27 @@ _MISSING = (
     "curl_cffi is required for --downloader fire-engine. "
     "Install it with: uv sync --extra fire-engine"
 )
+
+
+def split_proxy(proxy: str | None) -> tuple[str | None, tuple[str, str] | None]:
+    """(`proxy` without user:password, (user, password) percent-decoded, or None). The
+    authority is read as curl reads it: an optional scheme://, then up to the first /, ?
+    or #. The credentials go to curl as options (curl_cffi proxy_auth), so they are never
+    inside a URL its error messages quote."""
+    if not proxy:
+        return proxy, None
+    head, sep, rest = proxy.partition("://")
+    if not sep:  # curl takes a bare user:password@host:port as http
+        head, rest = "", proxy
+    end = min((i for i in map(rest.find, "/?#") if i >= 0), default=len(rest))
+    userinfo, at, host = rest[:end].rpartition("@")
+    if not at:
+        return proxy, None
+    url = head + sep + host + rest[end:]
+    if not userinfo:
+        return url, None
+    user, _, password = userinfo.partition(":")
+    return url, (unquote(user), unquote(password))
 
 
 class CurlCffiMissing(RuntimeError):
@@ -57,7 +79,7 @@ class CurlCffiFetcher(Fetcher):
     def __init__(self, policy, *, proxy: str | None = None,
                  impersonate: str = "chrome", session_factory=None, **kw):
         super().__init__(policy, **kw)
-        self._proxy = proxy
+        self._proxy, self._proxy_auth = split_proxy(proxy)
         self._impersonate = impersonate
         self._session_factory = session_factory or _default_session_factory
 
@@ -92,9 +114,13 @@ class CurlCffiFetcher(Fetcher):
         try:
             # timeout=None: the session's curl_options set the stdlib-like timeouts
             resp = session.request("GET", url, headers=req_headers, proxies=proxies,
-                                   timeout=None, allow_redirects=False, content_callback=write)
+                                   proxy_auth=self._proxy_auth, timeout=None,
+                                   allow_redirects=False, content_callback=write)
         except Exception as exc:  # curl transport error -> inherited retry path
             if size > MAX_BODY_BYTES:
                 raise ValueError("body too large") from None
-            raise OSError(f"curl_cffi: {type(exc).__name__}: {exc}") from exc
+            msg = f"curl_cffi: {type(exc).__name__}: {exc}"
+            if self._proxy:  # curl quotes a proxy URL it cannot use (credentials are not in it)
+                msg = msg.replace(self._proxy, redact_url(self._proxy))
+            raise OSError(msg) from exc
         return resp.status_code, {k.lower(): v for k, v in resp.headers.items()}, b"".join(chunks)

@@ -20,7 +20,7 @@ from click.testing import CliRunner
 from dograpper.cli import cli
 from dograpper.lib.fire_engine import fetcher as fire_fetcher
 from dograpper.lib.fire_engine.fetcher import (CurlCffiFetcher, _MISSING,
-                                               _default_session_factory)
+                                               _default_session_factory, split_proxy)
 from dograpper.lib.httrack import fetcher as httrack_fetcher
 from dograpper.lib.httrack.policy import build_policy, decoder_module
 
@@ -87,14 +87,31 @@ def test_get_returns_decoded_body_and_passes_impersonate():
     assert url == "https://example.com/docs/"
 
 
-def test_proxy_is_forwarded_to_the_session():
+def test_proxy_is_forwarded_to_the_session_with_its_credentials_apart():
+    """The credentials leave the proxy URL for curl's proxy username/password options:
+    curl quotes a proxy URL it cannot use in its errors, which reach the run report."""
     fetcher, session, _ = make_fetcher(FakeResp(), proxy="http://user:pw@proxy:8080")
 
     fetcher.get("https://example.com/", kind="navigate")
 
     _m, _u, kw = session.calls[0]
-    assert kw["proxies"] == {"http": "http://user:pw@proxy:8080",
-                             "https": "http://user:pw@proxy:8080"}
+    assert kw["proxies"] == {"http": "http://proxy:8080", "https": "http://proxy:8080"}
+    assert kw["proxy_auth"] == ("user", "pw")
+
+
+@pytest.mark.parametrize("proxy,url,auth", [
+    ("http://proxy:8080", "http://proxy:8080", None),
+    ("socks5h://u:p@proxy:1080", "socks5h://proxy:1080", ("u", "p")),
+    ("user:s3cret@proxy:8080", "proxy:8080", ("user", "s3cret")),  # no scheme: curl's http
+    ("http://user:s3cret@proxy:8080/p@th?q=@#@", "http://proxy:8080/p@th?q=@#@",
+     ("user", "s3cret")),  # an @ past the authority is not userinfo
+    ("http://us%3Aer:s3%40cr%3Aet@proxy:8080", "http://proxy:8080", ("us:er", "s3@cr:et")),
+    ("http://us@er:s3cret@proxy:8080", "http://proxy:8080", ("us@er", "s3cret")),
+    ("http://user@proxy:8080", "http://proxy:8080", ("user", "")),
+    ("http://@proxy:8080", "http://proxy:8080", None),
+])
+def test_split_proxy_reads_the_authority_as_curl_does(proxy, url, auth):
+    assert split_proxy(proxy) == (url, auth)
 
 
 def test_no_proxy_means_no_proxies_kwarg_value():
@@ -487,3 +504,49 @@ def test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout(trickle):
 
     assert (slow.status, slow.body, slow.error) == (200, b"x" * 300, None)
     assert hung.status is None and "(28)" in hung.error
+
+
+@pytest.mark.parametrize("proxy", [
+    # proxies curl cannot use: it quotes the URL it was given in its error (0.17.0)
+    "bogus://user:s3cret@127.0.0.1:1",
+    "http://user:s3cret@[bad:1",
+    "user:s3cret@[bad:1",  # no scheme
+    "bogus://user:s3%40cret@127.0.0.1:1/p@th",  # percent-encoded, an @ in the path
+])
+def test_real_proxy_credentials_are_never_in_curls_error(server, proxy):
+    base, _script, _ = server
+
+    res = real_fetcher(proxy=proxy).get(base + "/x", kind="navigate")
+
+    assert res.status is None and "curl: (" in res.error
+    for secret in ("s3cret", "s3%40cret", "s3@cret", "user"):  # the password alone too
+        assert secret not in res.error
+
+
+def test_real_percent_encoded_proxy_password_is_decoded_for_the_proxy(server):
+    base, script, _ = server
+    log = []
+    script["http://docs.example.invalid/page"] = recorded(log, (200, {}, b"via proxy"))
+    proxy = base.replace("http://", "us%3Aer:p%40ss@")  # no scheme either
+
+    res = real_fetcher(proxy=proxy).get("http://docs.example.invalid/page", kind="navigate")
+
+    assert (res.status, res.body) == (200, b"via proxy")
+    assert log[0]["Proxy-Authorization"] == "Basic " + base64.b64encode(b"us:er:p@ss").decode()
+
+
+def test_real_proxy_credentials_stay_out_of_the_report(server, tmp_path):
+    """A proxy curl cannot use fails every request, and the report lists the errors: the
+    password must not be in what the run prints, even with --verbose."""
+    pytest.importorskip("curl_cffi")
+    base, script, _ = server
+    _docs_site(script)
+    out = str(tmp_path / "mirror")
+
+    result = CliRunner().invoke(
+        cli, ["--verbose", "download", f"{base}/docs/", "-o", out, "--downloader", "fire-engine",
+              "--proxy", "bogus://user:s3cret@127.0.0.1:1", "--retries", "0", *FAST])
+
+    assert result.exit_code == 1
+    assert "Unsupported proxy scheme for 'bogus://127.0.0.1:1'" in result.output
+    assert "s3cret" not in result.output
