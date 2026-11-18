@@ -59,6 +59,11 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `download` manifest entries record `url` as `<scheme>://<host dir>/<saved
+  path>` instead of appending the path to the seed URL, which doubled a seed's
+  path segment (`.../PZ-API-Docs/PZ-API-Docs/index.html`) or glued paths onto a
+  page seed. A saved name with `?` (wget query pages) now gets `"url": null`,
+  and `pack --context-header` leaves `url` out for such sources. ([#94])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
@@ -147,3 +152,4 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#94]: https://github.com/lorenzoervedosa/dograpper/issues/94

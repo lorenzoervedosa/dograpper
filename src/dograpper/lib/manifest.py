@@ -7,13 +7,14 @@ import logging
 from dataclasses import dataclass, asdict, field, fields
 from typing import Dict, Optional
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class ManifestEntry:
-    url: str
+    # None when the URL cannot be rebuilt from the saved path (see build_manifest).
+    url: Optional[str]
     size_bytes: int
     etag: Optional[str] = None
     last_modified: Optional[str] = None
@@ -78,13 +79,20 @@ def build_manifest(base_url: str, output_dir: str) -> Manifest:
     The on-disk location — which typically includes the ``<netloc>`` directory
     created by wget — is preserved in ``local_path`` so callers can still find
     the file when re-running.
+
+    The fetched URL is not recorded per file, so ``url`` is rebuilt from
+    ``local_path`` as ``<seed scheme>://<host dir>/<rest>``; the seed's path is
+    never used. A ``.html`` added by ``--adjust-extension`` cannot be told apart
+    from a real one on disk, so the saved name is kept. ``url`` is None when
+    there is no seed scheme or host directory, or when the saved name has a
+    ``?``: wget decodes the query (``%26`` and ``&`` both save as ``&``).
     """
     files = {}
     last_run = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
-    clean_base = base_url.rstrip('/')
     parsed_base = urlparse(base_url)
     netloc = parsed_base.netloc
+    scheme = parsed_base.scheme
 
     for root, _, filenames in os.walk(output_dir):
         for f in filenames:
@@ -102,13 +110,19 @@ def build_manifest(base_url: str, output_dir: str) -> Manifest:
             else:
                 url_rel = fs_rel
 
-            url_approx = f"{clean_base}/{url_rel}" if url_rel else clean_base
+            host, sep, path = fs_rel.partition('/')
+            url = None
+            if scheme and sep and '?' not in path:
+                # shortcut: "%" is kept because Playwright saves paths still
+                # escaped; a literal "%" wget decoded from %25 comes out wrong.
+                path = quote(path, safe="/:@!$&'()*+,;=%", errors='surrogateescape')
+                url = f"{scheme}://{host}/{path}"
             key = url_rel or fs_rel
 
             mtime = os.path.getmtime(full_path)
 
             files[key] = ManifestEntry(
-                url=url_approx,
+                url=url,
                 size_bytes=size,
                 etag=None,
                 last_modified=None,
