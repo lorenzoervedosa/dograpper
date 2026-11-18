@@ -72,6 +72,13 @@ and fixes alone are a PATCH bump.
   size matches but mtime disagrees, instead of trusting mtime alone; the
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
+- `pack --dedup` no longer deletes a page's own content. A block is never
+  removed against another block of the same page, in any mode, and `fuzzy`
+  keeps a near-duplicate that starts with a different token (a key, tag or
+  parameter name) or differs only in numbers (a version banner, a date). The
+  summary and the `--dry-run` report gain a `Matches kept` line counting the
+  blocks each rule kept. A block identical on several pages, an identical
+  version banner included, is still kept only on the first. ([#89])
 
 ### Security
 
@@ -147,3 +154,4 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#89]: https://github.com/lorenzoervedosa/dograpper/issues/89
