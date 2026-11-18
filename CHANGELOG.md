@@ -88,8 +88,8 @@ and fixes alone are a PATCH bump.
   stylesheets and scripts, as HTTrack writes them ([#133]). A run over an earlier one is
   an update, as HTTrack `-C2`: each saved file is revalidated with
   `If-None-Match` / `If-Modified-Since` from its manifest record (new manifest
-  fields `status`, `content_type`, `redirected`; `etag` and `last_modified`
-  filled in), a 304 or an error leaves the previous copy byte-identical, and
+  fields `status`, `content_type`, `redirected` and `payload_md5`, the MD5 of
+  the body as received; `etag` and `last_modified` filled in), a 304 or an error leaves the previous copy byte-identical, and
   the summary adds `Not modified (304)`, `Kept the previous copy after an
   error` and `Not reached this run, kept on disk`. `--cache` picks HTTrack's
   cache mode (`-C`, default `2` over a manifest, else `1`): `1` loads each

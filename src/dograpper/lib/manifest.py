@@ -44,10 +44,12 @@ class ManifestEntry:
     # The httrack profile's record of the response the file was saved from, which its
     # update mode revalidates (etag and last_modified above too); None from the other
     # downloaders and in manifests written before. `redirected`: `url` reached the file
-    # through a redirect, whose target is never recorded.
+    # through a redirect, whose target is never recorded. `payload_md5`: the MD5 of the
+    # body as received, before links were rewritten, which `--changes` compares.
     status: Optional[int] = None
     content_type: Optional[str] = None
     redirected: Optional[bool] = None
+    payload_md5: Optional[str] = None
 
 @dataclass
 class Manifest:
@@ -57,7 +59,8 @@ class Manifest:
 
 _ENTRY_FIELDS = {f.name for f in fields(ManifestEntry)}
 # What a downloader records per file (build_manifest's `records`).
-RECORD_FIELDS = ('status', 'content_type', 'etag', 'last_modified', 'redirected')
+RECORD_FIELDS = ('status', 'content_type', 'etag', 'last_modified', 'redirected',
+                 'payload_md5')
 
 
 def read_manifest(path: str) -> Manifest:

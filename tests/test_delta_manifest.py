@@ -609,7 +609,8 @@ def test_manifest_without_the_record_fields_still_loads(tmp_path):
                    "last_modified": None, "local_path": "h.example/a.html", "mtime": 0,
                    "future_field": 1}}}))
     entry = load_manifest(str(path)).files["a.html"]
-    assert (entry.status, entry.content_type, entry.redirected) == (None, None, None)
+    assert (entry.status, entry.content_type, entry.redirected, entry.payload_md5) == (
+        None, None, None, None)
     save_manifest(load_manifest(str(path)), str(path))
     assert json.loads(path.read_text())["files"]["a.html"]["status"] is None
 

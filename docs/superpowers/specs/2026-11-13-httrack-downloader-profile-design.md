@@ -328,9 +328,12 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   `Last-Modified` of the response the file was saved from, and whether that URL
   reached the file through a redirect. ETag and Last-Modified are kept as HTTrack
   keeps them: under 64 characters, with the response's `Date` standing for a
-  missing `Last-Modified` (`src/htslib.c:1632-1653`). `ManifestEntry` gains
-  `status`, `content_type` and `redirected` in a backward-compatible way: old
-  manifests still load.
+  missing `Last-Modified` (`src/htslib.c:1632-1653`). The record also keeps the
+  MD5 of the payload as received, before `-K0` rewrote its links: it stands for
+  the body HTTrack's cache keeps, which `--changes` compares
+  (`src/htschanges.c:299-345`; #132). `ManifestEntry` gains `status`,
+  `content_type`, `redirected` and `payload_md5` in a backward-compatible way:
+  old manifests still load.
 - **Link rewriting (`-K0`, #133):** once every name is known, every saved page,
   stylesheet and script is written again with each link HTTrack records
   rewritten: the link attributes, and the links the script scans and `-%P`

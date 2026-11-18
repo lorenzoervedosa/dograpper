@@ -626,8 +626,10 @@ file with the validators the manifest recorded (see "Updates" under
 [Downloader profiles](#downloader-profiles)). For the files it saves, the
 httrack and fire-engine profiles also record the response's `status`, `content_type`, `etag`
 and `last_modified` (the `Date` when the server sent no `Last-Modified`), and
-`redirected` when the requested URL reached the file through a redirect; the
-other downloaders leave these `null`. A file a run did not touch keeps what
+`redirected` when the requested URL reached the file through a redirect, and
+`payload_md5`, the MD5 of the body as received (before its links were
+rewritten), which `--changes` compares; the other downloaders leave these
+`null`. A file a run did not touch keeps what
 an earlier run recorded.
 
 The manifest lives in the output directory: a relative `--manifest`

@@ -1,3 +1,4 @@
+import hashlib
 import os
 import threading
 
@@ -376,7 +377,8 @@ def test_first_run_records_what_a_revalidation_needs(server, tmp_path):
     res = run([f"{base}/a", f"{base}/d", f"{base}/old"], tmp_path)
     recs = {os.path.basename(p): r for p, r in res.records.items()}
     assert recs["a.html"] == {"status": 200, "content_type": "text/html", "etag": '"a1"',
-                              "last_modified": LM, "redirected": False}
+                              "last_modified": LM, "redirected": False,
+                              "payload_md5": hashlib.md5(b"<p>a</p>").hexdigest()}
     assert recs["d.html"]["etag"] is None and recs["d.html"]["last_modified"].endswith(" GMT")
     assert recs["new.html"]["redirected"] is True and recs["new.html"]["etag"] == '"n1"'
 
@@ -838,3 +840,17 @@ def test_do_not_recatch_leaves_an_erased_file_empty_without_a_request(server, tm
                                  (f"{base}/n.txt", "null-size file not recaught", None)]
     again_ = run_update(seeds, tmp_path, again(res, base, tmp_path), "html,txt")
     assert open(n, "rb").read() == b"notes" and again_.kept == []  # off: "recatching"
+
+
+def test_the_record_keeps_the_md5_of_the_payload_as_received(server, tmp_path):
+    """--changes compares a parsed page by its payload, the body before -K0 rewrote its
+    links (htschanges.c:299-345); the record keeps that MD5, the file on disk differs."""
+    base, script, _ = server
+    body = b'<a href="b">b</a>'
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, HTML, body)
+    script["/b"] = (200, HTML, b"<p>b</p>")
+    res = run([f"{base}/a", f"{base}/b"], tmp_path)
+    a = next(f for f in res.files_downloaded if f.endswith("a.html"))
+    assert open(a, "rb").read() != body  # relinked
+    assert res.records[a]["payload_md5"] == hashlib.md5(body).hexdigest()

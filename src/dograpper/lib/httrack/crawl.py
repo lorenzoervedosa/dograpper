@@ -1,5 +1,6 @@
 """Seeded-list fetch for the httrack profile: fetch each URL, write only clean 2xx bodies."""
 
+import hashlib
 import logging
 import os
 import re
@@ -184,10 +185,12 @@ def sends(p: Previous | None, url: str, redirected: bool, names: NameRegistry | 
 
 
 def record_of(res: FetchResult) -> dict:
-    """RECORD_FIELDS of the 2xx response `res` a file is saved from ("redirected" aside)."""
+    """RECORD_FIELDS of the 2xx response `res` a file is saved from ("redirected" aside),
+    with the MD5 of its payload as received (HTTrack --changes, htschanges.c:299-345)."""
     etag, last_modified = response_validators(res.headers)
     return {"status": res.status, "content_type": res.headers.get("content-type"),
-            "etag": etag, "last_modified": last_modified}
+            "etag": etag, "last_modified": last_modified,
+            "payload_md5": hashlib.md5(res.body).hexdigest()}
 
 
 _MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec"
