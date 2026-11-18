@@ -1,5 +1,6 @@
 """lib/httrack/links.py: HTTrack's link extraction, dedup key and link rewriting."""
 
+import gc
 import logging
 import time
 
@@ -504,9 +505,14 @@ def _cpu(fn, body: bytes) -> float:
     # second copy of tests/test_api_reference.py _assert_linear's measure (#126); factor out on the third
     best = float("inf")
     for _ in range(3):
-        t0 = time.process_time()
-        fn(body)
-        best = min(best, time.process_time() - t0)
+        gc.collect()
+        gc.disable()
+        try:
+            t0 = time.process_time()
+            fn(body)
+            best = min(best, time.process_time() - t0)
+        finally:
+            gc.enable()
     return best
 
 
