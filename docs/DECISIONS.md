@@ -35,6 +35,27 @@ Entry format:
   that switches to `2` over a manifest).
 - **Pending:** none.
 
+- **Decision:** HTTrack's change report (`-%d` / `--changes`,
+  `hts-changes.json`) is not ported in #132; it stays under the spec's "Known
+  gaps".
+- **Why:** HTTrack sorts a parsed page into `changed` or `unchanged` by the MD5
+  of its payload, the previous one read from the body its cache holds
+  (`src/htschanges.c:299-345`), because the saved copy carries rewritten
+  links. dograpper keeps no cache body, and its saved pages carry `-K0` links,
+  so a page whose links were rewritten differently would read as `changed`.
+  Porting it faithfully needs a new manifest field, a choice for the
+  maintainer rather than a deviation invented here.
+- **Rejected:** comparing the saved bytes (an unapproved deviation that
+  over-reports `changed`); porting it with no page comparison at all.
+- **Pending:** pick one: (a, recommended) record the MD5 of each parsed page's
+  payload in its manifest record (one new `RECORD_FIELDS` entry) and compare
+  that, which reproduces HTTrack; (b) compare the saved bytes and record the
+  deviation in spec §5.6; (c) leave `-%d` out of the profile. Either port also
+  adds `hts-changes.json` to the state files `pack` and `build_manifest` skip,
+  writes it only for a run that ends without a front failure (HTTrack: only a
+  completed run, `src/htscore.c:2360-2367`), and reports `first_crawl: null`
+  under `--cache 0`.
+
 - **Decision:** `--updatehack` decides at the headers through a `stop`
   predicate of `Fetcher.get`, passed to `_request` only when set;
   `CurlCffiFetcher._request` honors it too, in curl's writer (#130): at the

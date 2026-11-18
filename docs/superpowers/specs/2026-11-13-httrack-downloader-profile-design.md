@@ -553,8 +553,12 @@ README and CHANGELOG.
    `wget --mirror` under the profile.
 3. **Incremental.** Manifest records and conditional revalidation, with the
    previous copy kept on failure.
-   - **Status: implemented (wave 5).** Behavior and deviations in §5.6; the
-     opt-in cache options left are under "Known gaps".
+   - **Status: implemented (wave 5).** Behavior and deviations in §5.6.
+   - **Wave 6 (#132):** the cache modes (`--cache`, HTTrack `-C`), the update
+     hacks (`--updatehack`, `-%s`), do-not-recatch (`--do-not-recatch`,
+     `-%n`) and file times from `Last-Modified`. The change report (`-%d`,
+     `hts-changes.json`) is left under "Known gaps", pending a decision on how
+     to compare parsed pages (`docs/DECISIONS.md`, 2026-11-18).
 4. **Playwright under the profile.**
    - Navigations go through `page.route` + `route.fetch()`.
    - A response carrying `cf-mitigated` or challenge markup is aborted
