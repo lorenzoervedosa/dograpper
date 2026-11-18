@@ -149,6 +149,22 @@ def test_diff_mtime_changed_different_hash_modified():
     assert diff.removed == []
 
 
+def test_diff_same_size_and_mtime_different_hash_modified():
+    """Size and mtime equal, content hash differs → modified (#132).
+
+    A downloader that stamps a file with its server time (the httrack profile
+    from Last-Modified, wget --timestamping) can rewrite it with other bytes of
+    the same length and the same time; build_manifest hashes every file anyway.
+    """
+    old = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=1.0, content_hash="abc123"),
+    })
+    new = Manifest("http://x", "2024", {
+        "a.html": ManifestEntry("http://x/a", 100, mtime=1.0, content_hash="def456"),
+    })
+    assert diff_manifests(old, new).modified == ["a.html"]
+
+
 def test_diff_old_entry_missing_hash_falls_back_to_mtime():
     """Backward compat: entries from a manifest written before the hash field
     existed have content_hash=None. Without a hash to compare, fall back to

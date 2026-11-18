@@ -220,6 +220,11 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack --delta` no longer reports "no files changed" when a file was rewritten
+  with other bytes of the same size and the same modification time, as a
+  downloader that stamps files with the server's time can leave it: the
+  content hashes decide whenever both pack states have them, and the mtime
+  only for a state written before hashes existed. ([#132])
 - `pack` skips a saved HTTP error page (a `<title>` such as `404 Not Found`
   and almost no other text, as a mirror stores when a URL answered an error),
   warns once with the affected files (also in `--dry-run` and `--layout page`),
@@ -471,3 +476,4 @@ and fixes alone are a PATCH bump.
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
 [#133]: https://github.com/lorenzoervedosa/dograpper/issues/133
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
+[#132]: https://github.com/lorenzoervedosa/dograpper/issues/132

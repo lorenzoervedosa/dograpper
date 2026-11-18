@@ -281,16 +281,17 @@ def diff_manifests(old: Optional[Manifest], new: Manifest) -> ManifestDiff:
             old_entry = old.files[key]
             if old_entry.size_bytes != new_entry.size_bytes:
                 modified.append(key)
-            elif old_entry.mtime == new_entry.mtime:
-                # Fast path: mtime unchanged, content assumed unchanged
-                # without hashing.
-                pass
             elif old_entry.content_hash is not None and new_entry.content_hash is not None:
-                # mtime changed but content hash is available on both sides:
-                # trust the hash, not the mtime (touch, cp without -p, a
-                # fresh git clone all churn mtime without changing bytes).
+                # A hash on both sides decides, whatever the mtime: touch, cp
+                # without -p or a fresh git clone churn mtime without changing
+                # bytes, and a downloader that stamps files with the server's
+                # time (httrack's Last-Modified) keeps it over new bytes.
                 if old_entry.content_hash != new_entry.content_hash:
                     modified.append(key)
+            elif old_entry.mtime == new_entry.mtime:
+                # Backward compat: no hash to compare, mtime unchanged, content
+                # assumed unchanged.
+                pass
             else:
                 # Backward compat: old_entry came from a manifest written
                 # before content_hash existed. Can't verify by hash, so fall
