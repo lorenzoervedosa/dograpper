@@ -28,6 +28,12 @@ def is_binary_path(path: str) -> bool:
     return ext.lower() in BINARY_EXTENSIONS
 
 
+def normalize_extensions(value) -> str:
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(x).strip().lstrip('.') for x in value if str(x).strip())
+    return str(value)
+
+
 def filter_files(file_paths: List[str], ignore_file: Optional[str], ignore_patterns: List[str], base_dir: str, skip_binary: bool = True) -> List[str]:
     """Applies pathspec validation filtering against `.docsignore` files and inline filters.
 

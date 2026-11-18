@@ -7,6 +7,7 @@ from typing import List, Tuple
 
 from ._httrack_profile import resolve_profile, run_httrack
 from ..lib.config_loader import load_config
+from ..lib.ignore_parser import normalize_extensions
 from ..lib.llms_txt_parser import fetch_llms_txt
 from ..lib.manifest import load_manifest, save_manifest, build_manifest, merge_manifests
 from ..lib.playwright_crawl import run_playwright_crawl
@@ -63,12 +64,6 @@ def _compute_stats(
         else:
             unchanged += 1
     return touched, unchanged
-
-
-def _normalize_extensions(value) -> str:
-    if isinstance(value, (list, tuple)):
-        return ",".join(str(x).strip().lstrip('.') for x in value if str(x).strip())
-    return str(value)
 
 
 def _discover_urls(url: str, depth: int, fetch=None,
@@ -330,7 +325,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     depth = merged_params.get('depth', depth)
     headless = merged_params.get('headless', headless)
     delay = merged_params.get('delay', delay)
-    include_extensions = _normalize_extensions(
+    include_extensions = normalize_extensions(
         merged_params.get('include_extensions', include_extensions)
     )
     manifest_path = merged_params.get('manifest', manifest)
