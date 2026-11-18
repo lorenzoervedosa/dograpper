@@ -393,7 +393,10 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     new_manifest = build_manifest(url, output, fetched, previous=manifest_data,
                                   manifest_path=manifest_path)
     final_manifest = merge_manifests(manifest_data, new_manifest)
-    save_manifest(final_manifest, manifest_path)
+    try:
+        save_manifest(final_manifest, manifest_path)
+    except OSError as e:
+        raise click.ClickException(f"Failed to save manifest to {manifest_path}: {e}")
 
     total_size = sum(f.size_bytes for f in final_manifest.files.values())
 

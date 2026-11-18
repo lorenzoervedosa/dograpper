@@ -667,7 +667,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     if is_delta and current_state is not None:
         from ..lib.manifest import save_manifest
 
-        save_manifest(current_state, os.path.join(output_dir, PACK_STATE_FILENAME))
+        try:
+            save_manifest(current_state, state_path)
+        except OSError as e:
+            raise click.ClickException(f"Failed to save pack state to {state_path}: {e}")
 
     # 11. Summary footprint calculation
     files_processed = sum(len(c.files) for c in chunks)

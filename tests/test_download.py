@@ -1172,3 +1172,26 @@ def test_download_prints_failed_urls_summary():
         assert res.exit_code == 0
         assert "Failed: 7 URLs" in res.output and "first 5" not in res.output
         assert "http://x.io/p6: 404" in res.output
+
+
+def test_download_exits_nonzero_when_manifest_is_unwritable(tmp_path):
+    """#113: a lost manifest loses the incremental download, so it must not exit 0."""
+    from click.testing import CliRunner
+    from dograpper.cli import cli
+    from dograpper.lib.wget_mirror import WgetResult
+
+    out = tmp_path / "docs"
+    page = out / "h.example" / "a.html"
+    page.parent.mkdir(parents=True)
+    page.write_text("<html><body><h1>A</h1></body></html>")
+    (out / ".dograpper-manifest.json").mkdir()
+    other = out / "h.example" / "b.html"
+    other.write_text("<html><body><h1>B</h1></body></html>")
+    with patch('dograpper.commands.download.run_wget_mirror',
+               return_value=WgetResult(True, str(out), [str(page), str(other)], [], 0, [], {})), \
+            patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        result = CliRunner().invoke(cli, ['download', 'https://h.example/', '-o', str(out)])
+
+    assert result.exit_code == 1, result.output
+    assert str(out / ".dograpper-manifest.json") in result.output

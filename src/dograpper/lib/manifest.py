@@ -10,6 +10,7 @@ from typing import Dict, Optional
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from ..utils.atomic_write import atomic_write_bytes
 from ..utils.redact import recordable_url
 from .ignore_parser import DOGRAPPER_STATE_NAMES
 
@@ -108,13 +109,9 @@ def find_manifest(input_dir: str, name: str) -> Optional[str]:
 
 
 def save_manifest(manifest: Manifest, path: str) -> None:
-    """Save manifest to disk."""
-    d = asdict(manifest)
-    try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(d, f, indent=2)
-    except Exception as e:
-        logger.error(f"Failed to save manifest to {path}: {e}")
+    """Save manifest to disk atomically. Raises OSError when the write fails."""
+    atomic_write_bytes(path, json.dumps(asdict(manifest), indent=2).encode('utf-8'))
+
 
 def build_manifest(base_url: str, output_dir: str,
                    fetched: Optional[Dict[str, str]] = None,

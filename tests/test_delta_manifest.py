@@ -578,3 +578,47 @@ def test_context_header_uses_recorded_urls_and_skips_missing_ones(tmp_path):
     assert records["pz-wiki-modding.github.io/PZ-API-Docs/index.html"]["url"] == \
         "https://pz-wiki-modding.github.io/PZ-API-Docs/index.html"
     assert "url" not in records["pz-wiki-modding.github.io/PZ-API-Docs/q?x=1.html"]
+
+
+# --- #113: manifest writes fail loud and atomically ---
+
+def test_save_manifest_raises_on_write_failure(tmp_path):
+    import pytest
+    from dograpper.lib.manifest import Manifest
+
+    target = tmp_path / "m.json"
+    target.mkdir()  # a directory cannot be replaced by a file
+    with pytest.raises(OSError):
+        save_manifest(Manifest(base_url='', last_run='', files={}), str(target))
+
+
+def test_save_manifest_interrupted_write_keeps_previous_file(tmp_path, monkeypatch):
+    import pytest
+    from dograpper.lib.manifest import Manifest
+
+    target = tmp_path / "m.json"
+    save_manifest(Manifest(base_url='old', last_run='', files={}), str(target))
+    before = target.read_bytes()
+
+    def interrupted(src, dst):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "replace", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        save_manifest(Manifest(base_url='new', last_run='', files={}), str(target))
+
+    assert target.read_bytes() == before
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_pack_delta_exits_nonzero_when_pack_state_is_unwritable(tmp_path):
+    input_dir = tmp_path / "docs"
+    input_dir.mkdir()
+    (input_dir / "a.html").write_text("<html><body><main><h1>A</h1><p>alpha beta</p></main></body></html>")
+    out = tmp_path / "out"
+    (out / "pack_state.json").mkdir(parents=True)
+
+    result = CliRunner().invoke(pack, [str(input_dir), '-o', str(out), '--delta'])
+
+    assert result.exit_code == 1
+    assert str(out / "pack_state.json") in result.output

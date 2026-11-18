@@ -128,6 +128,11 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `download` and `pack --delta` exit 1 with the path in the message when the
+  manifest (`.dograpper-manifest.json`) or `pack_state.json` cannot be written,
+  instead of logging an error and exiting 0; both files are now written
+  atomically, so an interrupted run keeps the previous one.
+  ([#113](https://github.com/lorenzoervedosa/dograpper/issues/113))
 - `pack` never reads its own output: when `-o` lies inside `INPUT_DIR` (the
   default for `sync`, `<output>/chunks`), that subtree is left out of the input
   and reported once as `Excluded own output directory: N file(s) under ...`,

@@ -1142,6 +1142,8 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
+| 1 | download | the manifest cannot be written | fix permissions or free space in `--output`; the mirror itself is complete |
+| 1 | pack --delta | `pack_state.json` cannot be written | fix permissions or free space in `--output`; the chunks are complete, the next `--delta` run packs in full |
 | 2 | pack | `--output` is the same directory as `INPUT_DIR` | use a subdirectory or another path |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
