@@ -156,10 +156,13 @@ def format_context_header(
     url: str = "",
     readiness: dict = None,
     title: str = "",
+    metadata: dict = None,
 ) -> str:
     """Format a dograpper-context-v1 header for injection into chunks.
 
     ``title`` is written only by the page layout (ADR-0010), as the first field.
+    ``metadata`` holds the flat page fields a generator adapter read
+    (``version``, ``version_status`` for MediaWiki, #88); they follow ``url``.
 
     Returns formatted header string ending with \\n\\n, or empty string
     if no context is available.
@@ -174,6 +177,8 @@ def format_context_header(
         payload["source"] = source_path
     if url:
         payload["url"] = url
+    if metadata:
+        payload.update(metadata)
     if total_chunks > 1:
         payload["chunk_index"] = chunk_index
         payload["total_chunks"] = total_chunks

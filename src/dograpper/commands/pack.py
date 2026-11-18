@@ -427,13 +427,16 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         dedup_word_counts = {**(dedup_word_counts or {}),
                              **{rel: len(t.split()) for rel, t in api_texts.items()}}
 
-    # 7b. Extract headings for context-header or scoring (opt-in, before chunking)
+    # 7b. Extract headings (and page metadata, #88) for context-header or scoring (opt-in, before chunking)
     heading_map = None
+    page_meta = None
     if ctx_header or is_score:
         from ..utils.heading_extractor import extract_with_headings
         from ..utils.content_extractor import extract_content as _extract_ctx
+        from ..utils.mediawiki import page_metadata
 
         heading_map = {}
+        page_meta = {}
         # Initialize text_overrides if not already set by dedup, so the writer
         # uses the same text from which heading offsets were calculated.
         if dedup_text_overrides is None:
@@ -445,6 +448,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                 try:
                     with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
                         raw = fh.read()
+                    page_meta[rel] = page_metadata(raw)
                     if not no_ext:
                         raw = _extract_ctx(raw)
                     doc = extract_with_headings(raw, source_path=rel, markdown=markdown)
@@ -657,9 +661,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             text_overrides=dedup_text_overrides,
             url_map=url_resolution.urls if url_resolution else None,
             readiness_map=readiness_map, annotate=annotate, with_header=ctx_header,
-            markdown=markdown)
+            markdown=markdown, page_meta=page_meta)
     else:
-        write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate, api_records=api_split.records if api_split else None)
+        write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate, api_records=api_split.records if api_split else None, page_meta=page_meta)
 
     # 10b. Delta report (opt-in, after write)
     if is_delta and diff is not None:

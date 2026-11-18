@@ -178,7 +178,7 @@ def _swap_in(new: str, dest: str) -> None:
 
 def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = False,
                 text_overrides=None, url_map=None, readiness_map=None, annotate=None,
-                with_header: bool = False, markdown: bool = False) -> str:
+                with_header: bool = False, markdown: bool = False, page_meta=None) -> str:
     """Write ``pages/`` and ``INDEX.md`` for ``page_chunks`` output. Returns the index path.
 
     ``markdown`` writes HTML pages as Markdown (md) and counts their words
@@ -209,7 +209,8 @@ def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = Fals
             if with_header:
                 text = format_context_header(
                     [], title=titles[rel], source_path=rel, word_count=words, url=url,
-                    readiness=(readiness_map or {}).get(chunk.page_path)) + text
+                    readiness=(readiness_map or {}).get(chunk.page_path),
+                    metadata=(page_meta or {}).get(rel)) + text
             dest = resolve_under(tmp, *chunk.page_path.split("/")[1:])
             if dest is None:
                 raise OSError(f"page path leaves {PAGES_DIR}/: {chunk.page_path}")

@@ -23,6 +23,8 @@ the comment; a JSON parser reads the original character back.
 | title | string | no | Page title, first field. Written only in the page layout: the `<head>` `<title>` minus the site suffix that ends more than half of the run's titles, else the first `h1` of the raw page, else the file stem. |
 | source | string | yes | Relative path of the source file |
 | url | string | no | Original URL: the download manifest entry (the URL dograpper requested for the file; after a redirect still the requested one, never the redirect target, which may carry a signed token), else the page's HTTrack or saved-from marker (validated). Omitted when neither yields one. |
+| version | string | no | Page metadata (MediaWiki pages, [#88](https://github.com/lorenzoervedosa/dograpper/issues/88)): the build the page says it was written for, from its version banner (`This page was last updated for an older version of the current build (42.10.0).` gives `42.10.0`), else its first hidden `Version X` category. The banner then leaves the page text. Omitted when the page states no version. |
+| version_status | string | no | Page metadata, with `version` when it comes from the banner: `current` (revised for the current stable version), `outdated` (an older version of the current build) or `older-build` (a version of an earlier build). Omitted when the version comes from a category or is unknown. |
 | chunk_index | int | no | Sub-chunk position (1-based). Omitted if file is not split. |
 | total_chunks | int | no | Total sub-chunks for this file. Omitted if file is not split. |
 | word_count | int | no | Word count of this chunk's content (excluding header). In `md`, the Markdown markup (heading and list markers, table pipes and delimiter row) is not counted |
@@ -33,20 +35,24 @@ the comment; a JSON parser reads the original character back.
 ### Page layout header
 
 A page is never split, so its header (`--layout page --context-header`)
-holds `title`, `source`, `url` (when known), `word_count` (the whole page)
-and `llm_readiness` (with `--score`). It never holds `chunk_index`,
+holds `title`, `source`, `url` (when known), the page metadata (`version`,
+`version_status`, when known), `word_count` (the whole page) and
+`llm_readiness` (with `--score`). It never holds `chunk_index`,
 `total_chunks` or `context_breadcrumb`, and it carries no heading outline:
 `grep -n '^#' page.md` gives the headings with their line numbers. Page
-metadata fields that later adapters add are flat and optional
-([ADR-0010](adr/0010-per-page-pack-layout.md)).
+metadata fields are flat and optional, and follow `url`
+([ADR-0010](adr/0010-per-page-pack-layout.md)); the chunk layout writes them
+in every header of the page's sub-chunks.
 
 ```
 <!-- dograpper-context-v1
 {
-  "title": "Help:Style guide",
-  "source": "Help_Style_guide.html",
-  "url": "https://pzwiki.net/wiki/Help:Style_guide",
-  "word_count": 4273,
+  "title": "ActionGroup",
+  "source": "ActionGroup.html",
+  "url": "https://pzwiki.net/wiki/ActionGroup",
+  "version": "42.10.0",
+  "version_status": "outdated",
+  "word_count": 105,
   "schema_version": "v1"
 }
 -->
@@ -86,6 +92,8 @@ content.
 | symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). |
 | container | string | no | Member records only. Qualified name of the container that declares the member. |
 | generator | string | no | API records only. The adapter that split the page: `javadoc`. |
+| version | string | no | Page metadata of a MediaWiki page, as in the header above. Present with `--context-header` or `--score`, only when the page states its version. |
+| version_status | string | no | As in the header above. Same condition as `version`, and only when the version comes from the banner. |
 
 ### API records (`--api-records`)
 

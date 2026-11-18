@@ -116,8 +116,12 @@ and fixes alone are a PATCH bump.
   before extraction: navigation boxes (`navbox`), section edit links
   (`mw-editsection`) and maintenance boxes (stub, outdated, "help update"
   boxes with their `Edit (Create account)` links) leave the text; note boxes
-  stay. Pages from any other generator are extracted exactly as before.
-  ([#88])
+  stay. The version banner leaves the text too: the context header (both
+  layouts) and the JSONL records gain the optional page metadata fields
+  `version` and `version_status` (`current`, `outdated`, `older-build`),
+  read from the banner, else from the first hidden `Version X` category.
+  Pages from any other generator are extracted exactly as before.
+  ([schema](docs/schema-v1.md), [#88])
 
 ### Changed
 
@@ -212,6 +216,11 @@ and fixes alone are a PATCH bump.
   summary and the `--dry-run` report gain a `Matches kept` line counting the
   blocks each rule kept. A block identical on several pages, an identical
   version banner included, is still kept only on the first. ([#89])
+- `pack --dedup` no longer deletes the version banner of a MediaWiki page
+  because an earlier page carries the same one (as text, 137 banners became
+  29 under `exact` on a 167-page wiki): the version is now page metadata in
+  the context header, out of the text dedup reads, so with `--context-header`
+  every page keeps its `version`. ([#88], [#89])
 - `pack --cross-refs` annotates each page's own content, for the links that
   page holds, as the chunk is written, instead of the first occurrence of the
   link text anywhere in the written chunk file. Markers no longer rewrite

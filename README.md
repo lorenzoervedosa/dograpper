@@ -526,8 +526,12 @@ their wiki chrome first: navigation boxes (`navbox`), section edit links
 (`mw-editsection`) and maintenance boxes (an `mbox` with a
 `mw-customtoggle-mbox-*` toggle: stub, outdated, "help update") are cut from
 the page before the steps above. Note boxes, which have no toggle, stay.
-Pages from any other generator are not touched. Measured on MediaWiki 1.43
-(Citizen skin).
+The version banner (`This page was last updated for an older version of the
+current build (42.10.0).`) leaves the text too and becomes page metadata,
+`version` and `version_status`, in the context header; without a banner, the
+first hidden `Version X` category gives `version`. A version box whose
+wording is not one of the three known ones stays in the text. Pages from any
+other generator are not touched. Measured on MediaWiki 1.43 (Citizen skin).
 
 Code blocks (`<pre>`) keep their line breaks and indentation, with or
 without extraction. `md` writes each one as a fenced block whose language
@@ -600,8 +604,9 @@ A match never removes a block when:
 
 The summary's `Matches kept` line counts the blocks each rule kept. A
 block identical on several pages is still kept only on the first, even
-when it is per-page metadata such as a version banner with the same
-version.
+when it is per-page metadata. A MediaWiki version banner never reaches
+dedup: it is header metadata (see Smart extraction), so with
+`--context-header` every page keeps its `version`.
 
 On API reference corpora (Javadoc, TypeDoc, rustdoc, Doxygen) `--dedup`
 can remove real members: a signature and doc comment that several types
@@ -631,9 +636,10 @@ Injects structured metadata in the `dograpper-context-v1` format
 -->
 ```
 
-Optional fields (`url`, `llm_readiness`) are omitted when not available
-(they never appear as `null`). A `>` in a value is written as `\u003e`, so a
-value holding `-->` cannot close the comment. Full spec:
+Optional fields (`url`, `llm_readiness`, and the MediaWiki page metadata
+`version` and `version_status`, written after `url`) are omitted when not
+available (they never appear as `null`). A `>` in a value is written as
+`\u003e`, so a value holding `-->` cannot close the comment. Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
 
 In the page layout (`--layout page`) each page file gets exactly one header,
@@ -705,6 +711,8 @@ Schema (required fields in **bold**, optional in italics):
 - *`readiness_grade`* (with `--score`)
 - *`symbol`, `kind`, `symbol_kind`, `container`, `generator`* (with
   `--api-records`, on API records only; see below)
+- *`version`, `version_status`* (with `--context-header` or `--score`, for a
+  MediaWiki page that states its version; see Smart extraction)
 
 Field names diverge from the header format for word count, breadcrumb and
 readiness — see the full field-by-field spec, including the JSONL/header
@@ -923,7 +931,7 @@ out/
 | `--max-words-per-chunk`, `--max-chunks`, `--strategy`, `--prefix`, `--with-index`/`--no-index` | usage error (exit 2) when set on the CLI or in `.dograpper.json`, even to the default value |
 | `--bundle`, `--for-queries`, `--format jsonl`, `--api-records`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
 | `--delta` | the [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md) gate is unchanged; a run that passes it rebuilds `pages/` in full |
-| `--context-header` | one header at line 1 of each page file: `title`, `source`, `url`, `word_count`, `llm_readiness`; no breadcrumb or outline |
+| `--context-header` | one header at line 1 of each page file: `title`, `source`, `url`, `version`, `version_status`, `word_count`, `llm_readiness`; no breadcrumb or outline |
 | `--cross-refs` | markers name the page from the output root, `[-> pages/Target.md]`; `cross_refs.json` is keyed by page path |
 | `--score`, `--report` | one score per page; `chunk_id` in `llm-readiness.json` is the page path, stable across runs |
 | `--dry-run` | projects the page count; never needs or touches `pages/` |
