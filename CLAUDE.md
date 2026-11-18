@@ -244,18 +244,101 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_cli_help_coverage.py` | Antes de adicionar comando ou opção: ambos precisam de descrição/help escrito, dizendo o que fazem e o efeito do default |
 | `tests/test_cli_regression.py` | Antes de adicionar/renomear subcomando ou flag no help top-level — o baseline `tests/fixtures/help_baseline.txt` precisa ser regenerado |
 
-## Regras críticas
+## Contratos invioláveis
+
+Quebrar qualquer um é bug crítico. Cada contrato aponta o teste que o pina e a
+ADR que o registra; "sem teste" é lacuna conhecida, não licença. Contrato novo
+ou alterado entra aqui no mesmo PR, com teste — e ADR se for decisão
+arquitetural. A numeração é estável (outros arquivos citam "contrato N").
 
 1. **Dependências com problemas de compatibilidade devem ser opcionais.** Libs que exigem binários do sistema, compilação nativa problemática, ou que não funcionam em todos os ambientes (ex: playwright, que requer `playwright install chromium`) devem ser import condicional com mensagem de erro amigável. Dependências pip puras podem ser obrigatórias sem restrição.
+   ADR: `docs/adr/0004-optional-native-deps-conditional-import.md` · Teste: nenhum pina o import condicional (guardado por revisão).
 2. **Não usar repomix.** A concatenação de chunks é feita em Python puro. Essa é uma decisão arquitetural tomada — não reverter.
+   ADR: `docs/adr/0002-no-repomix-pure-python-concatenation.md` · Teste: nenhum (repomix não está em `pyproject.toml`).
 3. **Contagem de palavras, não bytes.** O chunking usa `len(text.split())` como métrica. Os limites do NotebookLM são em palavras. Não mudar para bytes.
+   ADR: `docs/adr/0003-word-count-not-bytes.md` · Testes: `tests/test_pack.py` (word_counter, chunker), `tests/test_boundary_chunking.py`.
 4. **Playwright nunca é import top-level.** Sempre import condicional dentro da função, com mensagem de erro amigável se ausente. Dependências pip puras (tiktoken, etc.) podem ser import top-level normalmente.
+   ADR: `docs/adr/0004-optional-native-deps-conditional-import.md` · Teste: nenhum (guardado por revisão).
 5. **Testes existentes não podem quebrar.** Qualquer mudança deve manter `uv run pytest tests/ -v` passando integralmente antes de commitar.
+   Pinado por: `.github/workflows/ci.yml` (matriz 3.10/3.12) e pelos gates abaixo.
 6. **Config precedência é inviolável**: defaults do click < `.dograpper.json` < flags CLI explícitas. Usa `ctx.get_parameter_source()` para distinguir. Não simplificar esse mecanismo.
+   Testes: `tests/test_config.py`, `tests/test_sync_precedence.py`, `tests/test_download_httrack_profile.py` (precedência das flags do perfil).
 7. **Encoding tolerante.** Leitura de arquivos sempre com `errors="replace"`. O CLI não deve crashar por causa de caracteres estranhos em HTMLs baixados.
+   Testes: `test_spa_detector_tolerates_invalid_utf8` (`tests/test_download.py`), `test_tolerant_encoding` (`tests/test_token_counter.py`), `test_pack_cli_excludes_binary_files` (`tests/test_pack.py`).
 8. Ignorar (não ler) tudo que estiver em `./temporario/`
+   Pinado por: `.claude/hooks/guard-temporario.sh` (PreToolUse; bloqueia escrita e edição, não leitura) · Teste: nenhum.
 9. **Mudança observável pelo usuário exige entrada no `CHANGELOG.md`**, em `## [Unreleased]`, no mesmo PR. Observável = superfície do CLI (comando, flag, output, exit code), arquivos escritos ou seu formato, comportamento da Action, ou requisito de instalação. `refactor`/`test`/`chore`/`ci`/`build`/`docs` não geram entrada — se gerariam, o commit foi tipado errado. A regra completa está no cabeçalho do `CHANGELOG.md`; `tests/test_changelog.py` guarda a parte mecânica.
+   Testes: `tests/test_changelog.py` (estrutura) · lembrete: `.claude/hooks/commit-doc-check.sh` em `feat`/`fix` sem `CHANGELOG.md`.
 10. **Release**: renomear `## [Unreleased]` para `## [X.Y.Z] - AAAA-MM-DD`, abrir uma `## [Unreleased]` vazia e bumpar `version` no `pyproject.toml` no mesmo commit. `dograpper --version` lê o metadata do pacote instalado — tag sem bump publica binário que se identifica errado.
+    Teste: `test_newest_release_matches_the_packaged_version` (`tests/test_changelog.py`).
+
+## Gates (dois níveis)
+
+A suíte inteira roda em ~15 s, então o contrato 5 vale por commit; o nível
+rápido é só para iterar.
+
+1. **Rápido (iteração):** `uv run pytest <testes dos módulos tocados> -q` — os
+   arquivos da tabela "Arquivos de contexto importantes" para cada módulo do
+   diff. Não vale quando o diff toca `lib/chunker.py`, `lib/config_loader.py`,
+   `utils/heading_extractor.py`, `commands/pack.py` ou `cli.py`: são
+   exercitados por dezenas de arquivos de teste (`commands/pack.py` é
+   importado direto por 18, `cli.py` por 21) — rode o nível 2 desde o primeiro
+   teste.
+2. **Completo (cada commit, obrigatório antes de push/PR):** `uv run pytest tests/ -q`
+   com `uv sync --extra dev --extra headless --extra httrack`, como o CI. Cada
+   commit da branch passa sozinho; quem monta o lote confere numa worktree
+   descartável (`git worktree add --detach <dir> <sha>`).
+
+Nunca mascare o exit code com pipe: `uv run pytest tests/ -q | tail` devolve o
+status do `tail`. Rode sem pipe, ou leia `${PIPESTATUS[0]}` (bash) /
+`${pipestatus[1]}` (zsh), ou use `set -o pipefail`.
+
+## Sessões paralelas (worktrees + PR por lote)
+
+Várias sessões de agente costumam rodar ao mesmo tempo neste repositório. O
+merge é sempre do mantenedor, por PR revisado; nenhuma sessão faz merge local
+nem push na `main` (o guarda `.claude/hooks/block-dangerous-git.py` bloqueia).
+
+- **Isolamento:** cada sessão trabalha numa worktree própria em
+  `.claude/worktrees/<nome>`, numa branch curta criada da base do lote
+  (`chore/<lote>-base` quando existe, senão `origin/main`). Nunca no checkout
+  principal.
+- **Trabalho que você não reconhece** (órfão, inacabado, divergência num
+  rebase) pode ser de outra sessão: deixe como está e reporte; ação
+  destrutiva só depois de confirmar com o usuário (regra global).
+- **Entrega:** um PR combinado por lote. Cada sessão entrega commits atômicos
+  na sua branch, sem push; a sessão integradora junta as branches, confere o
+  nível 2 em cada commit e abre o PR. Mudança que outra sessão também toca
+  (árvore e tabela deste arquivo, `CHANGELOG.md`) entra como bloco ou linha
+  isolada, para o merge ficar mecânico.
+- **PR já publicado e a `main` andou:** prefira `git merge origin/main` na
+  branch do PR. Rebase + `push --force-with-lease` reescreve commits
+  publicados e exige consentimento explícito a cada vez.
+- **Mutex — só se duas sessões escrevem a MESMA branch remota** (no fluxo
+  padrão só a integradora dá push, e ele não é usado). A seção crítica cobre
+  fetch + rebase/merge + push, nunca o desenvolvimento, e roda num único
+  comando de shell, com a liberação armada logo após o `mkdir`:
+
+  ```bash
+  until mkdir /tmp/dograpper-push-lock 2>/dev/null; do sleep 15; done
+  trap 'rmdir /tmp/dograpper-push-lock 2>/dev/null' EXIT; trap 'exit 130' INT TERM HUP
+  git fetch && git merge origin/main && uv run pytest tests/ -q && git push
+  ```
+
+  Lock com mais de 15 min é órfão: remova-o e registre em `docs/DECISIONS.md`.
+- **Limpeza local pós-merge** (o `delete_branch_on_merge` do GitHub está
+  desligado; worktree e branch local nunca são limpas sozinhas):
+  1. `git fetch --prune`.
+  2. Confirme que o trabalho está na `main`:
+     `git merge-base --is-ancestor <branch> origin/main`. Se o lote foi
+     montado por cherry-pick (SHAs novos), confira com
+     `git cherry origin/main <branch>` — só linhas `-` = patches já na `main`;
+     sobrou `+`, pare e pergunte.
+  3. `git worktree remove .claude/worktrees/<nome>` (sem `--force`: se
+     recusar por mudança não commitada, pare e pergunte) e `git worktree prune`.
+  4. `DOGRAPPER_BRANCH_MERGED=1 git branch -D <branch>` — pré-autorizado só
+     depois do passo 2; branch remota idem com
+     `DOGRAPPER_BRANCH_MERGED=1 git push origin --delete <branch>`.
 
 ## Padrões de commit e branch
 
