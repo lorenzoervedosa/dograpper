@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit
 
+from ...utils.challenge import is_challenge
 from ...utils.redact import drop_userinfo, redact_url
-from .challenge import is_challenge
 from .escape import request_target
 from .policy import ZSTD_MAX_WINDOW, HttrackPolicy, decoder_module, make_ssl_context, request_headers
 from .robots import NO_RULES, RobotsRules, parse_robots
