@@ -27,6 +27,9 @@ BLOCK_TAGS = frozenset({
 # What <br> leaves in the text until the prose is rendered: \s does not match it, so
 # whitespace collapsing keeps it. A page's own U+E000 is replaced by U+FFFD on the way in.
 _BR = "\ue000"
+# Same for the start of a table cell in plain text (#125): a tab, which text.split()
+# does not count as a word, where " | " would be one. md writes pipe tables instead.
+_TAB = "\ue001"
 
 # Classes naming a code block's language: MediaWiki (mw-highlight-lang-*),
 # Prism / highlight.js (language-*), lang-* and Sphinx (highlight-*). The name
@@ -120,6 +123,8 @@ class PreCapture:
 
 
 class HTMLStripper(HTMLParser):
+    cell_separator = True
+
     def __init__(self):
         super().__init__()
         self.reset()
@@ -135,6 +140,11 @@ class HTMLStripper(HTMLParser):
             self.ignore = True
         elif tag == "br" and not self.ignore and not self.pre.depth:
             self.text.append(_BR)
+        elif tag in ("td", "th") and self.cell_separator and not self.ignore and not self.pre.depth:
+            # at the start, not the end: </td> may be omitted. The leading one is stripped.
+            self.text.append(_TAB)
+        elif tag == "tr" and self.cell_separator and not self.ignore and not self.pre.depth:
+            self.text.append("\n\n")  # </tr> may be omitted too
         self.pre.starttag(tag, attrs)
 
     def handle_endtag(self, tag):
@@ -153,7 +163,7 @@ class HTMLStripper(HTMLParser):
         if self.pre.depth:
             self.pre.data(d)
         else:
-            self.text.append(d.replace(_BR, "\ufffd"))
+            self.text.append(d.replace(_BR, "\ufffd").replace(_TAB, "\ufffd"))
 
 
 def strip_html(text: str, markdown: bool = False, page: str = "") -> str:
@@ -218,12 +228,14 @@ def _flatten(parts: list):
 def _prose_blocks(data: str) -> list:
     # Unescape HTML entities that might be lingering
     # (an entity can decode to the marker here, so each piece is neutralized after decoding)
-    data = _BR.join(html.unescape(piece).replace(_BR, "\ufffd") for piece in data.split(_BR))
+    data = "".join(piece if i % 2 else html.unescape(piece).replace(_BR, "\ufffd").replace(_TAB, "\ufffd")
+                   for i, piece in enumerate(re.split(f"([{_BR}{_TAB}])", data)))
     # Collapse 3+ newlines into exactly 2 (preserve block separators)
     data = re.sub(r'\n{3,}', '\n\n', data)
     # Within each block, collapse whitespace (but not across \n\n boundaries)
     lines = data.split('\n\n')
-    lines = [re.sub(r' ?(?:\ue000 ?)+', '\n', re.sub(r'\s+', ' ', block)).strip() for block in lines]
+    lines = [re.sub(r' ?\ue001 ?', '\t', re.sub(r' ?(?:\ue000 ?)+', '\n', re.sub(r'\s+', ' ', block))).strip()
+             for block in lines]
     # Drop empty blocks
     return [block for block in lines if block]
 
@@ -371,6 +383,8 @@ class MarkdownStripper(HTMLStripper):
     untrusted pages. Missing end tags close what they imply, and whatever is
     still open at the end of the page is closed, so no text is lost.
     """
+
+    cell_separator = False  # cells are pipe-table cells here
 
     def __init__(self, page: str = ""):
         super().__init__()

@@ -212,6 +212,10 @@ and fixes alone are a PATCH bump.
 - `<br>` separates its neighbours instead of gluing them (`-debuglog=All-debuglog=Network,Sound`):
   a line break in body text (md and txt), and `; ` inside an md pipe-table cell, so the row stays
   on one line. Word counts are unchanged.
+- Plain-text output (`--format txt`, `jsonl`) separates the cells of a table row with a tab
+  (`debuglog<TAB>-debuglog=All`, not `debuglog-debuglog=All`). The tab is whitespace, so word counts
+  change only where gluing had merged two words. md is unchanged.
+  ([#125](https://github.com/lorenzoervedosa/dograpper/issues/125))
 - `pack` renders MediaWiki red links (`a.new`, `redlink=1` or `action=edit`
   targets) as plain text, so no `index.php?...&action=edit&redlink=1`
   destination reaches the output.

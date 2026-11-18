@@ -467,3 +467,36 @@ def test_br_does_not_add_words(markdown):
 @pytest.mark.parametrize("page", ["<p>onetwo</p>", "<p>one&#xE000;two</p>", "<p>one&amp;#xE000;two</p>"])
 def test_a_page_cannot_forge_a_br(page, markdown):
     assert "\n" not in strip_html(page, markdown=markdown)
+
+
+# ---------------------------------------------------------------------------
+# Plain-text table cells (#125)
+# ---------------------------------------------------------------------------
+
+ROW = "<table><tr><th>Name</th><th>Example</th></tr><tr><td>debuglog</td><td>-debuglog=All</td></tr></table>"
+
+
+def test_plain_text_separates_the_cells_of_a_row_with_a_tab():
+    assert strip_html(ROW) == "Name\tExample\n\ndebuglog\t-debuglog=All"
+
+
+def test_plain_text_keeps_empty_cells_and_drops_the_trailing_separator():
+    assert strip_html("<table><tr><td>a</td><td></td><td>b</td><td></td></tr></table>") == "a\t\tb"
+
+
+def test_plain_text_separates_cells_whose_end_tags_are_omitted():
+    assert strip_html("<table><tr><td>a<td>b<tr><td>c<th>d</table>") == "a\tb\n\nc\td"
+
+
+def test_plain_text_cell_separator_is_not_a_word():
+    assert count_words(strip_html(ROW)) == 4
+    assert count_words(strip_html("<table><tr><td>a b</td><td>c</td></tr></table>")) == 3
+
+
+def test_md_table_is_unchanged_by_the_plain_cell_separator():
+    assert md(ROW).splitlines()[-1] == "| debuglog | -debuglog=All |"
+
+
+@pytest.mark.parametrize("page", ["<p>onetwo</p>", "<p>one&#xE001;two</p>", "<p>one&amp;#xE001;two</p>"])
+def test_a_page_cannot_forge_a_cell_separator(page):
+    assert "\t" not in strip_html(page)
