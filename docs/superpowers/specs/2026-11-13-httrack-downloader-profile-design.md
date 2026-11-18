@@ -66,14 +66,15 @@ lose the wget path, which works well on the sites it already serves.
 - FTP, proxies, MPTCP, HTTP/2.
 - Fixing the suspected manifest path-duplication bug (open question 7 in the
   discovery note). It gets its own issue.
+- Challenge or CAPTCHA solving, JavaScript challenge execution, impersonating
+  a *browser's* TLS (JA3/JA4) or HTTP/2 fingerprint, and proxy rotation, **in
+  this profile**: HTTrack has none of them, and the profile stays identical
+  to HTTrack. HTTrack's *own* TLS configuration **is** reproduced; see §5.1.
+  They are not excluded from dograpper: another downloader may add them
+  (`docs/DECISIONS.md`, 2026-11-18).
 
 **Anti-goals (a failure even if it works)**
 
-- Automatic challenge or CAPTCHA solving, JavaScript challenge execution,
-  impersonating a *browser's* TLS (JA3/JA4) or HTTP/2 fingerprint, proxy
-  rotation. HTTrack has none of these either, so excluding them keeps the
-  profile identical. HTTrack's *own* TLS configuration **is** reproduced; see
-  §5.1.
 - Any regression in the `wget` profile or in `pack` consuming either profile's
   output.
 - A challenge page or error body ending up in the output directory, where
@@ -231,8 +232,8 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - challenge responses are never stored, are counted, and are listed in the
     report.
 - `/cdn-cgi/` paths are excluded from discovery.
-- **No automatic browser fallback on a challenge** (*call*, from the anti-goal
-  on challenge execution; HTTrack runs no JavaScript).
+- **No automatic browser fallback on a challenge** (*call*: HTTrack runs no
+  JavaScript, and this profile executes no challenge; see §2).
   - Under `httrack`, a challenged start URL, or challenged seeds when layers 1
     and 2 won, stops the run with exit 1.
   - The error message points to `--browser-login`.
@@ -435,8 +436,8 @@ accumulate under `[Unreleased]`.
    - That the honest UA is why HTTrack got through Cloudflare. In the one real
      run it did not prevent challenges.
    - That a stdlib `ssl` handshake will be treated like HTTrack's OpenSSL one.
-     The anti-goals forbid TLS impersonation, so the engine cannot be adjusted
-     to match.
+     This profile does not impersonate a browser's TLS (§2), so the engine
+     cannot be adjusted to match.
 
    Proposed "PR 0" spike, in two parts:
    - **(a) Offline, measures "identical":** a local TLS/HTTP server logs the
