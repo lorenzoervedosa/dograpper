@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from ..lib.config_loader import load_config
 from ..lib.ignore_parser import filter_files
-from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, read_source_text
+from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, format_chunk_index, read_source_text
 
 logger = logging.getLogger(__name__)
 
@@ -458,7 +458,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
             dr_scores = []
             for chunk in chunks:
-                chunk_id = f"{pref}{chunk.index:02d}"
+                chunk_id = f"{pref}{format_chunk_index(chunk.index, generated_chunk_count)}"
                 raw_total = 0
                 extracted_total = 0
                 headings_count = 0
