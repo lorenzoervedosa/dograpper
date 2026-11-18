@@ -104,6 +104,7 @@ src/dograpper/
     └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora, bloco de definições de link no fim) e count_words_file()
 tests/
 ├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl, test_httrack_mirror e test_download_cascade); a resposta pode ser um callable dos headers do pedido (GET condicional)
+├── linearity.py            # assert_linear()/cpu_time() — razão de tempo de CPU entre n e 4n (best of 3, GC desligado), fonte única dos testes de linearidade em entrada hostil (#126, #131, #135)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
 ├── test_api_reference.py   # --api-records: detecção/despacho, registros contêiner e membro sobre as fixtures javadoc 25 (tests/fixtures/javadoc) e Sphinx 9.2 autodoc (tests/fixtures/sphinx), markup não suportada, linearidade, CLI (erros de uso, dedup, --for-queries, --delta, serve)
 ├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo

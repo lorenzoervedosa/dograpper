@@ -1,6 +1,5 @@
 """lib/httrack/links.py: HTTrack's link extraction, dedup key and link rewriting."""
 
-import gc
 import logging
 import time
 
@@ -10,6 +9,7 @@ from dograpper.lib.httrack import jsscan as J
 from dograpper.lib.httrack.links import (
     css_links, page_links, rewrite_links, script_links, url_key)
 from dograpper.lib.httrack.policy import FetchMeta
+from tests.linearity import assert_linear
 
 PAGE = "https://h.test/docs/guide/intro.html"
 
@@ -501,21 +501,6 @@ def test_script_and_dirty_links_are_not_rewritten():
     assert _rewrite(html, local) == html
 
 
-def _cpu(fn, body: bytes) -> float:
-    # second copy of tests/test_api_reference.py _assert_linear's measure (#126); factor out on the third
-    best = float("inf")
-    for _ in range(3):
-        gc.collect()
-        gc.disable()
-        try:
-            t0 = time.process_time()
-            fn(body)
-            best = min(best, time.process_time() - t0)
-        finally:
-            gc.enable()
-    return best
-
-
 HOSTILE = {  # (head, piece repeated n times, tail, n): each must cost linear CPU time
     "unclosed-string": (b"<script>x.src=\"", b"a", b"", 20000),
     "unclosed-comment": (b"<script>/*", b"x.src='a.gif' ", b"", 20000),
@@ -538,8 +523,6 @@ def test_script_scans_are_linear_on_hostile_pages(name):
     # CPU time, not wall time: 4x the input may cost at most ~4x (quadratic would be 16x);
     # n is per shape, so each case stays short while a quadratic scan of it still fails
     head, piece, tail, n = HOSTILE[name]
-    small, big = head + piece * n + tail, head + piece * (4 * n) + tail
     def scan(b):
         page_links(b, PAGE)
-    ratio = _cpu(scan, big) / max(_cpu(scan, small), 1e-3)
-    assert ratio < 9, f"{name}: {ratio:.1f}x for 4x the input"
+    assert_linear(lambda k: head + piece * k + tail, scan, n, bound=9, floor=1e-3)

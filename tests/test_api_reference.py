@@ -5,7 +5,6 @@ The fixtures are javadoc 25 output for the sources in tests/fixtures/javadoc/src
 for tests/fixtures/sphinx/src (tests/fixtures/sphinx/regenerate.sh).
 """
 
-import gc
 import json
 import os
 import shutil
@@ -20,6 +19,7 @@ from dograpper.commands.serve import build_tools
 from dograpper.lib.pack_reader import load_chunks
 from dograpper.lib.retrieval import build_index
 from dograpper.utils.api_reference import NotSplit, split_api_pages, split_page
+from tests.linearity import assert_linear
 
 FIXTURE = Path(__file__).parent / "fixtures" / "javadoc" / "html"
 TYPE_PAGES = ["Box.Lid.html", "Box.html", "Color.html", "Marker.html", "Point.html",
@@ -78,26 +78,6 @@ def test_a_type_page_with_other_markup_is_not_split(old, new, problem):
 NEST, MEMBERS = 3000, 4000  # sized so a stack copy / a list scan per member trips the 7x bound
 
 
-def _assert_linear(build, run, n=10000):
-    # CPU time (not wall clock, so machine load does not count), best of 3, at n and 4n:
-    # linear work gives a ratio near 4, quadratic near 16.
-    # 7 sits above the worst clean ratio seen under load (~5.4) and below the weakest regression caught (~7.7).
-    def best(size):
-        page, times = build(size), []
-        for _ in range(3):
-            gc.collect()
-            gc.disable()  # as timeit does: a collection landing in one run skews the ratio
-            try:
-                start = time.process_time()
-                run(page)
-                times.append(time.process_time() - start)
-            finally:
-                gc.enable()
-        return min(times)
-    small, large = best(n), best(4 * n)
-    assert large < 7 * max(small, 0.01), f"4x input took {large / max(small, 0.01):.1f}x CPU time"
-
-
 def test_parsing_stays_linear_on_hostile_markup():
     head = '<meta name="generator" content="javadoc/ClassWriter"><h1 class="title" title="Class X">'
     # Deep unclosed nesting with stray end tags, and (separately, so each stays cheap) many members.
@@ -109,8 +89,8 @@ def test_parsing_stays_linear_on_hostile_markup():
 
     def run(page):
         assert len(split_page(page)) == page.count('class="detail"') + 1
-    _assert_linear(lambda n: hostile(n, 0), run, n=NEST)
-    _assert_linear(lambda n: hostile(0, n), run, n=MEMBERS)
+    assert_linear(lambda n: hostile(n, 0), run, n=NEST)
+    assert_linear(lambda n: hostile(0, n), run, n=MEMBERS)
     n = 40000
     with pytest.raises(NotSplit):
         split_page(head + '<section class="detail" id="x">' * n)
@@ -668,8 +648,8 @@ def test_sphinx_parsing_stays_linear_on_hostile_markup():
 
     def run(page):
         assert len(split_page(page)) == page.count('<dl class="py function">') + 2
-    _assert_linear(lambda n: hostile(n, 0), run, n=NEST)
-    _assert_linear(lambda n: hostile(0, n), run, n=MEMBERS)
+    assert_linear(lambda n: hostile(n, 0), run, n=NEST)
+    assert_linear(lambda n: hostile(0, n), run, n=MEMBERS)
     with pytest.raises(NotSplit):
         split_page('<div role="main">' + '<dl class="py class"><dt class="sig sig-object py">' * n)
     # A chain of unclosed nested objects: each name repeats its ancestors', so output would be quadratic.
@@ -682,7 +662,7 @@ def test_sphinx_parsing_stays_linear_on_hostile_markup():
     def run_chain(page):
         with pytest.raises(NotSplit, match="a qualified name over 1000 characters"):
             split_page(page)
-    _assert_linear(chain, run_chain, n=4000)  # ~0.1 s at n: big enough to dwarf CI jitter
+    assert_linear(chain, run_chain, n=4000)  # ~0.1 s at n: big enough to dwarf CI jitter
 
 
 def _sphinx_corpus(tmp_path):
