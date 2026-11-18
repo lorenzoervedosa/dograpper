@@ -9,7 +9,6 @@ Stdlib-only: urllib, re, gzip.
 from __future__ import annotations
 
 import gzip
-import io
 import logging
 import re
 import zlib
