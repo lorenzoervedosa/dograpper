@@ -77,7 +77,7 @@ content.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| id | string | yes | Unique record identifier. With `--api-records`: `NN_path` for a page's main container record, `NN_path#anchor` for its other records (see below). |
+| id | string | yes | Unique record identifier: `NN_path`, the chunk number (zero-padded to one width per run, at least two digits) and the source path; `NN_J_path` for sub-chunk `J` of a file that heading-driven splitting divided. With `--api-records`: `NN_path` for a page's main container record, `NN_path#anchor` for its other records (see below). |
 | source | string | yes | Relative path of the source file |
 | words | int | yes | Word count of `content` |
 | content | string | yes | Extracted text |
