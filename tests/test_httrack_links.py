@@ -525,3 +525,12 @@ def test_script_scans_are_linear_on_hostile_pages(name):
     def scan(b):
         page_links(b, PAGE)
     assert_linear(lambda k: head + piece * k + tail, scan, n, bound=9, floor=1e-3)
+
+
+@pytest.mark.parametrize("text,at,in_tag,in_css,escape", [  # htsparse_selftest.c:804-822
+    ("url(a.png)", 0, False, True, True), ("url('a (2).png')", 0, False, True, True),
+    ('x.src="a (2).png";', 1, False, False, False),
+    ("url(&quot;a (2).png&quot;)", 0, True, True, True), ('new URL("a.gif")', 4, False, False, False)])
+def test_css_url_links_escape_their_parentheses(text, at, in_tag, in_css, escape):
+    got = J._js_link(text, at, J.Ctx(css=in_css, in_tag=in_tag, tag_lastc='"'))
+    assert got[5] is escape

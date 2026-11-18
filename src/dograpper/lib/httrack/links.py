@@ -254,10 +254,10 @@ class _Scan:
                 attrs: dict | None = None) -> list[tuple[int, _Hit]]:
         """The links of the script t[i:end], each with its position."""
         name = "css" if ctx.css else "script"
-        return [(pos, _Hit(None, "", tag, attrs or {}, name, (0, 0), raw,
-                           self._resolve(unescape_attr(raw)), not self.nofollow))
-                for pos, raw, _ in scan_script(self.text, i, end, ctx, lastc,
-                                                self.parse_scripts, self.extended)]
+        return [(f.start, _Hit(None, "", tag, attrs or {}, name, (0, 0), f.link,
+                               self._resolve(unescape_attr(f.link)), not self.nofollow))
+                for f in scan_script(self.text, i, end, ctx, lastc, self.parse_scripts,
+                                     self.extended)]
 
     def _attr_script(self, tag: str, amap: dict, j: int, start: int, vend: int,
                      lastq: str, ctx: Ctx) -> list[tuple[int, _Hit]]:
@@ -367,7 +367,7 @@ class _Scan:
             if got is None:
                 pos = p + 1
                 continue
-            raw, term = got
+            raw, term, _ = got
             if raw:
                 found.append((p + 1, _Hit(None, "", tag, amap, "", (0, 0), raw,
                                           self._resolve(unescape_attr(raw)),
@@ -441,12 +441,11 @@ def _file_links(body: bytes, url: str, base: str, css: bool, parse_scripts: bool
     (htsparse.c:1264-1287), its links resolved against `base`, a module specifier's
     against the file itself."""
     out, text = [], _decode(body)
-    for _, raw, module in scan_script(text, 0, len(text), Ctx(css, css), "\0",
-                                       parse_scripts, extended):
-        raw = unescape_attr(raw)
+    for f in scan_script(text, 0, len(text), Ctx(css, css), "\0", parse_scripts, extended):
+        raw = unescape_attr(f.link)
         if len(raw) <= URL_MAX:
             try:
-                u = _usable(urljoin(url if module else base, raw))
+                u = _usable(urljoin(url if f.module else base, raw))
             except ValueError:
                 u = None
             if u:
