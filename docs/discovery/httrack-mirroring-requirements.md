@@ -316,6 +316,10 @@ this repository.
 
 ### Non-goals
 
+These next three are non-goals **of the `httrack` profile only**, which stays
+behaviourally identical to HTTrack. They are no longer dograpper-wide non-goals
+since 2026-11-18 (`docs/DECISIONS.md`); a separate downloader may adopt them.
+
 - **Header-level browser impersonation** (§2.10 F1): client hints, `Sec-Fetch-*` synthesized to look like a browser, browser `Accept` tables, browser header order. DL-01 deliberately goes the other way.
 - **UA spoofing as a WAF workaround** (§2.10 F2). This includes the current README claim (`README.md:264-265`), which DL-01 replaces.
 - **Clearance transplant:** embedded-browser cookie/UA harvesting, and documenting cookies.txt as a way past challenges (§2.10 F3). DL-19 is limited to sessions the user is entitled to.
