@@ -190,6 +190,24 @@ def test_fetch_metadata_follows_the_link_destination(meta, uir, fetch):
     assert ("Sec-Fetch-Site" in names) is bool(fetch)
 
 
+def test_fetch_metadata_can_fix_sec_fetch_site():
+    # a redirect chain carries the site hts_fetch_through computed, whatever the Referer
+    got = dict(request_headers(build_policy(), "h.test", kind="linked",
+                               referer="https://h.test/latest/", scheme="https",
+                               meta=FetchMeta(site="none")))
+    assert got["Sec-Fetch-Site"] == "none" and got["Referer"] == "https://h.test/latest/"
+
+
+@pytest.mark.parametrize("page,url,want", [
+    ("https://h.test/a", "https://h.test/b", "same-origin"),
+    ("https://h.test/a", "https://h.test:8443/b", "same-site"),
+    ("https://h.test/a", "http://h.test/b", "cross-site"),
+    (None, "https://h.test/b", "none"),
+])
+def test_site_of_compares_a_page_and_a_url(page, url, want):
+    assert policy.site_of(page, url) == want
+
+
 @pytest.mark.parametrize("page,want", [
     ("https://u:pw@h.test/a b?q=é#frag", "https://h.test/a%20b?q=%c3%a9"),
     ("https://user@h.test:8443", "https://h.test:8443/"),

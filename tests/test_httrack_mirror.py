@@ -7,6 +7,7 @@ import random
 import re
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from click.testing import CliRunner
 
@@ -234,6 +235,55 @@ def test_referer_and_fetch_metadata_per_link(server, tmp_path):
     assert calls[f"{base}/a"] == {"kind": "linked", "referer": f"{base}/",
                                   "meta": FetchMeta("document", "navigate", True)}
     assert calls[f"{base}/f"]["meta"] == FetchMeta("iframe", "navigate", False)
+
+
+def test_redirect_target_is_requested_as_htsmirror_c_requests_it(server, tmp_path):
+    # htsmirror.c:190-261 (a known non-page target: a fresh link with the moved link's
+    # parent) and 279-324 (any other: a stub page whose link it becomes); both copy the
+    # moved link's fetch metadata through hts_fetch_through (htsfetch.c:452-465)
+    base, script, _ = server
+    site(script, {"/": page("old", "doc"), "/new": page(),
+                  "/f.txt": ({"content-type": "text/plain"}, b"t")})
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/doc"] = (301, {"location": "/f.txt"}, b"")
+    res, spy = crawl(f"{base}/", tmp_path, exts="html,txt")
+    calls = {u: kw for u, kw in spy.calls if not u.endswith("/robots.txt")}
+    linked = FetchMeta("document", "navigate", True, "same-origin")
+    assert calls[f"{base}/new"] == {"kind": "linked", "referer": f"{base}/old", "meta": linked}
+    assert calls[f"{base}/f.txt"] == {"kind": "linked", "referer": f"{base}/", "meta": linked}
+
+
+def test_start_url_redirect_target_keeps_sec_fetch_site_none(server, tmp_path):
+    base, script, _ = server
+    site(script, {"/en/": page()})
+    script["/latest/"] = (302, {"location": "/en/"}, b"")
+    _, spy = crawl(f"{base}/latest/", tmp_path)
+    calls = {u: kw for u, kw in spy.calls if not u.endswith("/robots.txt")}
+    assert calls[f"{base}/en/"] == {"kind": "linked", "referer": f"{base}/latest/",
+                                    "meta": FetchMeta("document", "navigate", True, "none")}
+
+
+class _Silent(BaseHTTPRequestHandler):  # answers 501 to everything
+    def log_message(self, *a):
+        pass
+
+
+def test_redirect_chain_sends_its_worst_sec_fetch_site(server, tmp_path):
+    base, script, _ = server
+    other = ThreadingHTTPServer(("127.0.0.1", 0), _Silent)
+    threading.Thread(target=other.serve_forever, kwargs={"poll_interval": 0.01},
+                     daemon=True).start()
+    try:
+        target = f"http://127.0.0.1:{other.server_address[1]}/x"  # same host, other port
+        site(script, {"/": page("old")})
+        script["/old"] = (301, {"location": target}, b"")
+        _, spy = crawl(f"{base}/", tmp_path,
+                       filters=UrlFilters([f"+127.0.0.1:{other.server_address[1]}/*"]))
+    finally:
+        other.shutdown()
+        other.server_close()
+    assert dict(spy.calls)[target]["meta"] == FetchMeta("document", "navigate", True,
+                                                        "same-site")
 
 
 def test_max_links_ends_the_crawl_partial(server, tmp_path):

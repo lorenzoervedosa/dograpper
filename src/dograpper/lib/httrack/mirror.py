@@ -28,13 +28,10 @@ from .crawl import MAX_REDIRECTS, HttrackResult, fetch_page, relink
 from .fetcher import Fetcher, same_host
 from .links import css_links, page_links, url_key
 from .naming import KNOWN_EXTS, PAGE_EXTS, NameRegistry
-from .policy import NAVIGATION, FetchMeta, HttrackPolicy
+from .policy import NAVIGATION, SITES, FetchMeta, HttrackPolicy, site_of
 from .report import RunReport
 
 logger = logging.getLogger(__name__)
-
-_UNCLASSIFIED = FetchMeta("", "no-cors", False)
-
 
 @dataclass(frozen=True)
 class _Entry:
@@ -44,6 +41,7 @@ class _Entry:
     meta: FetchMeta = NAVIGATION
     front: bool = False            # the start URL or a redirect target it led to
     redirects: int = 0
+    initiator: str | None = None   # page whose link began the chain (Sec-Fetch-Site)
 
 
 def _start_rule(url: str) -> UrlFilters:
@@ -54,12 +52,38 @@ def _start_rule(url: str) -> UrlFilters:
     return UrlFilters([f"+{parts.netloc.rpartition('@')[2]}{directory}*"])
 
 
+def _extension(url: str) -> str:
+    return os.path.splitext(unquote(urlsplit(url).path).rsplit("/", 1)[-1])[1].lower()
+
+
+def _no_page(url: str) -> bool:
+    """htslib.c ishtml() == 0: the URL's extension is a type HTTrack knows and no page."""
+    ext = _extension(url)
+    return ext in KNOWN_EXTS and ext not in PAGE_EXTS
+
+
 def _skipped_by_extension(url: str, exts: set) -> bool:
     """--include-extensions before the request: an extension HTTrack knows as a type that is
     no page, and that the list leaves out, is not fetched (a page may come from any other)."""
-    name = unquote(urlsplit(url).path).rsplit("/", 1)[-1]
-    ext = os.path.splitext(name)[1].lower()
-    return bool(exts) and ext in KNOWN_EXTS and ext not in PAGE_EXTS and ext not in exts
+    return bool(exts) and _no_page(url) and _extension(url) not in exts
+
+
+def _moved_request(entry: _Entry, target: str) -> tuple[str | None, FetchMeta]:
+    """Referer and fetch metadata of a redirect target, as htsmirror.c hts_mirror_check_moved
+    sends it. A target with a known non-page extension, or one saved under the same name, is
+    a fresh link with the moved link's parent (htsmirror.c:190-261); any other becomes the
+    link of a stub page standing for the moved URL (279-324), so that URL is its Referer
+    (its precedent, htscore.c:3424-3426). Both keep the moved link's metadata, with the
+    worst Sec-Fetch-Site of the chain (htsfetch.c:452-465); a start URL's "none" stays."""
+    same_name = url_key(entry.url).casefold() == url_key(target).casefold()  # #159
+    referer = entry.referer if _no_page(target) or same_name else entry.url
+    if entry.front or not entry.meta.dest:
+        site = "none" if entry.front else entry.meta.site
+    else:
+        hops = (entry.meta.site or site_of(entry.initiator, entry.url),
+                site_of(entry.initiator, target))
+        site = max(hops, key=SITES.index)
+    return referer, entry.meta._replace(site=site)
 
 
 def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extensions: str, *,
@@ -96,7 +120,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         return "directory" if verdict is None and not scope[0].decide(u) else None
 
     def enqueue(u: str, *, hop: int, referer: str | None, meta: FetchMeta,
-                front: bool = False, redirects: int = 0) -> str:
+                front: bool = False, redirects: int = 0, initiator: str | None = None) -> str:
         """Queue `u` unless known or out of scope: "queued", "known" or "refused"."""
         k = url_key(u)
         if k in entry_of:
@@ -120,7 +144,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         if len(queue) >= policy.max_links:
             report.partial = True
             return "refused"
-        queue.append(_Entry(u, hop, referer, meta, front, redirects))
+        queue.append(_Entry(u, hop, referer, meta, front, redirects, initiator))
         return "queued"
 
     def work(entry: _Entry):
@@ -137,10 +161,9 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                 report.errors.append((safe, "too many redirects", via))
                 state["front_failed"] |= entry.front
                 return
-            # the start URL's target has no initiator to compare with: no fetch metadata
-            got = enqueue(final, hop=entry.hop, referer=entry.referer,
-                          meta=_UNCLASSIFIED if entry.front else entry.meta,
-                          front=entry.front, redirects=entry.redirects + 1)
+            referer, meta = _moved_request(entry, final)
+            got = enqueue(final, hop=entry.hop, referer=referer, meta=meta, front=entry.front,
+                          redirects=entry.redirects + 1, initiator=entry.initiator)
             state["front_failed"] |= entry.front and got != "queued"
             return
         if outcome != "ok":
@@ -173,7 +196,8 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                 if mime == "text/html":
                     pages[path] = entry.url
         for link in links:
-            got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta)
+            got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta,
+                          initiator=entry.url)
             if got != "refused":
                 requested.setdefault(url_key(link.url), set()).add(entry_of[url_key(link.url)])
 

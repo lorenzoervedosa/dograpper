@@ -36,10 +36,16 @@ MAX_RETRY_AFTER_CAP = 3600  # never lifted, even by disable_security_limits
 class FetchMeta(NamedTuple):
     """What a browser declares for a request (htsfetch.c hts_fetch_meta): Sec-Fetch-Dest
     (hts_fetch_dest_name; "" when HTTrack cannot classify the link, which then gets no
-    fetch metadata), Sec-Fetch-Mode, and Sec-Fetch-User for a user navigation."""
+    fetch metadata), Sec-Fetch-Mode, Sec-Fetch-User for a user navigation, and the
+    Sec-Fetch-Site a redirect chain fixed (None: from the Referer)."""
     dest: str = "document"
     mode: str = "navigate"
     user: bool = True
+    site: str | None = None
+
+
+# htsfetch.h hts_fetch_site, from best to worst: hts_fetch_through keeps the worst hop
+SITES = ("none", "same-origin", "same-site", "cross-site")
 
 
 NAVIGATION = FetchMeta()  # a start URL, as if typed in, or a followed <a href>
@@ -204,6 +210,12 @@ def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
         else "cross-site"
 
 
+def site_of(page: str | None, url: str) -> str:
+    """Sec-Fetch-Site of a request for `url` made from `page` (htsfetch.c hts_fetch_site_of)."""
+    parts = drop_userinfo(urlsplit(url))
+    return _fetch_site(_referer_value(page), parts.scheme, parts.netloc)
+
+
 def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str | None,
                     scheme: str, meta: FetchMeta = NAVIGATION) -> list[tuple[str, str]]:
     """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked;
@@ -223,7 +235,7 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
         h.append(("Upgrade-Insecure-Requests", "1"))
     h += [("User-Agent", policy.user_agent), ("Accept", ACCEPT)]
     if sent:
-        h += [("Sec-Fetch-Site", _fetch_site(referer, scheme, host)),
+        h += [("Sec-Fetch-Site", meta.site or _fetch_site(referer, scheme, host)),
               ("Sec-Fetch-Mode", meta.mode)]
         if meta.user:
             h.append(("Sec-Fetch-User", "?1"))

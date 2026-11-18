@@ -389,7 +389,10 @@ HTTrack's mirror loop:
   as the seeded fetch.
 - **Redirects:** the target is queued as a fresh link and passes the same
   scope, filter and robots checks; links to the redirecting URL then point at
-  the target's file.
+  the target's file. As in HTTrack, a page target is requested with the
+  redirecting URL as `Referer` (a known non-page type, with the linking page),
+  the original link's `Sec-Fetch-*` and the worst `Sec-Fetch-Site` of the
+  chain (`none` after a start URL).
 - **Links rewritten** (HTTrack `-K0`): once the crawl ends, every saved HTML
   page links to the files saved for its links with relative paths, other
   links become absolute URLs, and `<base href>` is emptied. The mirror browses
