@@ -521,6 +521,14 @@ contents, "copy to clipboard" buttons, version banners, cookie and
 announcement banners, feedback widgets, edit-on-github links. Use
 `--no-extract` to keep the full HTML.
 
+MediaWiki pages (`<meta name="generator" content="MediaWiki ...">`) lose
+their wiki chrome first: navigation boxes (`navbox`), section edit links
+(`mw-editsection`) and maintenance boxes (an `mbox` with a
+`mw-customtoggle-mbox-*` toggle: stub, outdated, "help update") are cut from
+the page before the steps above. Note boxes, which have no toggle, stay.
+Pages from any other generator are not touched. Measured on MediaWiki 1.43
+(Citizen skin).
+
 Code blocks (`<pre>`) keep their line breaks and indentation, with or
 without extraction. `md` writes each one as a fenced block whose language
 comes from a `mw-highlight-lang-*`, `language-*`, `lang-*` or Sphinx

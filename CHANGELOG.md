@@ -112,6 +112,12 @@ and fixes alone are a PATCH bump.
   notebooklm` or `--layout page` it exits 2.
   ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
   [#76](https://github.com/lorenzoervedosa/dograpper/issues/76))
+- `pack` cleans MediaWiki pages (detected by their `<meta name="generator">`)
+  before extraction: navigation boxes (`navbox`), section edit links
+  (`mw-editsection`) and maintenance boxes (stub, outdated, "help update"
+  boxes with their `Edit (Create account)` links) leave the text; note boxes
+  stay. Pages from any other generator are extracted exactly as before.
+  ([#88])
 
 ### Changed
 
@@ -339,3 +345,4 @@ and fixes alone are a PATCH bump.
 [#86]: https://github.com/lorenzoervedosa/dograpper/issues/86
 [#95]: https://github.com/lorenzoervedosa/dograpper/issues/95
 [#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
+[#88]: https://github.com/lorenzoervedosa/dograpper/issues/88

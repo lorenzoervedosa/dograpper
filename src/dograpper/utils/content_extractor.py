@@ -10,6 +10,8 @@ from html import escape
 from html.parser import HTMLParser
 from typing import Optional
 
+from . import mediawiki
+
 logger = logging.getLogger(__name__)
 
 SEMANTIC_SELECTORS = [
@@ -58,6 +60,7 @@ def extract_content(html: str) -> str:
     """Extract the main content from a documentation HTML page.
 
     Strategy:
+    0. A MediaWiki page first loses its wiki chrome (utils/mediawiki.py).
     1. Try to find a semantic container (<main>, <article>, etc.).
     2. Fall back to density scoring on <div>/<section> blocks.
     3. Remove blacklisted elements from the result.
@@ -69,6 +72,7 @@ def extract_content(html: str) -> str:
     if not html or not html.strip():
         return ""
 
+    html = mediawiki.clean(html)
     container_html = _find_semantic_container(html)
     if container_html is None:
         container_html = _find_by_density(html)
