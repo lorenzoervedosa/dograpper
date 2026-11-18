@@ -335,13 +335,17 @@ def _run_download_cascade(
                    "when a 200 announces the size it has on disk (and, on a revalidation, the "
                    "size recorded); its body is not read (HTTrack -%s). Default: off, as in "
                    "HTTrack")
+@click.option('--changes', is_flag=True, default=False,
+              help="[httrack] Write hts-changes.json in -o: which files this run left new, "
+                   "changed, unchanged or gone against the previous run (HTTrack -%d). "
+                   "Default: off, as in HTTrack")
 @click.option('--do-not-recatch', is_flag=True, default=False,
               help="[httrack] Do not fetch again a recorded file other than a page, script "
                    "or stylesheet that was erased or emptied since: it is left empty and "
                    "reported (HTTrack -%n). Default: off, fetched again in full, as in "
                    "HTTrack")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool, changes: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -380,6 +384,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'cache': cache,
         'updatehack': updatehack,
         'do_not_recatch': do_not_recatch,
+        'changes': changes,
     }
     merged_params = load_config(config_path, 'download', cli_params, ctx)
 

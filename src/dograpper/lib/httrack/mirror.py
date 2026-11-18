@@ -25,6 +25,7 @@ from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
+from .changes import Changes
 from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, moved_request,
                     previous_files, record_of, relink, reserve_names, sends, stamp, uncached)
 from .fetcher import Fetcher, same_host
@@ -115,6 +116,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
     prev = previous_files(previous, names, output_dir, policy.cache, policy.do_not_recatch)
+    changes = Changes(output_dir, previous, policy.cache) if policy.changes else None
     reserve_names(names, prev)
     url_of = {e.local_path or k: e.url for k, e in (previous.files if previous else {}).items()
               if e.url}
@@ -180,7 +182,8 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     def work(entry: _Entry):
         return fetch_page(entry.url, fetcher, report, lock, None,
                           kind="linked" if entry.referer else "navigate",
-                          referer=entry.referer, meta=entry.meta, prev=entry.prev)
+                          referer=entry.referer, meta=entry.meta, prev=entry.prev,
+                          tried=changes and changes.tried)
 
     def handle(entry: _Entry, outcome: str, final: str, res) -> None:
         safe, via = redact_url(entry.url), redact_url(entry.referer) if entry.referer else None
@@ -232,6 +235,8 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             report.filtered.append(safe)
         else:
             try:
+                if changes is not None:
+                    changes.overwriting(path)
                 atomic_write_bytes(path, res.body)
             except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
                 report.errors.append((safe, f"write failed: {exc}", via))
@@ -336,5 +341,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     records = {f: {**fields[f], "redirected": r} for f, (r, _) in sorted(chosen.items())}
     if policy.cache == 0:
         records = uncached(records, urls, previous, output_dir)
+    report_of = changes and changes.report(dict.fromkeys(saved.values()),  # queue order
+                                           set(saved.values()) - kept, urls, fields)
     return HttrackResult(bool(files or kept), files, len(kept), report, front_failed, urls,
-                         sorted(kept), records)
+                         sorted(kept), records, report_of)

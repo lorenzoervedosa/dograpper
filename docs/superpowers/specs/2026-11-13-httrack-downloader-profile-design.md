@@ -459,6 +459,48 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     empties a file whose size changed before requesting it in full
     (`src/htscache.c:796-814`); the profile requests it without emptying it,
     so a failed request leaves the copy as it was.
+- **Change report** (`--changes`, HTTrack `-%d`, off as in HTTrack,
+  `src/htslib.c:5441`; #132). `hts-changes.json` is written in `-o`, HTTrack's
+  log folder (`src/htschanges.c:573-574`), in HTTrack's format, field for
+  field and line for line (`src/htschanges.c:457-532`, strings escaped as
+  `src/htscharset.c:1268-1303`), and the summary line is HTTrack's
+  (`588-606`). One entry per file, in the order the run reached them. Each is
+  sorted as `changes_resolve` and `hts_changes_classify` sort it
+  (`src/htschanges.c:189-206`, `407-455`):
+  - a file left alone (304, kept after an error, `--cache 1`, `--updatehack`,
+    not recaught) is `unchanged`;
+  - a file written that did not exist is `new` (listed by the previous
+    manifest when there is one, else on disk before its write);
+  - a parsed file (a hypertext type with a body) compares the MD5 of its
+    payload with the `payload_md5` its previous record holds;
+  - any other file compares sizes, then the MD5 of its bytes before and after
+    the write;
+  - with no digest, a 200 means `changed`;
+  - under a cache mode, a file of the previous manifest that is still on disk
+    but was not reached is `gone`, or `unchanged` when this run requested its
+    URL past robots.txt (`src/htscore.c:2186-2210`);
+  - `--cache 0` reads no index: `first_crawl` is null and nothing is gone.
+  The report is written only for a run that succeeds, as HTTrack writes it
+  only for a completed one (`src/htscore.c:2360-2367`), and it is a state file
+  that `pack` and the manifest skip.
+  - **Deviations:**
+    - `generator` names dograpper (§5.1);
+    - `purged` is always false (no purge, below);
+    - `url` follows the manifest's rule for the URL requested: no
+      userinfo, and `""` (HTTrack's "no URL") for a query off the
+      allowlist. It is never a redirect target, which is never recorded.
+      HTTrack writes the URL the file was saved for;
+    - the previous payload is read from the record of the same file, which
+      stands for the cache entry of its URL;
+    - every page counts as parsed, as the profile rewrites every page's
+      links (HTTrack skips the pages past the depth limit);
+    - the files not reached are listed by path, because the manifest keeps
+      no crawl order, and seeded files are listed in seed order, whatever
+      the order their threads finished in (HTTrack lists them by
+      completion);
+    - a run that dograpper fails writes no report (a front failure, no file
+      saved or kept, the Playwright fallback), where HTTrack skips it only for
+      a stopped run or a rolled-back session (`src/htscore.c:2123-2138`).
 - **File times:** each saved file gets its recorded `Last-Modified` (else the
   `Date`) as access and modification time, once its links are rewritten, read
   as HTTrack reads the date (`src/htscore.c:451-452`, `src/htsback.c:2119-2128`,
@@ -518,10 +560,7 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- **HTTrack's change report** is not ported yet (#132):
-  - `-%d` `--changes` (off, `src/htslib.c:5441`) writes `hts-changes.json`
-    (discovery note §2.9, "Cache modes and update options");
-  - Pending a follow-up PR under #78. Evidence: discovery note §2.9.
+- None at the moment: the cache and update options of #132 are in §5.6.
 
 ## 6. Code layout (proposal; the plan may refine)
 
@@ -559,9 +598,9 @@ README and CHANGELOG.
    - **Status: implemented (wave 5).** Behavior and deviations in §5.6.
    - **Wave 6 (#132):** the cache modes (`--cache`, HTTrack `-C`), the update
      hacks (`--updatehack`, `-%s`), do-not-recatch (`--do-not-recatch`,
-     `-%n`) and file times from `Last-Modified`. The change report (`-%d`,
-     `hts-changes.json`) is left under "Known gaps", pending a decision on how
-     to compare parsed pages (`docs/DECISIONS.md`, 2026-11-18).
+     `-%n`), the change report (`--changes`, `-%d`, `hts-changes.json`, with
+     the payload MD5 in each manifest record) and file times from
+     `Last-Modified`.
 4. **Playwright under the profile.**
    - Navigations go through `page.route` + `route.fetch()`.
    - A response carrying `cf-mitigated` or challenge markup is aborted

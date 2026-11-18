@@ -440,6 +440,13 @@ def test_real_cache_and_update_flags_act_under_fire_engine(server, tmp_path):
     assert "/docs/e.txt" not in seen and (host / "docs" / "e.txt").read_bytes() == b""
     assert f"{base}/docs/e.txt: null-size file not recaught" in kept.output
 
+    changed = CliRunner().invoke(cli, [*args, "--changes"])  # HTTrack -%d
+
+    assert changed.exit_code == 0, changed.output
+    report = json.loads((out / "hts-changes.json").read_text())
+    assert report["first_crawl"] is False and sum(report["counts"].values()) == 4
+    assert "Change report: " in changed.output
+
 
 # -- body bound and timeouts, over the real curl_cffi --------------------------
 

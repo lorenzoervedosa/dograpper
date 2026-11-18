@@ -22,6 +22,29 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — HTTrack's change report ported with the payload MD5 (#132)
+
+Supersedes the "-%d is not ported" decision of the entry below: the maintainer
+picked option (a).
+
+- **Decision:** `--changes` writes `hts-changes.json` in `-o`, in
+  `htschanges.c`'s format. Each manifest record gains `payload_md5`, the MD5 of
+  the body as received before `-K0`, which stands for the body HTTrack's cache
+  keeps; a parsed file is compared by it.
+- **Why:** HTTrack compares a parsed page by its payload because the saved copy
+  carries rewritten links (`src/htschanges.c:299-345`). Comparing the saved
+  bytes would report a page as changed when only its links moved.
+- **Rejected:** comparing the saved bytes (option b); not porting it (option c).
+- **Pending:** none. The deviations the port needs are recorded in spec §5.6
+  ("Change report"):
+  - `generator` names dograpper;
+  - `purged` is false;
+  - `url` follows the manifest's rule for the URL requested;
+  - the previous payload is read from the record of the same file;
+  - every page counts as parsed;
+  - files not reached are listed by path, seeded files in seed order;
+  - a failed run writes no report.
+
 ## 2026-11-18 — HTTrack cache and update options in the httrack profile (#132)
 
 - **Decision:** HTTrack's cache mode is one flag, `--cache 0|1|2` (HTTrack's

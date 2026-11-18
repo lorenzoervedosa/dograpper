@@ -499,6 +499,25 @@ manifest recorded) keeps that copy and its record, as a 304 would: the body is
 never read and the connection is dropped, as HTTrack drops it. The summary
 counts these as `Kept on a matching size (--updatehack): N`.
 
+**Change report (`--changes`, HTTrack `-%d`, off).** The run writes
+`hts-changes.json` in `-o`, in HTTrack's format, and prints its summary
+(`Change report: 2 new, 1 changed, 40 unchanged, 1 gone (hts-changes.json)`).
+Each file is listed once, with its URL and its size:
+
+- `new`: no copy before this run;
+- `changed` (with `previous_size`): a page whose payload, the body as
+  received before its links were rewritten, differs from the one its manifest
+  record holds (`payload_md5`), or another file whose bytes differ;
+- `unchanged`: a file left as it was, or rewritten with the same payload or
+  bytes;
+- `gone`: a file of the previous run no link reached this run (a URL the run
+  requested without keeping it is `unchanged`).
+
+`first_crawl` is `true` without a previous manifest, and `null` under
+`--cache 0`, which lists nothing as gone. `purged` is always `false`. A URL is
+written as the manifest writes it (`""` when the manifest records none). A
+run that fails leaves the previous report as it was.
+
 **`--do-not-recatch` (HTTrack `-%n`, off).** A recorded file other than a
 page, a script or a stylesheet that was erased or emptied since is not fetched
 again: a missing one is created empty, and its URL is listed under `Errors` as
@@ -528,6 +547,7 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--cache` | `2` with a manifest, else `1` | Cache mode (HTTrack `-C`): `0` ignores the manifest, `1` trusts it, `2` revalidates (see "Cache modes") |
 | `--updatehack` | off | Keep a recorded non-page file when a `200` announces its size (HTTrack `-%s`, see "Update hacks") |
 | `--do-not-recatch` | off | Leave a recorded non-page file erased since empty instead of fetching it (HTTrack `-%n`) |
+| `--changes` | off | Write `hts-changes.json` in `-o`: what this run left new, changed, unchanged or gone (HTTrack `-%d`, see "Change report") |
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -581,8 +601,7 @@ is used when available. The release binary includes this extra.
 
 **Current gaps (temporary).** Under `httrack`, the Playwright fallback is
 not implemented yet and fails loud (exit 1); use `--downloader wget` for
-those sites. HTTrack's `--changes` option (`-%d`, `hts-changes.json`) is not ported yet.
-None of these is a deviation from HTTrack.
+those sites. It is no deviation from HTTrack.
 
 ##### fire-engine
 
@@ -635,7 +654,7 @@ an earlier run recorded.
 The manifest lives in the output directory: a relative `--manifest`
 resolves against `-o`, an absolute one is used as is, so a re-run from any
 directory finds it and two mirrors never share one. It never lists itself,
-`delta_manifest.json` or `pack_state.json`. `pack` reads it the same way,
+`delta_manifest.json`, `pack_state.json` or `hts-changes.json`. `pack` reads it the same way,
 relative to `INPUT_DIR` (its `--manifest` row says how a subdirectory of a
 mirror finds the mirror's manifest). Up to 0.4.0 the default was relative to the current
 directory; a manifest left there is not read (it may belong to another
@@ -1306,7 +1325,7 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1666,6 +1685,7 @@ longer read and can be deleted once `input-dir` holds the new one.
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
 | `pack_state.json` | `--delta` | Corpus state as of this pack; the next `--delta` run diffs against it |
 | `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes), in the `-o` directory |
+| `hts-changes.json` | `download --changes` | HTTrack's change report of the last run, in the `-o` directory |
 
 ---
 

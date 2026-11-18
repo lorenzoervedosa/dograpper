@@ -11,6 +11,7 @@ from urllib.parse import urljoin, urlsplit
 import click
 
 from ..lib.config_loader import is_explicit
+from ..lib.httrack.changes import CHANGES_FILE
 from ..lib.httrack.crawl import MAX_REDIRECTS, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
@@ -19,6 +20,7 @@ from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import format_report
 from ..lib.manifest import Manifest
 from ..lib.spa_detector import is_spa
+from ..utils.atomic_write import atomic_write_bytes
 from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
 
@@ -32,7 +34,7 @@ _PLAYWRIGHT_MSG = ("httrack profile: Playwright fallback is not implemented yet 
 PROFILE_OPTIONS = ('user_agent', 'no_robots', 'connections', 'max_conn_rate', 'max_bandwidth',
                    'timeout', 'retries', 'max_links', 'max_retry_after',
                    'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
-                   'cache', 'updatehack', 'do_not_recatch')
+                   'cache', 'updatehack', 'do_not_recatch', 'changes')
 # --no-X flags: the policy holds the positive switch
 _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
             'no_extended_parsing': 'extended_parsing'}
@@ -180,8 +182,16 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
                      for f in (*res.files_downloaded, *res.kept))
     if is_spa(output) or (not discovered and html_count <= 1):
         raise click.ClickException(fallback)
-    return (len(res.files_downloaded), res.files_skipped, format_report(res.report, verbose),
-            res.urls, res.records)
+    lines = format_report(res.report, verbose)
+    if res.changes is not None:  # written for a completed run only (htscore.c:2360-2367)
+        report, summary = res.changes
+        path = os.path.join(output, CHANGES_FILE)
+        try:
+            atomic_write_bytes(path, report.encode("utf-8"))
+        except OSError as e:  # HTTrack logs it and the run goes on (htschanges.c:575-586)
+            summary = f"Unable to write the change report {path}: {e}"
+        lines.append(summary)
+    return len(res.files_downloaded), res.files_skipped, lines, res.urls, res.records
 
 
 def _front_failed(discovered: bool, challenged: bool) -> str:

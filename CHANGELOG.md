@@ -72,7 +72,8 @@ and fixes alone are a PATCH bump.
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
   `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`,
-  `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`).
+  `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`,
+  `--changes`).
   When llms.txt and the sitemap give no URL list, it crawls the site from the
   start URL as HTTrack does: links from `href`, HTTrack's link attributes,
   meta refresh and CSS,
@@ -101,7 +102,11 @@ and fixes alone are a PATCH bump.
   matching size (--updatehack): N`). `--do-not-recatch` (HTTrack `-%n`, off)
   leaves a recorded file other than a page, script or stylesheet that was
   erased since empty instead of fetching it again, and reports it as `null-size
-  file not recaught`. Each saved file gets the response's `Last-Modified`
+  file not recaught`. `--changes` (HTTrack `-%d`, off) writes
+  `hts-changes.json` in `-o`, HTTrack's change report: each file new, changed
+  (a page by the MD5 of its payload against `payload_md5`), unchanged or gone
+  against the previous run, and a `Change report:` line in the summary. `pack`
+  and the manifest skip it. Each saved file gets the response's `Last-Modified`
   (else its `Date`) as its modification and access time, as HTTrack sets it.
   The Playwright fallback fails loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`

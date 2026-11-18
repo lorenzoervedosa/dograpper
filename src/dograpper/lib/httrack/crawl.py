@@ -41,6 +41,7 @@ class HttrackResult:
     urls: dict[str, str] = field(default_factory=dict)  # written file -> seed URL requested
     kept: list[str] = field(default_factory=list)  # files an update kept as they were
     records: dict[str, dict] = field(default_factory=dict)  # file -> manifest RECORD_FIELDS
+    changes: tuple[str, str] | None = None  # --changes: (hts-changes.json, summary line)
 
 
 class Previous(NamedTuple):
@@ -272,8 +273,9 @@ def moved_request(url: str, referer: str | None, meta: FetchMeta, target: str, *
 def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lock,
                redirect_ok: Callable[[str, str], bool] | None, *, kind: str = "navigate",
                referer: str | None = None, meta: FetchMeta = NAVIGATION,
-               prev: Previous | None = None,
-               names: NameRegistry | None = None) -> tuple[str, str, FetchResult | None]:
+               prev: Previous | None = None, names: NameRegistry | None = None,
+               tried: Callable[[str], None] | None = None
+               ) -> tuple[str, str, FetchResult | None]:
     """GET `url` for every fetch path: /cdn-cgi/ is never requested, robots.txt is checked
     before each hop, and a redirect is followed (at most MAX_REDIRECTS) only when
     `redirect_ok(url, target)`, called under `lock`, accepts the target; `url` is then a
@@ -291,7 +293,7 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
     recorded size is ("kept", URL, an empty result), and one erased under -%n
     (prev.erased) ("kept", URL, result) with result.error NOT_RECAUGHT; a 200 that -%s
     (policy.updatehack) takes at its headers is ("kept", URL, result) with
-    result.stopped."""
+    result.stopped. `tried(url)` is told of each hop requested past robots.txt."""
     via, hops = (redact_url(referer) if referer else None), 0
     while True:
         safe = redact_url(url)
@@ -316,6 +318,8 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 report.robots_blocked.append(safe)
             logger.info("robots.txt disallows %s", safe)
             return "refused", url, None
+        if tried is not None:
+            tried(url)
         mine = sends(prev, url, hops > 0, names)
         if mine and prev.erased:  # -%n: "Null-size file not recaught" (htsback.c:2653-2694)
             with lock:
@@ -417,6 +421,8 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     names = NameRegistry(output_dir)
     prev = previous_files(previous, names, output_dir, policy.cache, policy.do_not_recatch)
     reserve_names(names, prev)
+    from .changes import Changes  # changes.py imports this module
+    changes = Changes(output_dir, previous, policy.cache) if policy.changes else None
     kept: set[str] = set()
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
@@ -448,7 +454,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         except ValueError:  # a malformed URL: fetch_page records it
             p = None
         outcome, final, res = fetch_page(url, fetcher, report, lock, redirect_ok, prev=p,
-                                         names=names)
+                                         names=names, tried=changes and changes.tried)
         if outcome == "kept":
             return keep(final, url, p, res.challenged or res.error is not None)
         if outcome != "ok":
@@ -493,6 +499,8 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 pending = writing[path]
             pending.wait()  # another seed is writing this file: count as written only if it lands
         try:
+            if changes is not None:
+                changes.overwriting(path)
             atomic_write_bytes(path, res.body)
         except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
             with lock:
@@ -543,5 +551,8 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     records = {path: {**fields[path], "redirected": r} for path, (r, _) in requested.items()}
     if policy.cache == 0:
         records = uncached(records, chosen, previous, output_dir)
+    rank = {s: i for i, s in enumerate(seeds)}  # threads finish in any order: seed order
+    report_of = changes and changes.report(sorted(requested, key=lambda p: rank[requested[p][1]]),
+                                           written, chosen, fields)
     return HttrackResult(bool(files or kept), files, len(kept), report, front_failed, chosen,
-                         sorted(kept), records)
+                         sorted(kept), records, report_of)
