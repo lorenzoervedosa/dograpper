@@ -3,6 +3,7 @@ import json
 import tempfile
 from unittest.mock import MagicMock, patch
 import click
+import pytest
 
 from dograpper.lib.wget_mirror import run_wget_mirror
 from dograpper.lib.spa_detector import is_spa
@@ -184,6 +185,115 @@ def test_wget_mirror_ua_includes_chrome():
     from dograpper.lib.wget_mirror import BROWSER_UA
     assert "Chrome/" in BROWSER_UA
     assert "Mozilla/5.0" in BROWSER_UA
+
+
+# --- --filter rules on wget --mirror (#96) ---
+
+SEED = "https://pzwiki.net/w/index.php?title=Category:Lua_events"
+
+
+def _wget_accepts(args, url):
+    """wget's own decision for a child link (recur.c download_child): no-parent, then regexes."""
+    import re
+    from urllib.parse import urlsplit
+    if "--no-parent" in args and not urlsplit(url).path.startswith("/w/"):
+        return False
+    regex = {a.split("=", 1)[0]: a.split("=", 1)[1] for a in args if a.startswith("--") and "-regex=" in a}
+    if "--accept-regex" in regex and not re.search(regex["--accept-regex"], url):
+        return False
+    return not ("--reject-regex" in regex and re.search(regex["--reject-regex"], url))
+
+
+@pytest.mark.parametrize("rules", [
+    [],
+    ["-*Special:*", "-*action=*"],
+    ["+pzwiki.net/wiki/On*"],
+    ["-*", "+pzwiki.net/wiki/On*"],
+    ["-*", "+pzwiki.net/wiki/On*", "-*OnTick*"],
+    ["+*", "-*/wiki/Category:*"],
+    ["+pzwiki.net/wiki/*", "-*", "+*/wiki/OnLoad"],
+    ["-*", "-*/w/*", "+*/wiki/On*"],
+])
+def test_wget_filter_args_decide_like_the_rules(rules):
+    """The --accept-regex/--reject-regex wget gets accept exactly what the rules accept,
+    and what no rule matches stays under --no-parent's scope (the start directory)."""
+    from dograpper.lib.url_filter import UrlFilters
+    from dograpper.lib.wget_mirror import url_filter_args
+    filters = UrlFilters(rules)
+    args = url_filter_args(filters, SEED)
+    assert ("--no-parent" in args) is not any(r.startswith("+") for r in rules)
+    for url in ["https://pzwiki.net/wiki/OnTick", "https://pzwiki.net/wiki/OnLoad",
+                "https://pzwiki.net/wiki/Category:En", "https://pzwiki.net/wiki/Other",
+                "https://pzwiki.net/w/index.php?title=Special:Random",
+                "https://pzwiki.net/w/index.php?title=Category:Lua_events&action=edit",
+                "https://pzwiki.net/w/load.php?modules=site"]:
+        verdict = filters.decide(url)
+        expected = url.startswith("https://pzwiki.net/w/") if verdict is None else verdict
+        assert _wget_accepts(args, url) is expected, url
+
+
+def test_wget_filter_args_refuse_a_plus_rule_after_a_minus_rule():
+    import re
+    from dograpper.lib.url_filter import UrlFilters
+    from dograpper.lib.wget_mirror import url_filter_args
+    with pytest.raises(ValueError, match=re.escape("'+*/wiki/On*' follows '-*Special:*'")):
+        url_filter_args(UrlFilters(["-*Special:*", "+*/wiki/On*"]), SEED)
+
+
+def test_wget_mirror_counts_only_urls_a_rule_refused(tmp_path):
+    """wget's --rejected-log lists every regex refusal; only those a rule decided count."""
+    from dograpper.lib.url_filter import UrlFilters
+    rows = [
+        ("REGEX", "https%3A//pzwiki.net/wiki/Category%3AEn"),       # refused by -*
+        ("REGEX", "https%3A//pzwiki.net/wiki/Category%3AEn"),       # seen twice, counted once
+        ("PARENT", "https%3A//pzwiki.net/wiki/Other"),              # not a filter decision
+        ("REGEX", "https%3A//pzwiki.net/w/index.php?title=Special%3ARandom"),
+    ]
+
+    def fake_run(cmd, **kw):
+        log = next((a.split("=", 1)[1] for a in cmd if a.startswith("--rejected-log=")), None)
+        if log:  # not the --version probe
+            with open(log, "w", encoding="utf-8") as f:
+                f.write("REASON\tU_URL\tU_SCHEME\n")
+                f.writelines(f"{reason}\t{url}\tSCHEME_HTTPS\n" for reason, url in rows)
+        result = MagicMock()
+        result.returncode, result.stdout, result.stderr = 0, "", ""
+        return result
+
+    filters = UrlFilters(["-*", "+pzwiki.net/wiki/On*"])
+    with patch("subprocess.run", side_effect=fake_run):
+        res = run_wget_mirror(SEED, str(tmp_path), filters=filters)
+    assert res.success
+    assert filters.excluded == {"https://pzwiki.net/wiki/Category:En",
+                                "https://pzwiki.net/w/index.php?title=Special:Random"}
+    assert not list(tmp_path.iterdir())  # the log is not left in the output
+
+
+def test_wget_mirror_removes_the_rejected_log_when_wget_cannot_run(tmp_path, monkeypatch):
+    from dograpper.lib.url_filter import UrlFilters
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+
+    def fake_run(cmd, **kw):
+        if any(a.startswith("--rejected-log=") for a in cmd):  # the mirror run, not the --version probe
+            raise OSError("exec failed")
+        result = MagicMock()
+        result.returncode, result.stdout, result.stderr = 0, "", ""
+        return result
+
+    with patch("subprocess.run", side_effect=fake_run):
+        with pytest.raises(OSError):
+            run_wget_mirror(SEED, str(tmp_path / "out"), filters=UrlFilters(["-*Special:*"]))
+    assert not list(tmp_path.glob("*.rejected.tsv"))
+
+
+def test_wget_mirror_without_rules_adds_no_rejected_log():
+    from dograpper.lib.url_filter import UrlFilters
+    with patch('subprocess.run') as mock_run:
+        mock_run.return_value.returncode = 0
+        run_wget_mirror('http://example.com', './out', filters=UrlFilters())
+        args = mock_run.call_args[0][0]
+    assert "--no-parent" in args
+    assert not any(a.startswith(("--rejected-log", "--accept-regex", "--reject-regex")) for a in args)
 
 
 # --- Pretty-URL handling (issue: --accept dropped extensionless URLs) ---
@@ -490,6 +600,35 @@ def test_playwright_crawl_consumes_seed_urls():
             assert "http://target.com" in visited_urls
             assert "http://target.com/api" in visited_urls
             assert "http://target.com/guide" in visited_urls
+    finally:
+        del sys.modules['playwright']
+        del sys.modules['playwright.sync_api']
+
+
+def test_playwright_crawl_skips_links_the_filters_refuse():
+    import sys
+    from unittest.mock import MagicMock
+    from dograpper.lib.url_filter import UrlFilters
+
+    mock_sync_api = MagicMock()
+    mock_p = mock_sync_api.sync_playwright.return_value.__enter__.return_value
+    mock_page = mock_p.chromium.launch.return_value.new_context.return_value.new_page.return_value
+    mock_page.content.return_value = "<html></html>"
+    mock_page.evaluate.side_effect = [
+        ["http://target.com/wiki/OnTick", "http://target.com/wiki/Category:En#top"],
+        ["http://target.com/wiki/Deeper"],  # beyond --depth: not a filter decision
+    ]
+
+    sys.modules['playwright'] = MagicMock()
+    sys.modules['playwright.sync_api'] = mock_sync_api
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            from dograpper.lib.playwright_crawl import run_playwright_crawl
+            filters = UrlFilters(["-*", "+*/wiki/On*"])
+            run_playwright_crawl("http://target.com/w/start", d, depth=1, filters=filters)
+            visited_urls = [c[0][0] for c in mock_page.goto.call_args_list]
+            assert visited_urls == ["http://target.com/w/start", "http://target.com/wiki/OnTick"]
+            assert filters.excluded == {"http://target.com/wiki/Category:En"}
     finally:
         del sys.modules['playwright']
         del sys.modules['playwright.sync_api']

@@ -115,6 +115,13 @@ def test_sync_forwards_downloader_and_httrack_flags():
     assert dl["disable_security_limits"] is True
 
 
+def test_sync_forwards_filter_rules():
+    result, captured = _run_sync(['https://example.com', '-o', './out',
+                                  '--filter', '-*', '--filter', '+*/wiki/On*'])
+    assert result.exit_code == 0, result.output
+    assert captured["download"]["filter"] == ('-*', '+*/wiki/On*')
+
+
 def test_sync_downloader_defaults_match_download():
     result, captured = _run_sync(['https://example.com', '-o', './out'])
     assert result.exit_code == 0, result.output

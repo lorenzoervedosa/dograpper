@@ -6,15 +6,15 @@ import logging
 from typing import List, Tuple
 
 from ._httrack_profile import resolve_profile, run_httrack
-from ..lib.config_loader import load_config
+from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import normalize_extensions
 from ..lib.llms_txt_parser import fetch_llms_txt
 from ..lib.manifest import load_manifest, save_manifest, build_manifest, merge_manifests
 from ..lib.playwright_crawl import run_playwright_crawl
 from ..lib.sitemap_parser import fetch_sitemap
 from ..lib.spa_detector import is_spa
-from ..lib.url_filter import filter_urls
-from ..lib.wget_mirror import format_failures, run_wget_mirror, run_wget_urls
+from ..lib.url_filter import UrlFilters, filter_urls
+from ..lib.wget_mirror import format_failures, run_wget_mirror, run_wget_urls, url_filter_args
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,19 @@ def _compute_stats(
     return touched, unchanged
 
 
+def _url_filters(ctx: click.Context, rules) -> UrlFilters:
+    """The --filter rules (CLI tuple or JSON list) as UrlFilters; a bad value is a usage error."""
+    src = "" if is_explicit(ctx, 'filter') else " (from .dograpper.json)"
+    if not isinstance(rules, (list, tuple)) or not all(isinstance(r, str) for r in rules):
+        raise click.UsageError(f"--filter{src} must be a list of rules, got {rules!r}")
+    try:
+        return UrlFilters(rules)
+    except ValueError as e:
+        raise click.UsageError(f"--filter{src}: {e}")
+
+
 def _discover_urls(url: str, depth: int, fetch=None,
-                   sitemap_hints=()) -> Tuple[List[str], str]:
+                   sitemap_hints=(), filters=None) -> Tuple[List[str], str]:
     """Run Layer 1 (llms.txt) then Layer 2 (sitemap). Return (urls, layer).
 
     Layers 1+2 run unconditionally (regardless of --headless) because
@@ -77,7 +88,7 @@ def _discover_urls(url: str, depth: int, fetch=None,
 
     The httrack profile passes its ``fetch`` (shared pacing and robots cache) and
     the robots.txt ``sitemap_hints``; without them the parsers use their own HTTP,
-    exactly as before.
+    exactly as before. ``filters`` (--filter) scopes both lists.
     """
     parser_kw: dict = {}
     sitemap_kw: dict = {}
@@ -87,7 +98,7 @@ def _discover_urls(url: str, depth: int, fetch=None,
 
     logger.info("[cascade] layer-1 llms.txt: probing")
     llms_urls = fetch_llms_txt(url, **parser_kw)
-    filtered_llms = filter_urls(llms_urls, url, depth)
+    filtered_llms = filter_urls(llms_urls, url, depth, filters)
     logger.info(
         f"[cascade] layer-1 llms.txt: raw={len(llms_urls)} in-scope={len(filtered_llms)}"
     )
@@ -99,7 +110,7 @@ def _discover_urls(url: str, depth: int, fetch=None,
 
     logger.info("[cascade] layer-2 sitemap.xml: probing")
     sitemap_urls = fetch_sitemap(url, **sitemap_kw)
-    filtered_sitemap = filter_urls(sitemap_urls, url, depth)
+    filtered_sitemap = filter_urls(sitemap_urls, url, depth, filters)
     logger.info(
         f"[cascade] layer-2 sitemap: raw={len(sitemap_urls)} in-scope={len(filtered_sitemap)}"
     )
@@ -122,13 +133,14 @@ def _run_download_cascade(
     headless: bool,
     report_lines: List[str],
     verbose: bool,
+    filters: UrlFilters,
 ) -> Tuple[int, int]:
     """Orchestrate the 4-layer cascade. Returns (downloaded, skipped) counts;
     wget's failed-URL summary lines are appended to `report_lines`."""
     is_incremental = bool(manifest_data)
 
     # Layers 1+2 — authoritative URL discovery (always, even under --headless).
-    discovered_urls, winning_layer = _discover_urls(url, depth)
+    discovered_urls, winning_layer = _discover_urls(url, depth, filters=filters)
 
     if discovered_urls:
         if headless:
@@ -139,7 +151,7 @@ def _run_download_cascade(
             try:
                 result = run_playwright_crawl(
                     url, output, depth, delay, include_extensions,
-                    manifest_data, seed_urls=discovered_urls,
+                    manifest_data, seed_urls=discovered_urls, filters=filters,
                 )
             except RuntimeError as e:
                 raise click.ClickException(str(e))
@@ -175,7 +187,7 @@ def _run_download_cascade(
             try:
                 result = run_playwright_crawl(
                     url, output, depth, delay, include_extensions,
-                    manifest_data, seed_urls=discovered_urls,
+                    manifest_data, seed_urls=discovered_urls, filters=filters,
                 )
             except RuntimeError as e:
                 raise click.ClickException(str(e))
@@ -193,6 +205,7 @@ def _run_download_cascade(
         try:
             result = run_playwright_crawl(
                 url, output, depth, delay, include_extensions, manifest_data,
+                filters=filters,
             )
         except RuntimeError as e:
             raise click.ClickException(str(e))
@@ -207,7 +220,7 @@ def _run_download_cascade(
     try:
         wget_res = run_wget_mirror(
             url, output, depth, delay, include_extensions,
-            incremental=is_incremental,
+            incremental=is_incremental, filters=filters,
         )
     except RuntimeError as e:
         raise click.ClickException(str(e))
@@ -233,6 +246,7 @@ def _run_download_cascade(
         try:
             result = run_playwright_crawl(
                 url, output, depth, delay, include_extensions, manifest_data,
+                filters=filters,
             )
         except RuntimeError as e:
             raise click.ClickException(str(e))
@@ -267,6 +281,9 @@ def _run_download_cascade(
               help="Allowed extensions, comma-separated")
 @click.option('--manifest', type=str, default=".dograpper-manifest.json", show_default=True,
               help="JSON cache file for incremental downloads")
+@click.option('--filter', multiple=True, metavar='RULE',
+              help="URL rule in HTTrack syntax, repeatable: +pattern accepts, -pattern "
+                   "refuses, the last match wins (e.g. --filter '-*' --filter '+example.com/wiki/On*')")
 @click.option('--downloader', type=click.Choice(['wget', 'httrack']), default='wget',
               show_default=True,
               help="Download backend: wget (default) or the httrack profile (pure-Python seeded fetch)")
@@ -292,7 +309,7 @@ def _run_download_cascade(
 @click.option('--disable-security-limits', is_flag=True, default=False,
               help="[httrack] Lift the connection, rate and bandwidth clamps")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, downloader: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -312,6 +329,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'delay': delay,
         'include_extensions': include_extensions,
         'manifest': manifest,
+        'filter': filter,
         'downloader': downloader,
         'user_agent': user_agent,
         'no_robots': no_robots,
@@ -340,6 +358,12 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         raise click.UsageError(
             f"invalid downloader {downloader!r}; allowed: wget, httrack")
     policy_kw, from_config = resolve_profile(ctx, merged_params, downloader)
+    filters = _url_filters(ctx, merged_params['filter'])
+    if downloader == 'wget':
+        try:  # wget --mirror's regexes cannot say every rule order: refuse before any fetch
+            url_filter_args(filters, url)
+        except ValueError as e:
+            raise click.UsageError(f"--filter: {e}")
     report_lines: List[str] = []
 
     os.makedirs(output, exist_ok=True)
@@ -348,12 +372,12 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     if downloader == 'httrack':
         files_downloaded, files_skipped, report_lines = run_httrack(
             url, output, depth, delay, include_extensions, headless,
-            bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls,
+            bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
         )
     else:
         files_downloaded, files_skipped = _run_download_cascade(
             url, output, depth, delay, include_extensions, manifest_data, headless,
-            report_lines, bool(ctx.obj.get('VERBOSE')),
+            report_lines, bool(ctx.obj.get('VERBOSE')), filters,
         )
 
     new_manifest = build_manifest(url, output)
@@ -369,5 +393,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     click.echo(f"  Files skipped:    {files_skipped} (cached)")
     click.echo(f"  Total size:       {total_size / 1024 / 1024:.1f} MB")
     click.echo(f"  Manifest:         {manifest_path}")
+    if filters.rules:
+        click.echo(f"  Filtered by --filter: {len(filters.excluded)}")
     for line in report_lines:
         click.echo(f"  {line}")

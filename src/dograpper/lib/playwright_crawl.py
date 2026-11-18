@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import List, Any
 from pathlib import Path
 
+from dograpper.lib.url_filter import UrlFilters
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -28,6 +30,7 @@ def run_playwright_crawl(
     include_extensions: str = "html,md,txt",
     manifest_data: Any = None,
     seed_urls: List[str] | None = None,
+    filters: UrlFilters | None = None,
 ) -> CrawlResult:
     """Crawl SPAs using playwright.
 
@@ -38,6 +41,9 @@ def run_playwright_crawl(
     `seed_urls` (optional) pre-seeds the crawl queue so the download cascade
     can feed in URLs discovered by llms.txt/sitemap layers, skipping the
     link-graph discovery phase entirely when we already know the targets.
+
+    `filters` (optional) drops the links its --filter rules refuse, recording them
+    in `filters.excluded`.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -146,7 +152,11 @@ def run_playwright_crawl(
                         # Strip fragments
                         absolute_link = urlparse(absolute_link)._replace(fragment="").geturl()
                         
-                        if absolute_link not in visited:
+                        # a link past --depth is dropped later anyway: not a filter decision
+                        within_depth = depth == 0 or current_depth < depth
+                        if absolute_link not in visited and not (
+                                within_depth and filters is not None
+                                and filters.decide(absolute_link) is False):
                             to_visit.append((absolute_link, current_depth + 1))
                             
             except Exception as e:

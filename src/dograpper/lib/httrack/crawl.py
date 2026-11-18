@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
+from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.redact import redact_url
 
@@ -31,7 +32,10 @@ class HttrackResult:
 
 
 def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
-                   include_extensions: str, *, fetcher: Fetcher | None = None) -> HttrackResult:
+                   include_extensions: str, *, fetcher: Fetcher | None = None,
+                   filters: UrlFilters | None = None) -> HttrackResult:
+    """Fetch `urls` (already scoped and filtered); a redirect target goes through the
+    same-host check and `filters` (refusals land in `filters.excluded`) before its GET."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
@@ -88,6 +92,8 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                         return "refused"
                     if not same_host(url, nxt):
                         report.out_of_scope.append(redact_url(nxt))
+                        return "scoped"
+                    if filters is not None and filters.decide(nxt) is False:
                         return "scoped"
                     if hops >= MAX_REDIRECTS:
                         report.errors.append((safe, "too many redirects", None))

@@ -90,6 +90,14 @@ and fixes alone are a PATCH bump.
   `INDEX.md` and grep-then-Read usage. An existing `SKILL.md` is never
   overwritten. The `claude-project` description now says it targets Claude
   Projects. ([#93])
+- `download --filter RULE` (repeatable, config key `filter`, forwarded by
+  `sync`): HTTrack scan rules (`+pattern` accepts, `-pattern` refuses, the last
+  match wins) applied to every discovered link before it is fetched, under both
+  downloaders: the llms.txt/sitemap lists, `wget --mirror` (as
+  `--accept-regex`/`--reject-regex`), Playwright and httrack redirect targets.
+  A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
+  filtered. Refused URLs are counted as `Filtered by --filter: N` in the
+  summary ([#96](https://github.com/lorenzoervedosa/dograpper/issues/96)).
 
 ### Changed
 

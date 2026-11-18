@@ -9,7 +9,9 @@ import time
 from dataclasses import dataclass, field
 from typing import List
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
+from dograpper.lib.url_filter import UrlFilters, rule_regex
 from dograpper.utils.dep_resolver import resolve_wget
 from dograpper.utils.redact import neutralize_controls, redact_url
 
@@ -67,6 +69,54 @@ def _content_filter_args(include_extensions: str) -> List[str]:
     if normalized == set(DEFAULT_TEXT_EXTENSIONS):
         return [f"--reject={ASSET_REJECT_EXTENSIONS}"]
     return [f"--accept={include_extensions}"]
+
+
+def url_filter_args(filters: UrlFilters | None, url: str) -> List[str]:
+    """wget's scope for a crawl from `url` under the --filter rules.
+
+    No +rule: ``--no-parent``, plus the -rules as ``--reject-regex``. A +rule lifts
+    ``--no-parent``; the start directory then becomes HTTrack's implicit first rule,
+    ``+<host>/<directory>*`` (htswizard.c), so links no rule matches keep that scope.
+    wget takes a link that matches ``--accept-regex`` and not ``--reject-regex``,
+    which says exactly what the rules say only when no +rule follows a -rule (after
+    the last bare ``*`` rule, which overrides every rule before it); other orders
+    raise ValueError.
+    """
+    rules = list(filters.rules) if filters is not None else []
+    if not any(accepts for accepts, _, _ in rules):
+        reject = "|".join(rx for _, _, rx in rules)
+        return ["--no-parent"] + ([f"--reject-regex={reject}"] if reject else [])
+    parts = urlsplit(url)
+    directory = parts.path[:parts.path.rfind("/") + 1] or "/"
+    rules.insert(0, (True, None, rule_regex(parts.netloc.rpartition("@")[2] + directory + "*")))
+    stars = [i for i, (_, pattern, _) in enumerate(rules) if pattern == "*"]
+    if stars:
+        rules = rules[stars[-1]:]
+        while rules and not rules[0][0]:  # after "-*", -rules before the first +rule change nothing
+            rules.pop(0)
+    first_refusal = next((i for i, rule in enumerate(rules) if not rule[0]), len(rules))
+    late = next((rule for rule in rules[first_refusal:] if rule[0]), None)
+    if late is not None:
+        raise ValueError(
+            f"under --downloader wget, '+{late[1]}' follows '-{rules[first_refusal][1]}': "
+            "wget's --accept-regex/--reject-regex cannot let a +rule override an earlier "
+            "-rule. Put the -rules after the +rules (they then win), or start with '-*'")
+    accept = "|".join(rx for accepts, _, rx in rules if accepts)
+    reject = "|".join(rx for accepts, _, rx in rules if not accepts)
+    if not accept:  # "-*" with no +rule after it: only the start URL is fetched
+        return ["--reject-regex=.*"]
+    return [f"--accept-regex={accept}"] + ([f"--reject-regex={reject}"] if reject else [])
+
+
+def _record_refused(log_path: str, filters: UrlFilters) -> None:
+    """Re-decide each link wget's regexes refused (its --rejected-log) so that only the
+    ones a rule refused land in ``filters.excluded``; the others were outside the scope."""
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            reason, _, rest = line.partition("\t")
+            if reason == "REGEX":
+                filters.decide(unquote(rest.split("\t", 1)[0]))
+
 
 MAX_SHOWN_FAILURES = 5
 
@@ -127,9 +177,11 @@ def run_wget_mirror(
     depth: int = 0,
     delay: int = 0,
     include_extensions: str = "html,md,txt",
-    incremental: bool = False
+    incremental: bool = False,
+    filters: UrlFilters | None = None,
 ) -> WgetResult:
-    """Run wget --mirror with the specified options."""
+    """Run wget --mirror with the specified options. URLs the --filter rules refused are
+    recorded in ``filters.excluded``."""
     
     # Check if wget is installed
     wget_bin = resolve_wget()
@@ -144,10 +196,10 @@ def run_wget_mirror(
         "--convert-links",
         "--adjust-extension",
         "--page-requisites",
-        "--no-parent",
         f"--directory-prefix={output_dir}",
         f"--user-agent={BROWSER_UA}",
     ])
+    cmd.extend(url_filter_args(filters, url))
 
     for header_name, header_value in BROWSER_HEADERS.items():
         cmd.append(f"--header={header_name}: {header_value}")
@@ -161,6 +213,12 @@ def run_wget_mirror(
     
     cmd.extend(_content_filter_args(include_extensions))
 
+    rejected_log = None
+    if filters is not None and filters.rules:
+        fd, rejected_log = tempfile.mkstemp(suffix=".rejected.tsv")
+        os.close(fd)
+        cmd.append(f"--rejected-log={rejected_log}")
+
     cmd.append(url)
 
     max_retries = 3
@@ -171,30 +229,37 @@ def run_wget_mirror(
     errors = []
     failed: List[WgetFailure] = []
 
-    while attempt < max_retries and not success:
-        attempt += 1
-        logger.info(f"Running wget (attempt {attempt}/{max_retries}): {' '.join(cmd)}")
+    try:
+        while attempt < max_retries and not success:
+            attempt += 1
+            logger.info(f"Running wget (attempt {attempt}/{max_retries}): {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                errors="replace", env=_WGET_ENV)
-        stdout_output += result.stdout
-        stderr_output += result.stderr
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    errors="replace", env=_WGET_ENV)
+            stdout_output += result.stdout
+            stderr_output += result.stderr
         
-        if result.returncode == 0:
-            success = True
-        elif result.returncode == 8:
-            logger.warning("wget returned 8 (Server error). Treating as partial success.")
-            success = True
-            errors.append("Server error on some URLs (exit code 8)")
-            failed = parse_failed_urls(result.stderr)
-        else:
-            logger.error(f"wget failed with exit code {result.returncode}")
-            errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
-            if attempt < max_retries:
-                backoff_time = 2 ** attempt
-                logger.info(f"Retrying in {backoff_time} seconds...")
-                time.sleep(backoff_time)
+            if result.returncode == 0:
+                success = True
+            elif result.returncode == 8:
+                logger.warning("wget returned 8 (Server error). Treating as partial success.")
+                success = True
+                errors.append("Server error on some URLs (exit code 8)")
+                failed = parse_failed_urls(result.stderr)
+            else:
+                logger.error(f"wget failed with exit code {result.returncode}")
+                errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
+                if attempt < max_retries:
+                    backoff_time = 2 ** attempt
+                    logger.info(f"Retrying in {backoff_time} seconds...")
+                    time.sleep(backoff_time)
             
+        if rejected_log and success:
+            _record_refused(rejected_log, filters)
+    finally:
+        if rejected_log:
+            os.unlink(rejected_log)
+
     files_downloaded = []
     if success:
         outpath = Path(output_dir)

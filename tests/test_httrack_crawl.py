@@ -75,6 +75,22 @@ def test_same_host_redirect_is_followed_and_final_url_named(server, tmp_path):
     assert [os.path.basename(f) for f in res.files_downloaded] == ["new.html"]
 
 
+def test_redirect_target_refused_by_filters_is_not_fetched(server, tmp_path):
+    from dograpper.lib.url_filter import UrlFilters
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/Special:Login"}, b"")
+    script["/Special:Login"] = (200, HTML, b"<p>login</p>")
+    filters = UrlFilters(["-*Special:*"])
+    policy = build_policy(retries=0)
+    ft = FakeTime()
+    res = fetch_url_list([f"{base}/old"], str(tmp_path), policy, "html",
+                         fetcher=Fetcher(policy, clock=ft.clock, sleep=ft.sleep), filters=filters)
+    assert res.files_downloaded == [] and not res.front_failed
+    assert "/Special:Login" not in seen
+    assert filters.excluded == {f"{base}/Special:Login"}
+
+
 def test_redirect_with_undecodable_body_is_followed(server, tmp_path):
     base, script, _ = server
     script["/robots.txt"] = (404, {}, b"")

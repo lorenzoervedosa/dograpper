@@ -214,6 +214,7 @@ dograpper download <url> -o <directory> [options]
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions (csv) |
 | `--manifest` | — | `.dograpper-manifest.json` | Cache file path |
+| `--filter` | — | *(none)* | URL rule, repeatable: `+pattern` accepts, `-pattern` refuses, the last match wins (see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | Download backend: `wget` or `httrack` (see [Downloader profiles](#downloader-profiles)) |
 
 #### Discovery cascade (4 layers)
@@ -232,7 +233,8 @@ next one when the previous fails or returns fewer than 3 usable URLs
    The probe also tries `sitemap_index.xml` and `sitemap-index.xml`.
 3. **`wget --mirror`** — traditional link-graph crawl, `User-Agent` of
    Chrome/120 to avoid being blocked by edge WAFs (Cloudflare, Vercel).
-   Runs with `--no-parent`, `--timestamping` (always, enables incremental
+   Runs with `--no-parent` (lifted by a `+` [URL filter](#url-filters---filter)),
+   `--timestamping` (always, enables incremental
    mode via mtime diff), `--convert-links`, `--adjust-extension`,
    `--page-requisites`.
 4. **Playwright (bounded hydration)** — SPA fallback:
@@ -265,6 +267,60 @@ INFO: [cascade] layer-2 sitemap: raw=120 in-scope=120
 INFO: [cascade] layer-2 sitemap: WIN (>=3)
 INFO: [cascade] layer-3 wget -i: fetching 120 URLs from sitemap.xml
 ```
+
+#### URL filters (`--filter`)
+
+`--filter RULE` scopes a crawl with HTTrack's scan rules. It is repeatable, is
+read from `"filter": [...]` in `.dograpper.json` (a list; explicit flags replace
+it) and is forwarded by `sync`. It works with both downloaders and is applied to
+every discovered link before it is fetched: the llms.txt and sitemap lists,
+`wget --mirror`, the Playwright crawl, and the httrack profile's seeded list and
+redirect targets. The start URL itself is never filtered.
+
+- `+pattern` accepts the URLs it matches and `-pattern` refuses them. Rules are
+  read in order and the **last** matching rule decides.
+- A URL that no rule matches keeps the default scope: same host, under the start
+  URL's path, within `--depth`.
+- A `+` rule lifts the path limit (wget's `--no-parent`) for the URLs it
+  matches. Start with `-*` to make the `+` rules the whole scope.
+- Rules never leave the start URL's host. This is a deviation from HTTrack, where
+  `+other.host/*` widens the crawl to another site.
+
+Pattern syntax, as HTTrack's `strjoker` matcher implements it. Patterns are
+HTTrack wildcards, not regular expressions: `.`, `?` and `+` are literal
+characters.
+
+- A pattern is matched from the start of the URL. Write it with or without the
+  scheme (`example.com/docs/*` or `https://example.com/docs/*`); the first form
+  also ignores a `user:password@`. The fragment is ignored. The query string is
+  part of the URL, and the URL is matched as discovered, percent-encoding
+  unchanged.
+- Literal text ignores ASCII case: `+*/wiki/on*` matches `/wiki/OnTick`.
+- `*` matches any run of characters.
+- `*[file]` (or `*[name]`) matches a run without `/` or `?`, and `*[path]` a run
+  without `?`.
+- `*[param]` matches an optional query string (`?…`).
+- `*[a-z,0-9,_]` matches a run of the listed characters and ranges. It is
+  case-sensitive, and `\` escapes one character (`*[\*]`, `*[\[,\]]`).
+- `*[]` means the URL must end there.
+- A pattern that does not end in `*[]` also matches the same URL followed by a
+  query string: `-*/index.php` refuses `/index.php?action=edit` too, while
+  `-*.html*[]` leaves `page.html?x=1` alone.
+- Size rules (`*[<NN]`, `*[>NN]`), `mime:` rules and `*(...)` are not supported.
+  They, and a rule that starts with neither `+` nor `-`, are a usage error
+  (exit 2).
+
+Under `--downloader wget`, `wget --mirror` receives the rules as
+`--accept-regex` / `--reject-regex` (POSIX regex). These cannot let a `+` rule
+override an earlier `-` rule, so such a list is a usage error before anything
+is fetched: put the `-` rules after the `+` rules. Rules before a bare `-*` or
+`+*` never decide anything and do not count for this check. The httrack
+profile has no such limit.
+
+The summary counts the refused URLs as `Filtered by --filter: N`; URLs outside
+the default scope that no rule matched are not counted. Page requisites (CSS,
+images) that `wget -i` fetches for a listed page are scoped by
+`--include-extensions` only.
 
 #### Downloader profiles
 
@@ -356,6 +412,14 @@ dograpper download https://docs.python.org/3/ -o ./python-docs -d 3 --include-ex
 
 # Mintlify (layer 2 finds the sub-sitemap on CDN automatically)
 dograpper download https://mintlify.wiki/user/project -o ./project-docs
+
+# One MediaWiki category: the category page plus its member pages (/wiki/On*), nothing else
+dograpper download "https://pzwiki.net/w/index.php?title=Category:Current_Lua_events&pagefrom=OnLoadSoundBanks" \
+  -o ./lua-events -d 1 --filter '-*' --filter '+pzwiki.net/wiki/On*'
+
+# Crawl a wiki category but skip unrelated meta pages
+dograpper download https://pzwiki.net/wiki/Category:Lua_events -o ./lua-events -d 1 \
+  --filter '-*/wiki/Category:En' --filter '-*/wiki/PZwiki:*' --filter '-*/wiki/Special:*'
 ```
 
 ### `dograpper pack`
@@ -823,6 +887,7 @@ dograpper sync <url> -o <dir> [options]
 | `--headless` | — | `false` | Playwright direct (passed to `download`) |
 | `--delay` | — | `0` | Rate limiting in ms (passed to `download`) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
+| `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
 | `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |

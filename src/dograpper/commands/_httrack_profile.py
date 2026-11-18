@@ -122,8 +122,9 @@ def discovery_fetch(fetcher) -> Callable[[str], bytes | None]:
 
 
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
-                policy_kw, from_config, discover) -> Tuple[int, int, List[str]]:
-    """Seeded fetch only. `discover` is download's layers 1+2 (`_discover_urls`).
+                policy_kw, from_config, discover, filters) -> Tuple[int, int, List[str]]:
+    """Seeded fetch only. `discover` is download's layers 1+2 (`_discover_urls`);
+    `filters` (--filter) scopes the discovered list and the redirect targets.
     Returns (downloaded, skipped, report lines)."""
     warn_if_old_openssl()
     if headless:
@@ -132,13 +133,15 @@ def run_httrack(url, output, depth, delay, include_extensions, headless, verbose
     fetcher = Fetcher(policy)
     parts = urlsplit(url)
     sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
-    discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints)
+    discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints,
+                                         filters)
     if not discovered:
         raise click.ClickException(
             "httrack profile: recursive crawl is not implemented yet (planned); "
             "use --downloader wget")
     logger.info(f"[cascade] httrack: fetching {len(discovered)} URLs from {winning_layer}")
-    res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher)
+    res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher,
+                         filters=filters)
     if res.front_failed or not res.success:
         for line in format_report(res.report, verbose):
             click.echo(f"  {line}", err=True)
