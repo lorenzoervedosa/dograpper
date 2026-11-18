@@ -3,6 +3,7 @@
 import logging
 import os
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
@@ -13,7 +14,7 @@ from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .escape import request_target
-from .fetcher import REDIRECTS, Fetcher, same_host
+from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
 from .naming import NameRegistry
 from .policy import HttrackPolicy
 from .report import RunReport
@@ -31,6 +32,74 @@ class HttrackResult:
     report: RunReport
     front_failed: bool
     urls: dict[str, str] = field(default_factory=dict)  # written file -> seed URL requested
+
+
+def _count(report: RunReport, status: int | None, error: bool) -> None:
+    key = "error" if error or status is None else f"{status // 100}xx"
+    report.status_counts[key] = report.status_counts.get(key, 0) + 1
+
+
+def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lock,
+               redirect_ok: Callable[[str, str], bool], *, kind: str = "navigate",
+               referer: str | None = None) -> tuple[str, str, FetchResult | None]:
+    """GET `url` for every fetch path: /cdn-cgi/ is never requested, robots.txt is checked
+    before each hop, and a redirect is followed (at most MAX_REDIRECTS) only when
+    `redirect_ok(url, target)`, called under `lock`, accepts the target. Return ("ok",
+    final URL, result) for a 2xx that is no challenge, else ("scoped" | "refused", URL,
+    None) with the cause recorded in `report` (an error names `referer`)."""
+    via, hops = (redact_url(referer) if referer else None), 0
+    while True:
+        safe = redact_url(url)
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            with lock:
+                report.errors.append((safe, "malformed URL", via))
+            return "refused", url, None
+        if parts.path.startswith("/cdn-cgi/"):
+            with lock:
+                report.out_of_scope.append(safe)
+            return "scoped", url, None
+        try:
+            target = request_target(parts)  # robots sees exactly what goes on the wire
+        except ValueError:
+            with lock:
+                report.errors.append((safe, "malformed URL", via))
+            return "refused", url, None
+        if not fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").allowed(target):
+            with lock:
+                report.robots_blocked.append(safe)
+            logger.info("robots.txt disallows %s", safe)
+            return "refused", url, None
+        res = fetcher.get(url, kind=kind, referer=referer)
+        # the fetcher keeps a 3xx's Location even when its body fails to decode
+        redirect = bool(res.status in REDIRECTS and res.location)
+        with lock:
+            report.retried += max(res.attempts - 1, 0)
+            _count(report, res.status, res.error is not None and not redirect)
+            if res.error is not None and not redirect:
+                report.errors.append((safe, res.error, via))
+                return "refused", url, None
+            if redirect:
+                try:
+                    nxt = urljoin(url, res.location)
+                except ValueError:
+                    report.errors.append((safe, "malformed redirect Location", via))
+                    return "refused", url, None
+                if not redirect_ok(url, nxt):
+                    return "scoped", url, None
+                if hops >= MAX_REDIRECTS:
+                    report.errors.append((safe, "too many redirects", via))
+                    return "refused", url, None
+                url, hops = nxt, hops + 1
+                continue
+            if res.challenged:
+                report.challenged.append(safe)
+                return "refused", url, None
+            if not (res.status and 200 <= res.status < 300):
+                report.errors.append((safe, f"HTTP {res.status}", via))
+                return "refused", url, None
+        return "ok", url, res
 
 
 def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
@@ -52,68 +121,16 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     finished, size = [0], [0]  # seeds done, bytes written
     progress = ProgressReporter("httrack", total=len(seeds))
 
-    def count(status: int | None, error: bool) -> None:
-        key = "error" if error or status is None else f"{status // 100}xx"
-        report.status_counts[key] = report.status_counts.get(key, 0) + 1
+    def redirect_ok(url: str, nxt: str) -> bool:
+        if not same_host(url, nxt):
+            report.out_of_scope.append(redact_url(nxt))
+            return False
+        return filters is None or filters.decide(nxt) is not False
 
     def fetch_one(url: str) -> str:
         """Return "refused", "scoped" (skipped by scope/filter) or "written"."""
-        seed, hops = url, 0
-        while True:
-            safe = redact_url(url)
-            try:
-                parts = urlsplit(url)
-            except ValueError:
-                with lock:
-                    report.errors.append((safe, "malformed URL", None))
-                return "refused"
-            if parts.path.startswith("/cdn-cgi/"):
-                with lock:
-                    report.out_of_scope.append(safe)
-                return "scoped"
-            try:
-                target = request_target(parts)  # robots sees exactly what goes on the wire
-            except ValueError:
-                with lock:
-                    report.errors.append((safe, "malformed URL", None))
-                return "refused"
-            if not fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").allowed(target):
-                with lock:
-                    report.robots_blocked.append(safe)
-                logger.info("robots.txt disallows %s", safe)
-                return "refused"
-            res = fetcher.get(url, kind="navigate")
-            # the fetcher keeps a 3xx's Location even when its body fails to decode
-            redirect = bool(res.status in REDIRECTS and res.location)
-            with lock:
-                report.retried += max(res.attempts - 1, 0)
-                count(res.status, res.error is not None and not redirect)
-                if res.error is not None and not redirect:
-                    report.errors.append((safe, res.error, None))
-                    return "refused"
-                if redirect:
-                    try:
-                        nxt = urljoin(url, res.location)
-                    except ValueError:
-                        report.errors.append((safe, "malformed redirect Location", None))
-                        return "refused"
-                    if not same_host(url, nxt):
-                        report.out_of_scope.append(redact_url(nxt))
-                        return "scoped"
-                    if filters is not None and filters.decide(nxt) is False:
-                        return "scoped"
-                    if hops >= MAX_REDIRECTS:
-                        report.errors.append((safe, "too many redirects", None))
-                        return "refused"
-                    url, hops = nxt, hops + 1
-                    continue
-                if res.challenged:
-                    report.challenged.append(safe)
-                    return "refused"
-                if not (res.status and 200 <= res.status < 300):
-                    report.errors.append((safe, f"HTTP {res.status}", None))
-                    return "refused"
-            return write(url, seed, safe, res)
+        outcome, final, res = fetch_page(url, fetcher, report, lock, redirect_ok)
+        return write(final, url, redact_url(final), res) if outcome == "ok" else outcome
 
     def write(url: str, seed: str, safe: str, res) -> str:
         path = names.assign(url, res.headers.get("content-type"))
