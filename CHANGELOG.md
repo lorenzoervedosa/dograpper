@@ -73,6 +73,12 @@ and fixes alone are a PATCH bump.
   always skipped. `--include-extensions` (config key `include-extensions`)
   brings other extensions back. Corpora that relied on packing e.g. `.json`
   or extensionless files must now opt in. ([#91])
+- `pack --context-header` fills `url` for pages without a manifest entry from
+  the marker in the page head: HTTrack's `Mirrored from <url>` footer or a
+  browser's `saved from url=(N)<url>`. The value is validated (http/https,
+  length, characters, host) and the manifest still wins. The pack summary gains
+  a `Source URLs` line counting URLs by source and listing files left without
+  one, including rejected or conflicting markers. ([#90])
 
 ### Fixed
 
