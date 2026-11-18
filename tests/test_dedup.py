@@ -560,3 +560,35 @@ class TestDeduplicateCLI:
             assert result.exit_code == 0
             assert os.path.exists(output_dir)
             assert len(os.listdir(output_dir)) > 0
+
+    def _create_page_with_sibling_entries(self, tmp_dir):
+        input_dir = os.path.join(tmp_dir, "input")
+        os.makedirs(input_dir)
+        with open(os.path.join(input_dir, "Map.info.txt"), "w") as f:
+            f.write(MAP_INFO_PAGE)
+        with open(os.path.join(input_dir, "other.txt"), "w") as f:
+            f.write(f"Another page with enough words of its own to be a block.\n\n{BANNER.format('4.5.1')}")
+        with open(os.path.join(input_dir, "zz_last.txt"), "w") as f:
+            f.write(f"A last page with enough words of its own to be a block.\n\n{BANNER.format('4.17.0')}")
+        return input_dir
+
+    def test_summary_shows_removed_per_mode_and_matches_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = self._create_page_with_sibling_entries(tmp)
+            result = CliRunner().invoke(pack, [
+                input_dir, "-o", os.path.join(tmp, "out"),
+                "--dedup", "both", "--dedup-threshold", "10",
+            ])
+            assert result.exit_code == 0, result.output
+            assert "Blocks removed:    0 (0 exact + 0 fuzzy)" in result.output
+            assert "Matches kept:      2 same-page, 0 leading-token, 1 numbers-only" in result.output
+
+    def test_dry_run_shows_matches_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = self._create_page_with_sibling_entries(tmp)
+            result = CliRunner().invoke(pack, [
+                input_dir, "-o", os.path.join(tmp, "out"),
+                "--dedup", "both", "--dedup-threshold", "10", "--dry-run",
+            ])
+            assert result.exit_code == 0, result.output
+            assert "Dedup matches kept:    2 same-page, 0 leading-token, 1 numbers-only" in result.output

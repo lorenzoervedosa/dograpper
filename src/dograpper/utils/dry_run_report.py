@@ -80,6 +80,12 @@ def generate_report(data: DryRunData) -> str:
             f"({dedup_pct}%) \u2014 {data.dedup_stats.blocks_removed_exact} exact, "
             f"{data.dedup_stats.blocks_removed_fuzzy} fuzzy"
         )
+        # Same wording as the "Matches kept" line of the pack summary (commands/pack.py).
+        lines.append(
+            f"  Dedup matches kept:    {data.dedup_stats.blocks_kept_same_page} same-page, "
+            f"{data.dedup_stats.blocks_kept_leading_token} leading-token, "
+            f"{data.dedup_stats.blocks_kept_numbers} numbers-only"
+        )
 
     if data.show_tokens:
         total_tokens = sum(f.tokens for f in data.file_stats if f.tokens is not None)
