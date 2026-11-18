@@ -6,7 +6,12 @@
 
 ## Verdict
 
-**Three of the four criteria pass. The large-file criterion fails.**
+**All four criteria pass after the re-run below.** The first run passed three
+of the four criteria; the large-file criterion failed, as described next, and
+was fixed by reference-style links (#115), plain-text links in code (#117) and
+packed-page link targets (#118). See [Re-run after the link fixes](#re-run-after-the-link-fixes).
+
+First run:
 
 - All 32 curated lookups were answered with a `file:line` citation, at 1.56
   tool calls per lookup. 30 of them stayed within one grep plus one `Read`.
@@ -214,3 +219,27 @@ follow-ups.
 Not checked: the Sphinx corpus, how Claude Code's `Grep` tool displays lines
 over 2,000 characters, and whether the 12 Javadoc lines between 43,036 and
 43,844 chars fit in one `Read`.
+
+## Re-run after the link fixes
+
+Same mirrors and the same `init --target claude-code` preset, packed with the
+branch that adds reference-style links (#115), plain-text links in code
+(#117), packed-page link targets (#118), `<br>` separators (#116) and the
+MediaWiki leftover cleanup (#119). Token counts use `cl100k_base`.
+
+| Measure | WIKI first run → re-run | Javadoc first run → re-run |
+|---|---|---|
+| Longest line (chars) | 60,413 → 25,062 | 115,338 → 22,680 |
+| Lines over 2,000 chars | 42 → 15 | 586 → 237 |
+| Files over 256 KB | 1 → 1 (`Item_tag.md`) | 21 → 17 |
+| Longest line in a file over 256 KB (tokens) | 8,236 (`Item_tag.md:189`) | none over 2,000 chars |
+| Pack time vs. default layout | 11–13 s vs. 10–12 s (about 1.1x) | 68 s vs. 60–80 s |
+
+Every line of every file over 256 KB now fits one `Read`: the largest is
+8,236 tokens, against 27,000–47,000 for the lines refused in the first run.
+`rg 'ItemContainer getInventory'` now matches the `IsoGameCharacter`
+signature. The large-file criterion passes, and so do the other three, which
+the link fixes do not affect. The first run's lookups were not re-run.
+
+Still open from the findings: F6 (#120, Javadoc summary grids) and F7 (#121,
+saved 404 pages). Neither affects an acceptance criterion.
