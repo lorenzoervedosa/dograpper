@@ -605,6 +605,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         click.echo(f"  Dedup mode:        {dedup_mode}")
         click.echo(f"  Blocks analyzed:   {dedup_stats.total_blocks}")
         click.echo(f"  Blocks removed:    {dedup_stats.blocks_removed} ({dedup_stats.blocks_removed_exact} exact + {dedup_stats.blocks_removed_fuzzy} fuzzy)")
+        click.echo(f"  Matches kept:      {dedup_stats.blocks_kept_same_page} same-page, "
+                   f"{dedup_stats.blocks_kept_leading_token} leading-token, "
+                   f"{dedup_stats.blocks_kept_numbers} numbers-only")
         if total_words + dedup_stats.words_removed > 0:
             pct = dedup_stats.words_removed * 100 // (total_words + dedup_stats.words_removed)
         else:
