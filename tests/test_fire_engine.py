@@ -9,15 +9,20 @@ import base64
 import gzip
 import json
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 from dograpper.cli import cli
+from dograpper.lib.fire_engine import fetcher as fire_fetcher
 from dograpper.lib.fire_engine.fetcher import (CurlCffiFetcher, _MISSING,
                                                _default_session_factory)
-from dograpper.lib.httrack.policy import build_policy
+from dograpper.lib.httrack import fetcher as httrack_fetcher
+from dograpper.lib.httrack.policy import build_policy, decoder_module
 
 
 LM = "Mon, 01 Jan 2024 00:00:00 GMT"
@@ -27,23 +32,28 @@ class FakeResp:
     def __init__(self, status=200, headers=None, content=b"<html>ok</html>", chunks=None):
         self.status_code = status
         self.headers = headers or {}
-        self._chunks = chunks if chunks is not None else [content]
-        self.closed = False
+        self.chunks = chunks if chunks is not None else [content]
 
-    def iter_content(self, chunk_size=65536):
-        yield from self._chunks
 
-    def close(self):
-        self.closed = True
+class FakeCurlError(Exception):
+    pass
 
 
 class FakeSession:
+    """curl's side of a transfer: each chunk goes to the writer (content_callback), and a
+    writer that does not take the whole chunk aborts it, as libcurl does (error 23)."""
+
     def __init__(self, resp):
         self.resp = resp
         self.calls = []
+        self.delivered = 0
 
     def request(self, method, url, **kw):
         self.calls.append((method, url, kw))
+        for chunk in self.resp.chunks:
+            self.delivered += 1
+            if kw["content_callback"](chunk) != len(chunk):
+                raise FakeCurlError("curl: (23) Failure writing output to destination")
         return self.resp
 
 
@@ -51,8 +61,8 @@ def make_fetcher(resp, *, proxy=None, impersonate="chrome124"):
     session = FakeSession(resp)
     captured = {}
 
-    def factory(imp):
-        captured["impersonate"] = imp
+    def factory(imp, timeout):
+        captured["impersonate"], captured["timeout"] = imp, timeout
         return session
 
     fetcher = CurlCffiFetcher(
@@ -121,29 +131,41 @@ def test_cloudflare_challenge_is_detected_from_header():
     assert res.challenged is True
 
 
-def test_content_encoding_header_is_dropped_so_body_is_not_double_decoded():
-    # curl_cffi already decompresses; a lingering content-encoding must not make
-    # the inherited get() try to decode plain bytes again.
-    resp = FakeResp(headers={"content-encoding": "gzip"}, content=b"plain text")
+def test_the_raw_body_is_decoded_by_the_bounded_httrack_decoder():
+    """curl's decoding is off (the default factory sets HTTP_CONTENT_DECODING 0): the
+    encoded body and its Content-Encoding reach Fetcher.get, which decodes within
+    MAX_BODY_BYTES and the zstd window cap, as on the stdlib path."""
+    resp = FakeResp(headers={"Content-Encoding": "gzip"}, content=gzip.compress(b"plain text"))
     fetcher, _session, _ = make_fetcher(resp)
 
     res = fetcher.get("https://example.com/", kind="navigate")
 
-    assert res.body == b"plain text"
+    assert (res.body, res.headers["content-encoding"]) == (b"plain text", "gzip")
 
 
-def test_body_over_the_cap_is_rejected_mid_stream(monkeypatch):
-    # curl decompresses on the fly; a bomb must be stopped while streaming, not
-    # after the whole thing is in memory.
+def test_a_body_over_the_cap_aborts_the_transfer_at_curls_writer(monkeypatch):
+    """The cap holds where curl hands bytes over: the chunk past it is refused and curl
+    stops, so nothing past the cap is buffered or charged to the bandwidth."""
     monkeypatch.setattr("dograpper.lib.fire_engine.fetcher.MAX_BODY_BYTES", 10)
-    resp = FakeResp(chunks=[b"x" * 8, b"y" * 8])  # 16 bytes > cap of 10
-    fetcher, _session, _ = make_fetcher(resp)
+    resp = FakeResp(chunks=[b"x" * 8, b"y" * 8, b"z" * 8])
+    fetcher, session, _ = make_fetcher(resp)
+    charged = []
+    fetcher._charge_bandwidth = charged.append
 
     res = fetcher.get("https://example.com/", kind="navigate")
 
-    assert res.status is None
-    assert res.error == "body too large"
-    assert resp.closed is True
+    assert (res.status, res.error) == (None, "body too large")
+    assert session.delivered == 2  # the third chunk never came: the transfer was aborted
+    assert charged == [8]
+    assert res.attempts == 1  # an oversized body is not retried
+
+
+def test_the_policy_timeout_reaches_the_session_factory():
+    fetcher, _session, captured = make_fetcher(FakeResp())
+
+    fetcher.get("https://example.com/", kind="navigate")
+
+    assert captured["timeout"] == 120.0
 
 
 def test_userinfo_is_stripped_from_the_url_sent_to_curl():
@@ -167,7 +189,7 @@ def test_an_explicit_port_reaches_curl_once():
 def test_default_factory_without_curl_cffi_raises_friendly_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "curl_cffi", None)  # forces ImportError
     with pytest.raises(RuntimeError) as exc:
-        _default_session_factory("chrome124")
+        _default_session_factory("chrome124", 1.0)
     assert "fire-engine" in str(exc.value)
     assert str(exc.value) == _MISSING
 
@@ -175,7 +197,7 @@ def test_default_factory_without_curl_cffi_raises_friendly_error(monkeypatch):
 def test_missing_curl_cffi_surfaces_before_any_request():
     """The first GET (robots.txt, in run_fire_engine) must raise the friendly error,
     not have it wrapped as a transport OSError that the run retries and reports."""
-    def factory(_imp):
+    def factory(_imp, _timeout):
         raise RuntimeError(_MISSING)
 
     fetcher = CurlCffiFetcher(build_policy(), session_factory=factory, sleep=lambda _s: None)
@@ -352,3 +374,113 @@ def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server
     assert "Not modified (304): 2" in second.output
     assert {p: open(p, "rb").read() for p in files} == files
     assert json.loads(manifest.read_text())["files"] == before
+
+
+# -- body bound and timeouts, over the real curl_cffi --------------------------
+
+def bombs():
+    """(encoding, body) whose decoded size is 4 MiB of zeros, for each codec installed."""
+    data = b"\0" * (4 << 20)
+    out = [("gzip", gzip.compress(data, 9))]
+    if (br := decoder_module("br")) is not None:
+        out.append(("br", br.compress(data, quality=1)))
+    if (zstd := decoder_module("zstd")) is not None:
+        out.append(("zstd", zstd.compress(data)))
+    return out
+
+
+@pytest.mark.parametrize("encoding,body", bombs(), ids=lambda v: v if isinstance(v, str) else "")
+def test_real_decompression_bomb_stops_at_the_cap_and_only_wire_bytes_are_charged(
+        server, monkeypatch, encoding, body):
+    """curl does not decode: the few KiB on the wire are what its writer receives and the
+    bandwidth is charged, and the bounded decoder stops the 4 MiB expansion at the 1 MiB
+    cap. (A 1 GiB bomb, measured by hand: ~1 GiB peak RSS before #130, ~100 MiB after.)"""
+    base, script, _ = server
+    monkeypatch.setattr(httrack_fetcher, "MAX_BODY_BYTES", 1 << 20)
+    script["/bomb"] = (200, {"Content-Encoding": encoding}, body)
+    fetcher = real_fetcher()
+    charged = []
+    fetcher._charge_bandwidth = charged.append
+
+    res = fetcher.get(base + "/bomb", kind="navigate")
+
+    assert res.error == "decode failed: ValueError: body too large"
+    assert sum(charged) == len(body) < 1 << 20
+
+
+def test_real_zstd_frame_over_the_window_cap_is_refused(server):
+    """curl's own zstd decoder takes windows up to 128 MiB; the bounded decoder keeps the
+    8 MiB cap (RFC 9659) on this transport too."""
+    zstd = decoder_module("zstd")
+    if zstd is None:
+        pytest.skip("no zstd decoder installed")
+    base, script, _ = server
+    data = b"x" * 10_000_000
+    if zstd.__name__ == "zstandard":
+        body = zstd.ZstdCompressor(compression_params=zstd.ZstdCompressionParameters.from_level(
+            3, window_log=27)).compress(data)
+    else:
+        body = zstd.compress(data, options={zstd.CompressionParameter.window_log: 27})
+    script["/wide"] = (200, {"Content-Encoding": "zstd"}, body)
+
+    res = real_fetcher().get(base + "/wide", kind="navigate")
+
+    assert res.status == 200 and res.body == b"" and res.error.startswith("decode failed")
+
+
+def test_real_raw_body_over_the_cap_aborts_the_transfer(server, monkeypatch):
+    base, script, _ = server
+    monkeypatch.setattr(fire_fetcher, "MAX_BODY_BYTES", 1 << 20)
+    script["/big"] = (200, {}, b"x" * (4 << 20))
+    fetcher = real_fetcher()
+    charged = []
+    fetcher._charge_bandwidth = charged.append
+
+    res = fetcher.get(base + "/big", kind="navigate")
+
+    assert (res.status, res.error) == (None, "body too large")
+    assert sum(charged) <= 1 << 20
+
+
+@pytest.fixture
+def trickle():
+    """A server that answers 300 bytes in three pieces 0.5 s apart, or never answers."""
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path == "/hang":
+                time.sleep(3)
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", "300")
+            self.end_headers()
+            for _ in range(3):
+                time.sleep(0.5)
+                self.wfile.write(b"x" * 100)
+                self.wfile.flush()
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    srv.daemon_threads = True
+    t = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    t.start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+    t.join(5)
+
+
+def test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout(trickle):
+    """--timeout bounds a silence, not the transfer: a 1.5 s body that keeps arriving
+    passes a 1 s timeout (the stdlib path's socket timeout), a silent server does not."""
+    pytest.importorskip("curl_cffi")
+    fetcher = CurlCffiFetcher(build_policy(retries=0, timeout=1))
+
+    slow = fetcher.get(trickle + "/slow", kind="navigate")
+    hung = fetcher.get(trickle + "/hang", kind="navigate")
+
+    assert (slow.status, slow.body, slow.error) == (200, b"x" * 300, None)
+    assert hung.status is None and "(28)" in hung.error

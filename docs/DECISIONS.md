@@ -22,6 +22,25 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — fire-engine decodes in Python; its extra gains brotli and zstandard (#130)
+
+- **Decision:** curl's decoding is off and its writer bounds the raw body;
+  `Fetcher.get` decodes it with the httrack `_decode`. The `fire-engine` extra
+  now also lists `brotli>=1.2` and `zstandard>=0.22` (the `httrack` extra's
+  decoders, already in the lock: no new package). `--timeout` maps to curl's
+  connect timeout plus a low-speed abort (no byte for `--timeout` s), not to a
+  total transfer time.
+- **Why:** a write callback alone still lets curl's own decoder expand a zstd
+  frame with a window up to 128 MiB; the shared decoder keeps the 8 MiB cap.
+  The Chrome profile advertises `br, zstd`, so without the decoders those
+  pages would fail to decode. A total timeout would abort large pages that are
+  paced by `--max-bandwidth` inside the writer.
+- **Rejected:** keeping curl's decoding with a capped writer (zstd window
+  unbounded); overriding `Accept-Encoding` to what Python can decode (breaks
+  the browser fingerprint); a total-time timeout (curl_cffi's non-streaming
+  default).
+- **Pending:** none.
+
 ## 2026-11-18 — fire-engine sends only the request-specific httrack headers (#130)
 
 - **Decision:** `CurlCffiFetcher` forwards to curl only `Referer`,

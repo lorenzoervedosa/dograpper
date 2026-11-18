@@ -551,7 +551,11 @@ request. All `[httrack]` flags above apply, plus:
 | `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`) |
 
 Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
-'dograpper[fire-engine]'`), which installs `curl_cffi`. Without it, the
+'dograpper[fire-engine]'`), which installs `curl_cffi` plus the `br` / `zstd`
+decoders of the `httrack` extra: curl hands the body over as it came, and the
+profile decodes it with the `httrack` decoder, under the same size and zstd
+window limits. `--timeout` is the time to connect, then the longest silence
+while receiving, as under `httrack`. Without the extra, the
 profile fails loud with an install hint. `--headless` is rejected (the profile
 has its own transport). If the site still challenges the request after the
 browser fingerprint, the run exits 1 and suggests `--proxy` with a different

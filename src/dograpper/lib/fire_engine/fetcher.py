@@ -5,16 +5,23 @@ call for ``curl_cffi`` with TLS/HTTP-2 impersonation. Every other behaviour --
 pacing (connection rate, bandwidth, per-host gap, Retry-After gate), retry,
 challenge detection and robots.txt -- is inherited unchanged.
 
+curl hands over the body as it arrived (its decoding is off): the size cap holds in
+its writer, and ``Fetcher.get`` decodes it with the bounded httrack decoder, so a
+compressed body meets the same limits as on the stdlib path.
+
 ``curl_cffi`` is an optional native dependency (contract 1 / ADR-0004): it is
 imported lazily, only when a session is first created.
 """
+import math
 from urllib.parse import urlunsplit
 
-from ..httrack.fetcher import CHUNK, MAX_BODY_BYTES, Fetcher, wire_host
+from ..httrack.fetcher import MAX_BODY_BYTES, Fetcher, wire_host
 
 # Of the httrack request headers, only the request-specific ones go to curl; the
 # impersonated browser sends its own identity (User-Agent, Accept*, Sec-Fetch-*) (ADR-0011).
 _FORWARDED = frozenset({"referer", "if-none-match", "if-modified-since"})
+
+_WRITE_ABORT = 0xFFFFFFFF  # libcurl's CURL_WRITEFUNC_ERROR: the writer stops the transfer
 
 _MISSING = (
     "curl_cffi is required for --downloader fire-engine. "
@@ -26,12 +33,17 @@ class CurlCffiMissing(RuntimeError):
     """curl_cffi is not installed: raised by the first session, wherever it opens."""
 
 
-def _default_session_factory(impersonate: str):
+def _default_session_factory(impersonate: str, timeout: float):
     try:
+        from curl_cffi import CurlOpt
         from curl_cffi import requests as cffi_requests
     except ImportError as exc:
         raise CurlCffiMissing(_MISSING) from exc
-    return cffi_requests.Session(impersonate=impersonate)
+    return cffi_requests.Session(impersonate=impersonate, curl_options={
+        CurlOpt.HTTP_CONTENT_DECODING: 0,  # the raw body: Fetcher.get decodes it, bounded
+        # the stdlib socket timeout: to connect, then with nothing received
+        CurlOpt.CONNECTTIMEOUT_MS: int(timeout * 1000),
+        CurlOpt.LOW_SPEED_LIMIT: 1, CurlOpt.LOW_SPEED_TIME: math.ceil(timeout)})
 
 
 class CurlCffiFetcher(Fetcher):
@@ -52,7 +64,8 @@ class CurlCffiFetcher(Fetcher):
     def _session(self):
         session = getattr(self._local, "cffi", None)
         if session is None:
-            session = self._local.cffi = self._session_factory(self._impersonate)
+            session = self._local.cffi = self._session_factory(self._impersonate,
+                                                               self.policy.timeout)
         return session
 
     def _request(self, key, parts, target, headers):
@@ -64,37 +77,24 @@ class CurlCffiFetcher(Fetcher):
         req_headers = {k: v for k, v in headers if k.lower() in _FORWARDED}
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
-        # Stream and bound the decoded body: curl decompresses on the fly, so a tiny
-        # gzip bomb must be stopped mid-read, not after resp.content loads it whole.
-        # shortcut: this cap is consumer-side, so curl_cffi can still buffer decoded
-        # bytes ahead of the bandwidth-throttled drain (docs/DEBT.md). Move the bound
-        # to curl's writer (disable its auto-decode and reuse httrack _decode, or a
-        # WRITEFUNCTION) when curl_cffi is installed for the smoke-test slice.
         session = self._session()  # outside the try: a missing curl_cffi is no transport error
-        resp = None
+        chunks, size = [], 0
+
+        def write(chunk):  # curl's writer, in this thread: it paces and bounds the transfer
+            nonlocal size
+            size += len(chunk)
+            if size > MAX_BODY_BYTES:
+                return _WRITE_ABORT
+            chunks.append(chunk)
+            self._charge_bandwidth(len(chunk))
+            return len(chunk)
+
         try:
-            resp = session.request(
-                "GET", url, headers=req_headers, proxies=proxies,
-                timeout=self.policy.timeout, allow_redirects=False, stream=True,
-            )
-            chunks, total = [], 0
-            for chunk in resp.iter_content(chunk_size=CHUNK):
-                chunks.append(chunk)
-                total += len(chunk)
-                if total > MAX_BODY_BYTES:
-                    raise ValueError("body too large")
-                self._charge_bandwidth(len(chunk))
-            hdrs = {k.lower(): v for k, v in resp.headers.items()}
-            status = resp.status_code
-        except ValueError:
-            if resp is not None:
-                resp.close()
-            raise
+            # timeout=None: the session's curl_options set the stdlib-like timeouts
+            resp = session.request("GET", url, headers=req_headers, proxies=proxies,
+                                   timeout=None, allow_redirects=False, content_callback=write)
         except Exception as exc:  # curl transport error -> inherited retry path
-            if resp is not None:
-                resp.close()
+            if size > MAX_BODY_BYTES:
+                raise ValueError("body too large") from None
             raise OSError(f"curl_cffi: {type(exc).__name__}: {exc}") from exc
-        else:
-            resp.close()
-        hdrs.pop("content-encoding", None)  # curl_cffi decoded the body while streaming
-        return status, hdrs, b"".join(chunks)
+        return resp.status_code, {k.lower(): v for k, v in resp.headers.items()}, b"".join(chunks)

@@ -417,7 +417,9 @@ dev = [
     { name = "pytest" },
 ]
 fire-engine = [
+    { name = "brotli" },
     { name = "curl-cffi" },
+    { name = "zstandard" },
 ]
 headless = [
     { name = "playwright" },
@@ -429,6 +431,7 @@ httrack = [
 
 [package.metadata]
 requires-dist = [
+    { name = "brotli", marker = "extra == 'fire-engine'", specifier = ">=1.2" },
     { name = "brotli", marker = "extra == 'httrack'", specifier = ">=1.2" },
     { name = "click", specifier = ">=8.1" },
     { name = "curl-cffi", marker = "extra == 'fire-engine'", specifier = ">=0.7" },
@@ -437,6 +440,7 @@ requires-dist = [
     { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "tiktoken", specifier = ">=0.7.0" },
+    { name = "zstandard", marker = "extra == 'fire-engine'", specifier = ">=0.22" },
     { name = "zstandard", marker = "extra == 'httrack'", specifier = ">=0.22" },
 ]
 provides-extras = ["headless", "build", "httrack", "fire-engine", "dev"]

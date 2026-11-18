@@ -89,6 +89,17 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   aceita: os `Sec-Fetch-*` são os fixos do perfil (navegação), não os do link
   (`FetchMeta`), e `--user-agent` não é enviado (pendência em
   `docs/DECISIONS.md`).
+- **Corpo limitado no lado do curl.** A decodificação do curl fica desligada
+  (`HTTP_CONTENT_DECODING` 0): o writer do curl (`content_callback`) recebe o
+  corpo como veio do fio, aborta a transferência além de `MAX_BODY_BYTES` e
+  cobra a banda por pedaço, como o caminho da stdlib; o `Fetcher.get` decodifica
+  com o mesmo decoder limitado do `httrack` (teto de tamanho, de membros e de
+  janela zstd de 8 MiB, que o decoder do próprio curl não aplica). Por isso o
+  extra `fire-engine` instala também `brotli` e `zstandard`: o perfil de Chrome
+  anuncia `br` e `zstd`, e quem os decodifica agora é o Python. Sem streaming
+  do curl_cffi, o `--timeout` vira opções do curl com a semântica do timeout de
+  socket da stdlib: para conectar, depois sem receber nada por `--timeout`
+  segundos (nunca a duração total da transferência).
 
 ## Consequências
 
