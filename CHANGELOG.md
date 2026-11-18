@@ -109,7 +109,9 @@ and fixes alone are a PATCH bump.
   against the previous run, and a `Change report:` line in the summary. `pack`
   and the manifest skip it. Each saved file gets the response's `Last-Modified`
   (else its `Date`) as its modification and access time, as HTTrack sets it.
-  The Playwright fallback fails loud under this profile for now.
+  The Playwright fallback fails loud under this profile for now. The TLS
+  handshake matches HTTrack's on OpenSSL >= 3.5 only; on an older build the
+  profile warns that some CDNs may reject it.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
@@ -144,8 +146,8 @@ and fixes alone are a PATCH bump.
   Projects. ([#93])
 - `download --filter RULE` (repeatable, config key `filter`, forwarded by
   `sync`): HTTrack scan rules (`+pattern` accepts, `-pattern` refuses, the last
-  match wins) applied to every discovered link before it is fetched, under both
-  downloaders: the llms.txt/sitemap lists, `wget --mirror` (as
+  match wins) applied to every discovered link before it is fetched, under every
+  downloader: the llms.txt/sitemap lists, `wget --mirror` (as
   `--accept-regex`/`--reject-regex`), Playwright, and the httrack crawl and
   redirect targets.
   A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
@@ -205,10 +207,10 @@ and fixes alone are a PATCH bump.
 - `pack` now packs documentation formats only by default (`.html`, `.htm`,
   `.md`, `.txt`). `.js`, `.css`, `.json` and other text files are skipped and
   listed by extension in one summary line; `robots.txt`,
-  `.dograpper-manifest.json`, `delta_manifest.json` and `pack_state.json` are
-  always skipped. `--include-extensions` (config key `include-extensions`)
-  brings other extensions back. Corpora that relied on packing e.g. `.json`
-  or extensionless files must now opt in. ([#91])
+  `.dograpper-manifest.json`, `delta_manifest.json`, `pack_state.json` and
+  `hts-changes.json` are always skipped. `--include-extensions` (config key
+  `include-extensions`) brings other extensions back. Corpora that relied on
+  packing e.g. `.json` or extensionless files must now opt in. ([#91])
 - `pack --context-header` fills `url` for pages without a manifest entry from
   the marker in the page head: HTTrack's `Mirrored from <url>` footer or a
   browser's `saved from url=(N)<url>`. The value is validated (http/https,
@@ -227,14 +229,21 @@ and fixes alone are a PATCH bump.
   out of the source-file drift list; a repo-root one from earlier runs is no
   longer read. ([#95])
 - `pack --format md` (the default) writes each HTML page's structure as
-  Markdown: `#`–`######` headings, `[text](target)` links with the `href` as
-  the page wrote it, `-` / `N.` list items with nesting, and pipe tables with
-  one line per row. A link to the same page, or with a scheme other than
-  `http`, `https` or `mailto`, keeps only its text; a list item holding a
-  block is written as its blocks. Counts leave the markup out (context
+  Markdown: `#`–`######` headings, reference links (`[text][n]` in the line
+  and one `[n]: target` line per distinct target at the end of each page,
+  numbered by first use, the target as the page wrote it, so a line is as
+  long as its visible text and every line of a page-layout pack fits one
+  `Read`), `-` / `N.` list items with nesting, and pipe tables with one line
+  per row. A link to the same page, or with a scheme other than `http`,
+  `https` or `mailto`, keeps only its text; a list item holding a block is
+  written as its blocks. In the chunk layout each page section ends with its
+  own link definitions, and each section a `--context-header` split makes ends
+  with those of the links it holds. Counts leave the markup out (context
   headers, `INDEX.md`, `llm-readiness.json`), and `--max-words-per-chunk`
   measures each page's plain text, as for `txt`. `--dedup` compares a table
-  or a list as one block. `txt` and `jsonl` output is unchanged. ([#87])
+  or a list as one block, never removes a link definition and compares links
+  by target. `txt` and `jsonl` output is unchanged. ([#87],
+  [#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
 
 ### Fixed
 
@@ -279,16 +288,6 @@ and fixes alone are a PATCH bump.
   a redirect alias that `pack` skipped points at its target's file. Links to
   anything else keep their target.
   ([#118](https://github.com/lorenzoervedosa/dograpper/issues/118))
-- `pack --format md` writes links as reference links: `[text][n]` in the line
-  and one `[n]: target` line per distinct target at the end of each page,
-  numbered by first use, instead of `[text](target)`, so a line is as long as
-  its visible text and every line of a page-layout pack fits one `Read`. In
-  the chunk layout each page section ends with its own definitions, and each
-  section a `--context-header` split makes ends with those of the links it
-  holds. Word counts, `txt` and `jsonl` are unchanged; `--cross-refs` markers
-  follow the `[n]` and never enter a definition; `--dedup` never removes a
-  definition and compares links by target.
-  ([#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
 - `pack --format md` writes a link inside code (`<code>`, `<pre>`, a Javadoc
   `div.member-signature`) as its text, so a signature reads as the source
   shows it and greps as a phrase (`rg 'ItemContainer getInventory'`); links in
@@ -335,10 +334,10 @@ and fixes alone are a PATCH bump.
   word boundaries instead of doing a plain substring replace. ([#55])
 - `pack --delta` no longer reports a byte-identical file as `modified` when
   only its mtime changed (a `touch`, a `cp` without `-p`, a fresh `git
-  clone`). The manifest diff now falls back to an md5 content hash whenever
-  size matches but mtime disagrees, instead of trusting mtime alone; the
-  mtime match itself remains a fast path that skips hashing. Manifests
-  written before this change still load and compare correctly. ([#56])
+  clone`). The manifest diff now compares an md5 content hash whenever size
+  matches, instead of trusting mtime: the hash decides even when the mtime
+  matches too (see [#132] above). Manifests written before this change still
+  load and compare correctly. ([#56])
 - `pack` no longer drops HTML-escaped angle brackets (`&lt;T&gt;`, escaped
   markup in code blocks) during content extraction; default output now keeps
   `List<T>` and `<div>` examples, matching `--no-extract`. ([#66])
@@ -387,8 +386,8 @@ and fixes alone are a PATCH bump.
 - `download`'s Playwright layer follows the links of a page it skips as
   cached on an incremental run, instead of ending the crawl there. ([#94])
 - `pack --cross-refs` writes its marker after a Markdown link whose text it
-  matched (`[Item](Item.html) [-> docs_chunk_02]`) instead of inside the
-  brackets, and never inside a link's target, where it broke the link. ([#87])
+  matched (`[Item][1] [-> docs_chunk_02]`) instead of inside the brackets, and
+  never inside a link definition, where it broke the link. ([#87])
 - `pack --layout page --format txt` writes `<pre>` code without its fence
   lines, as txt chunks do, and leaves them out of the page's `INDEX.md` and
   header word counts. ([#86])
