@@ -22,6 +22,23 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — Glossary terms confirmed by the maintainer (#138)
+
+Supersedes the "Pending" of the entry below.
+
+- **Decision:** the picks of the `Download` section of `GLOSSARY.md` stand:
+  *downloader*, *update*, *kept file* and *link rewriting* are the terms, with
+  "profile", "update mode", "cached file" and a bare `-K0` under `_Avoid_`.
+- **Why:** the maintainer confirmed them when asked, after the docs audit
+  (#138) was merged.
+- **Rejected:** none.
+- **Pending:** maintainer: whether the terms are applied to text that already
+  exists. The README section "Downloader profiles", the `[httrack]` help
+  labels, `PROFILE_OPTIONS` / `run_profile` and the `Files skipped: N
+  (cached)` summary line keep the old words. This session's recommendation is
+  to leave them and use the terms in new text: renaming a summary line is an
+  observable change.
+
 ## 2026-11-18 — Download-side terms picked for GLOSSARY.md (docs audit)
 
 - **Decision:** `GLOSSARY.md` gains a `Download` section: Mirror, Downloader,
