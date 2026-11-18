@@ -8,7 +8,7 @@ is reported, with the reason, by ``format_kept_whole``.
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 from urllib.parse import quote
 
 from ..generator import page_generator
@@ -17,10 +17,20 @@ from ..redact import neutralize_controls
 NO_ADAPTER = "no supported generator"
 # Shown before "... N more (use --verbose)"; same cap as lib/source_urls.py MAX_SHOWN_MISSING.
 MAX_SHOWN_KEPT_WHOLE = 10
+# Records repeat their container's qualified name (every Javadoc member the type's, every Sphinx
+# object its ancestors'), so a huge or deeply nested name would make the output quadratic in the
+# page size; no real qualified name is this long.
+MAX_SYMBOL = 1000
 
 
 class NotSplit(Exception):
     """The page keeps one record; the message says why."""
+
+
+def check_symbol(symbol: str, unsupported: Callable[[str], NotSplit]) -> None:
+    """Raise the adapter's ``unsupported(problem)`` for a qualified name over MAX_SYMBOL characters."""
+    if len(symbol) > MAX_SYMBOL:
+        raise unsupported(f"a qualified name over {MAX_SYMBOL} characters")
 
 
 @dataclass

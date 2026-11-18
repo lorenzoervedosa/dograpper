@@ -89,6 +89,21 @@ def test_parsing_stays_linear_on_hostile_markup():
         split_page(head + '<section class="detail" id="x">' * n)
 
 
+def test_javadoc_qualified_names_are_bounded():
+    # Every member symbol repeats the type's name, so a huge name times many members would make
+    # the output quadratic in the page size.
+    n = 10000
+    page = ('<meta name="generator" content="javadoc/ClassWriter">'
+            f'<h1 class="title" title="Class {"X" * n}"><section class="class-description">'
+            '</section><section id="field-detail">'
+            + "".join(f'<section class="detail" id="f{i}"><h3>f{i}</h3>'
+                      f'<div class="member-signature">int f{i}</div></section>' for i in range(n)))
+    start = time.perf_counter()
+    with pytest.raises(NotSplit, match="unsupported Javadoc markup: a qualified name over 1000 characters"):
+        split_page(page)
+    assert time.perf_counter() - start < 5.0
+
+
 # ---------------------------------------------------------------------------
 # Container records
 # ---------------------------------------------------------------------------

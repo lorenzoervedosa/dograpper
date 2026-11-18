@@ -10,7 +10,7 @@ with any other markup raises NotSplit.
 
 from typing import List, Optional
 
-from . import ApiRecord, NotSplit
+from . import ApiRecord, NotSplit, check_symbol
 from ._html import Regions, Text
 
 GENERATOR = "javadoc"
@@ -114,6 +114,7 @@ def records(html: str, generator: str) -> List[ApiRecord]:
         raise _unsupported("unknown type kind in the h1 title")
     package = " ".join(page.package.final()) if page.package else ""
     qualified = f"{package}.{name}" if package else name
+    check_symbol(qualified, _unsupported)
 
     members: List[ApiRecord] = []
     declared = {}  # label -> {member name: None}, an ordered set in page order
@@ -135,6 +136,7 @@ def records(html: str, generator: str) -> List[ApiRecord]:
         declared.setdefault(label, {})[short] = None
         member_name = short + (m.anchor[m.anchor.index("("):] if "(" in m.anchor else "")
         symbol = f"{qualified}#{member_name}"
+        check_symbol(symbol, _unsupported)
         members.append(ApiRecord(
             text="\n".join([symbol] + m.text.final()), symbol=symbol, kind="member",
             symbol_kind=symbol_kind, breadcrumb=[qualified, member_name], generator=GENERATOR,

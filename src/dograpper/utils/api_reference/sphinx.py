@@ -14,7 +14,7 @@ Permalink signs and ``[source]`` links are dropped. Any other markup raises NotS
 
 from typing import List, Optional
 
-from . import ApiRecord, NotSplit
+from . import ApiRecord, NotSplit, check_symbol
 from ._html import Regions, Text
 
 GENERATOR = "sphinx"
@@ -33,9 +33,6 @@ _TYPES = {
 }
 # Types that live in a module, so the first of them names the page's module.
 _MODULE_LEVEL = ("class", "exception", "function", "data")
-# A nested object's name repeats its ancestors', so a chain of nested objects would make the
-# output quadratic in the page size; a longer qualified name than this is not a real one.
-MAX_SYMBOL = 1000
 
 
 class _Object:
@@ -155,8 +152,7 @@ def records(html: str) -> List[ApiRecord]:
             obj.symbol = f"{obj.parent.symbol}.{name}"
         else:
             obj.symbol = (_line(obj.prename) + name) if obj.prename else obj.anchor
-        if len(obj.symbol) > MAX_SYMBOL:
-            raise _unsupported(f"a qualified name over {MAX_SYMBOL} characters")
+        check_symbol(obj.symbol, _unsupported)
 
     top = [obj for obj in page.objects if obj.parent is None]
     module = next((obj.symbol.rpartition(".")[0] for obj in top if obj.objtype in _MODULE_LEVEL), "")
