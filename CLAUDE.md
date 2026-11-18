@@ -131,7 +131,7 @@ tests/
 ├── test_drift.py           # Drift: compare_readiness, renders markdown/text (literais), CLI (first run, fail-on-drift, --output)
 ├── test_dry_run.py         # Dry-run: report generation, CLI integration, edge cases
 ├── test_e2e.py             # Integração ponta-a-ponta usando ./test-docs
-├── test_fire_engine.py     # Perfil `--downloader fire-engine` (ADR-0011): CurlCffiFetcher com curl_cffi mockado (body, proxy, challenge, content-encoding, porta explícita, lib ausente inclusive sob --no-robots), guards de --proxy/--impersonate e despacho na CLI; smoke tests com o curl_cffi real contra o fixture `server` (identidade do navegador, gzip, proxy com credencial, download ponta a ponta, stop= antes do corpo), pulados sem o extra `fire-engine`
+├── test_fire_engine.py     # Perfil `--downloader fire-engine` (ADR-0011): CurlCffiFetcher com curl_cffi mockado (body, proxy, challenge, content-encoding, porta explícita, lib ausente inclusive sob --no-robots), guards de --proxy/--impersonate e despacho na CLI; smoke tests com o curl_cffi real contra o fixture `server` (identidade do navegador, gzip, proxy com credencial, download ponta a ponta, stop= antes do corpo, --cache 1/--updatehack/--do-not-recatch pela cascata compartilhada), pulados sem o extra `fire-engine`
 ├── test_eval_command.py    # Integração do `dograpper eval` sobre um pack JSONL (--json, erros de pré-requisito)
 ├── test_eval_harness.py    # evaluate(): hit-rate, MRR por rank, breakdown por grade, pares vazios
 ├── test_explain.py         # Explain preview: parsing de seções v1, sidecars, modos CLI, roundtrip pack→explain

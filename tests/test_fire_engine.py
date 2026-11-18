@@ -396,6 +396,51 @@ def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server
     assert json.loads(manifest.read_text())["files"] == before
 
 
+def test_real_cache_and_update_flags_act_under_fire_engine(server, tmp_path):
+    """fire-engine's updates run on the httrack engine (run_profile, #130), so --cache 1,
+    --updatehack and --do-not-recatch act there as under httrack (#132)."""
+    pytest.importorskip("curl_cffi")
+    base, script, seen = server
+    words = " ".join(["documentation"] * 40)
+    txt = {"Content-Type": "text/plain", "ETag": '"t"'}
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, {"Content-Type": "text/html"},
+                        f'<html><body><p>{words}</p><a href="a.html">a</a>'
+                        f'<a href="n.txt">n</a><a href="e.txt">e</a></body></html>'.encode())
+    script["/docs/a.html"] = (200, {"Content-Type": "text/html"},
+                              f"<html><body><p>{words}</p></body></html>".encode())
+    script["/docs/n.txt"] = (200, txt, b"old!")
+    script["/docs/e.txt"] = (200, txt, b"erase me")
+    out = tmp_path / "mirror"
+    args = ["download", f"{base}/docs/", "-o", str(out), "--downloader", "fire-engine",
+            "--include-extensions", "html,txt", *FAST]
+    first = CliRunner().invoke(cli, args)
+    assert first.exit_code == 0, first.output
+    host = out / base.split("//")[1]
+    seen.clear()
+
+    cached = CliRunner().invoke(cli, [*args, "--cache", "1"])  # HTTrack -C1
+
+    assert cached.exit_code == 0, cached.output
+    assert [p for p in seen if p.startswith("/docs/")] == []  # discovery probes aside
+    assert "Loaded from cache without a request: 4" in cached.output
+    script["/docs/n.txt"] = (200, txt, b"new!")  # same length; validators ignored
+
+    hacked = CliRunner().invoke(cli, [*args, "--updatehack"])  # HTTrack -%s
+
+    assert hacked.exit_code == 0, hacked.output
+    assert "Kept on a matching size (--updatehack): 2" in hacked.output
+    assert (host / "docs" / "n.txt").read_bytes() == b"old!"
+    (host / "docs" / "e.txt").unlink()
+    seen.clear()
+
+    kept = CliRunner().invoke(cli, ["-v", *args, "--do-not-recatch"])  # HTTrack -%n
+
+    assert kept.exit_code == 0, kept.output
+    assert "/docs/e.txt" not in seen and (host / "docs" / "e.txt").read_bytes() == b""
+    assert f"{base}/docs/e.txt: null-size file not recaught" in kept.output
+
+
 # -- body bound and timeouts, over the real curl_cffi --------------------------
 
 def bombs():

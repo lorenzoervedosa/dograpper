@@ -107,6 +107,13 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   ou `#`; percent-decode) e vai ao curl como opções próprias (`proxy_auth` do
   curl_cffi): nenhuma mensagem do curl pode conter a credencial, e a URL do
   proxy que aparece no erro ainda passa por `redact_url`.
+- **Opções de cache e atualização do HTTrack (#132).** `--cache`,
+  `--updatehack` e `--do-not-recatch`, e as datas de arquivo tiradas do
+  `Last-Modified`, valem no `fire-engine` pela mesma cascata: são estado da
+  política e do motor, não do transporte. O `stop=` do `--updatehack`
+  (HTTrack `-%s`) é perguntado no writer do curl, no primeiro pedaço, com o
+  status, o `Content-Type` e o `Content-Length` que o curl leu (`CURLINFO`), e
+  o writer aborta a transferência sem guardar nem cobrar o corpo.
 
 ## Consequências
 

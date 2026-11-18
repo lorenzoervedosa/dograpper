@@ -56,6 +56,18 @@ Entry format:
   completed run, `src/htscore.c:2360-2367`), and reports `first_crawl: null`
   under `--cache 0`.
 
+- **Decision:** `--cache`, `--updatehack` and `--do-not-recatch` act under
+  `--downloader fire-engine` exactly as under `httrack`, through the shared
+  `run_profile()` cascade (#130); no flag is refused there. Recorded in
+  ADR-0011, "Fatia 2".
+- **Why:** #130 gave fire-engine the update mode (the previous manifest, its
+  records), and the three options are policy and engine state, not transport
+  state. The one transport-specific piece, `-%s`'s `stop`, is honored in
+  curl's writer.
+- **Rejected:** refusing the three under fire-engine (written before #130, when
+  fire-engine ran no update, and dropped in the replay onto the batch).
+- **Pending:** none.
+
 - **Decision:** `--updatehack` decides at the headers through a `stop`
   predicate of `Fetcher.get`, passed to `_request` only when set;
   `CurlCffiFetcher._request` honors it too, in curl's writer (#130): at the
