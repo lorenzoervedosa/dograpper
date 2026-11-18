@@ -390,7 +390,8 @@ dograpper pack <input_directory> -o <output_directory> [options]
 Operation order (each stage reads the output of the previous one):
 
 ```
-list files → apply .docsignore → --no-extract? yes: full HTML / no: extract
+list files → apply .docsignore → skip bot-challenge pages
+           → --no-extract? yes: full HTML / no: extract
            → --dedup → --bundle? cap max-chunks/max-words-per-chunk
            → --strategy (size|semantic) → boundary-aware chunking
            → --score? compute readiness
@@ -1063,9 +1064,16 @@ Conditional extra lines (per enabled flag):
 | `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, `Grade distribution` |
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
+| bot-challenge pages found | `Challenge pages: N` |
 | `--for-queries` | `Query packing: ...` |
 
 Warnings appear when:
+- Input `.html`/`.htm` files are Cloudflare bot-challenge interstitials
+  (`<title>Just a moment...</title>`), typically saved by an external
+  mirroring tool that was blocked. They carry no content, so `pack` lists
+  them once on stderr, leaves them out of the chunks and counts them (also
+  in `--dry-run`); if every file is one, `pack` fails. A page that merely
+  mentions the phrase in its text is not affected.
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
   into a chunk, overshooting the stated limit).
 - Total chunks exceed `--max-chunks` (nothing is discarded — every
