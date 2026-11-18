@@ -102,6 +102,7 @@ tests/
 ├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
+├── test_claude_hooks.py    # Hooks de .claude/hooks como CLIs (JSON no stdin): guarda de git (bloqueia/libera, fail-open, amend por repo), lembretes de contrato e pós-commit
 ├── test_claude_md_inventory.py # Guard estrutural do CLAUDE.md: árvore completa e referências de caminho válidas
 ├── test_changelog.py       # Guard estrutural do CHANGELOG.md: seções válidas, ordem, versão casando com pyproject
 ├── test_cli_help_coverage.py # Guard: todo comando tem descrição e toda opção tem help (alimenta `--help` e o `docs`)
@@ -184,6 +185,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `docs/adr/` | Antes de reverter ou contornar uma decisão arquitetural (repomix, contagem por palavras, deps opcionais, query-oriented packing, delta na Action, registros de referência de API, layout por página) |
 | `docs/superpowers/specs/2026-11-13-httrack-downloader-profile-design.md` | Antes de alterar `lib/httrack/` ou `commands/_httrack_profile.py`: desvios aprovados em relação ao HTTrack e roteiro dos próximos PRs do perfil. Evidência por comportamento (com citações do código do HTTrack) em `docs/discovery/httrack-mirroring-requirements.md` |
 | `GLOSSARY.md` | Ao nomear conceitos de entrada/saída (página, registro, chunk, símbolo, contêiner, membro, target) em código, docs, issues ou PRs |
+| `tests/test_claude_hooks.py` | Antes de alterar `.claude/hooks/` ou o wiring em `.claude/settings.json` (decisões de bloqueio, mapa de contratos dos lembretes) |
 | `.dograpper.json.example` | Ao mexer em `config_loader.py` ou no merge de configuração |
 | `.docsignore.example` | Ao mexer em `ignore_parser.py` |
 | `tests/test_pack.py` | Antes de alterar qualquer coisa em `lib/chunker.py` ou `commands/pack.py` |
