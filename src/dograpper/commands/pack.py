@@ -359,17 +359,12 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             else:
                 heading_map[rel] = []
 
-    # 7c. Build url_map from manifest (for context-header URLs)
-    url_map = None
-    if manifest_data and manifest_data.files:
-        url_map = {}
-        for fpath in filtered_paths:
-            rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
-            for key, entry in manifest_data.files.items():
-                local = entry.local_path or key
-                if local == rel or key == rel:
-                    url_map[rel] = entry.url
-                    break
+    # 7c. Source URLs for --context-header: manifest entry, else page marker
+    url_resolution = None
+    if ctx_header:
+        from ..lib.source_urls import resolve_source_urls
+
+        url_resolution = resolve_source_urls(filtered_paths, input_dir, manifest_data)
 
     # 7d. Query-oriented ordering (opt-in, after delta/dedup, before chunking)
     query_pack_result = None
@@ -536,7 +531,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             readiness_map = scoring.header_map()
 
     # 10. Write outputs
-    write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_map, readiness_map=readiness_map)
+    write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map)
 
     # 10a. Cross-references (opt-in, after write)
     cross_ref_total = 0
@@ -654,6 +649,11 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     if do_cross_refs:
         click.echo(f"  Cross-refs:        {output_dir}/cross_refs.json ({cross_ref_total} links, {cross_ref_unresolved} unresolved)")
+
+    if url_resolution is not None:
+        from ..lib.source_urls import format_url_summary
+        for line in format_url_summary(url_resolution, bool(ctx.obj.get('VERBOSE'))):
+            click.echo(f"  {line}")
 
     if token_counts:
         from ..utils.token_counter import format_token_summary

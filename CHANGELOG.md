@@ -56,6 +56,12 @@ and fixes alone are a PATCH bump.
   Playwright fallback fail loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
+- `pack --context-header` fills `url` for pages without a manifest entry from
+  the marker in the page head: HTTrack's `Mirrored from <url>` footer or a
+  browser's `saved from url=(N)<url>`. The value is validated (http/https,
+  length, characters, host) and the manifest still wins. The pack summary gains
+  a `Source URLs` line counting URLs by source and listing files left without
+  one, including rejected or conflicting markers. ([#90])
 
 ### Fixed
 

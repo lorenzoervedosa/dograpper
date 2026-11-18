@@ -62,6 +62,7 @@ src/dograpper/
 │   ├── readiness_diff.py   # compare_readiness() + render_markdown()/render_text() — diff de snapshots llm-readiness.json, stdlib-only
 │   ├── retrieval.py        # build_index()/BM25Index — retrieval determinístico stdlib-only (tie-break por doc_id)
 │   ├── sitemap_parser.py   # fetch_sitemap() — sitemap.xml + sitemapindex recursivo, gzip, same-netloc guard (SITEMAP_NS)
+│   ├── source_urls.py      # resolve_source_urls() — URL de origem por arquivo do pack: entrada do manifest, senão marcador da página (HTTrack `Mirrored from`, `saved from url=(N)`) validado como entrada não confiável; format_url_summary()
 │   ├── spa_detector.py     # is_spa() via html.parser; small-sample branch (N<5) + errors='replace' encoding
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth
 │   └── wget_mirror.py      # run_wget_mirror() --mirror + run_wget_urls() -i; BROWSER_UA Chrome/120, --no-parent, --timestamping sempre
@@ -129,7 +130,7 @@ tests/
 ├── test_retrieval.py       # BM25: tokenize, ranking, top-k, determinismo e tie-break por doc_id
 ├── test_scorer.py          # LLM Readiness Score: noise_ratio, boundary, context_depth, grades, CLI
 ├── test_sitemap_parser.py  # fetch_sitemap: namespace, urlset, gzip, sitemapindex recursivo, cross-host reject, 404, UA
-├── test_source_urls.py     # URLs de origem do pack --context-header: manifest explícito ausente/quebrado = exit 1, default quebrado = nota
+├── test_source_urls.py     # URLs de origem do pack --context-header: carga do manifest (explícito falha, default vira nota), marcadores HTTrack/saved-from, validação, precedência, resumo
 ├── test_sync.py            # Pass-through de flags do sync para download/pack (sem precedência)
 ├── test_sync_precedence.py # Precedência de config através do ctx.invoke do sync (CLI explícita > JSON > defaults)
 ├── test_token_counter.py   # Token counting: fallback, tiktoken, format_summary, CLI integration
@@ -166,7 +167,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_query_packer.py` | Antes de alterar `lib/query_packer.py` ou a integração `--for-queries` em `commands/pack.py` |
 | `tests/test_pack_scoring.py` | Antes de alterar `lib/pack_scoring.py` ou a etapa 9c de `commands/pack.py` |
 | `tests/test_pack_artifacts.py` | Antes de alterar `lib/pack_artifacts.py` ou as escritas de sidecar (10a-10e) de `commands/pack.py` |
-| `tests/test_source_urls.py` | Antes de alterar a carga do manifest (`_load_url_manifest`) ou a resolução de URLs (passo 7c) de `commands/pack.py` |
+| `tests/test_source_urls.py` | Antes de alterar `lib/source_urls.py`, a carga do manifest (`_load_url_manifest`) ou o passo 7c de `commands/pack.py` |
 | `tests/test_sync_precedence.py` | Antes de alterar `commands/sync.py` ou `lib/config_loader.py` (mecanismo CLI_EXPLICIT_PARAMS) |
 | `tests/test_download.py` | Antes de alterar qualquer coisa em `lib/wget_mirror.py`, `lib/spa_detector.py`, `lib/playwright_crawl.py` ou `commands/download.py` |
 | `tests/test_download_cascade.py` | Antes de alterar a orquestração de `commands/download.py` ou o threshold `MIN_URLS_TO_CONSIDER_DISCOVERED` |

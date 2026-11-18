@@ -376,10 +376,10 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--dry-run` | — | `false` | Simulate pack without writing; prints report |
 | `--dedup` | — | `off` | Block deduplication: `off`, `exact`, `fuzzy`, `both` |
 | `--dedup-threshold` | — | `3` | Maximum Hamming distance for fuzzy dedup (0-10) |
-| `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON) |
+| `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON), with the source `url` from the manifest or the page's HTTrack / saved-from marker |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` |
 | `--delta` | — | `false` | Skip the run entirely when nothing changed since the last pack; pack in full when something did |
-| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`. Given explicitly, it must exist and load (exit 1 otherwise); at the default path a missing file is skipped and a broken one is skipped with a note |
+| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`; its entry wins over a page marker. Given explicitly, it must exist and load (exit 1 otherwise); at the default path a missing file is skipped and a broken one is skipped with a note |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
@@ -452,6 +452,33 @@ Optional fields (`url`, `llm_readiness`) are omitted when not available
 (they never appear as `null`). Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
 
+`url` comes from the file's entry in the download manifest (`--manifest`).
+Without one, an HTML page's URL is read from the marker an offline copy left
+in its head, so mirrors made by other tools get URLs too:
+
+- HTTrack: `<!-- Mirrored from <url> by HTTrack Website Copier/... -->`.
+  HTTrack 3.49 and older write the URL without its scheme; `http://` is
+  assumed, as HTTrack itself does for a bare host.
+- A browser's "Save page as": `<!-- saved from url=(NNNN)<url> -->`, where
+  `NNNN` must equal the URL's length. `saved from url=(0014)about:internet`,
+  the Windows zone marker many sites ship in their HTML, names no URL and is
+  ignored.
+
+Only the first 8 KiB of the page, up to `<body>`, is scanned. A marker is page
+content, so its URL is checked before use: `http` or `https`, at most 2,048
+characters, RFC 3986 characters only (no whitespace, control characters,
+quotes, angle brackets or non-ASCII), a hostname, no credentials, a numeric
+port. A rejected marker, or two markers that disagree, leave `url` out. The
+pack summary counts the URLs by source and lists the files left without one
+(the first 10; all of them with `--verbose`):
+
+```
+  Source URLs:     0 from manifest, 166 from page markers, 2 without
+  Rejected markers: 1 invalid, 0 conflicting
+    bad.html: invalid page marker
+    data.json: no manifest entry or page marker
+```
+
 #### Cross-references (`--cross-refs`)
 
 Extracts internal links from HTML, resolves relative paths, maps each
@@ -476,8 +503,8 @@ Schema (required fields in **bold**, optional in italics):
 - **`content`** — extracted text
 - **`schema_version`** — `"v1"`
 - *`breadcrumb`, `chunk_index`, `total_chunks`* (with `--context-header` or `--score`)
-- *`url`* (with `--context-header` **and** a matching manifest entry — `--score`
-  alone never populates it)
+- *`url`* (with `--context-header`, from a matching manifest entry or the
+  page's HTTrack / saved-from marker — `--score` alone never populates it)
 - *`readiness_grade`* (with `--score`)
 
 Field names diverge from the header format for word count, breadcrumb and
@@ -1062,6 +1089,7 @@ Conditional extra lines (per enabled flag):
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
 | `--for-queries` | `Query packing: ...` |
+| `--context-header` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
 
 Warnings appear when:
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
