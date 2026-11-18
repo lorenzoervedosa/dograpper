@@ -296,6 +296,14 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   a file on NTFS or default APFS. **Deviation:** the fold is Unicode
   (`str.casefold`), not ASCII-only, so `/Été` and `/été` collide too; both
   filesystems fold them, and an overwrite spoils the corpus.
+- **HTML extension:** an HTML response replaces any extension HTTrack knows
+  (its MIME table, a dynamic or an HTML-family type: `notes.txt` →
+  `notes.html`) and is appended to an unknown one (`article-1.884291` →
+  `article-1.884291.html`), as `src/htsname.c:1200-1215` does.
+  **Deviation (shortcut):** HTTrack keeps a contested extension when the body's
+  magic bytes prove it (`src/htsname.c:289-321`, `src/htssniff.c`): a real PDF
+  at `/doc.pdf` served as `text/html` stays `doc.pdf`. dograpper does not sniff
+  and names it `doc.html`.
 - **Manifest:** written from the engine's own per-URL records (real URL, final
   URL, status, content-type, ETag, Last-Modified), not derived from disk
   paths. `ManifestEntry` gains the missing fields in a backward-compatible

@@ -1,10 +1,11 @@
 """HTTrack-style local file naming, layout-compatible with wget --adjust-extension.
 
 ``<output>/<host>/<path>``: directory URLs become ``index.html``. HTML responses
-without ``.html``/``.htm`` get ``.html``: like HTTrack, it replaces a dynamic or
-HTML-family extension (``foo.cgi?q=45`` -> ``foo<hash>.html``) and is appended to
-anything else. Characters HTTrack forbids in saved names become ``_``. Pure path
-computation: never creates directories or files.
+without ``.html``/``.htm`` get ``.html``: like HTTrack, it replaces any extension
+HTTrack knows (``notes.txt`` -> ``notes.html``, ``foo.cgi?q=45`` -> ``foo<hash>.html``)
+and is appended to an unknown one (``article-1.884291`` -> ``article-1.884291.html``).
+Characters HTTrack forbids in saved names become ``_``. Pure path computation: never
+creates directories or files.
 
 Out of scope: Windows reserved names (CON, NUL...), trailing dots/spaces, over-long names.
 """
@@ -17,11 +18,26 @@ from urllib.parse import unquote, urlsplit
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 # htsname.c: replaced by "_" in every saved name, on every platform
 _FORBIDDEN = {c: "_" for c in [*range(32), 127, *map(ord, '~\\:*?"<>|')]}
-# htsmime.c hts_ext_dynamic + htslib.c ishtml_ext (and a bare trailing dot): an HTML page
-# gets .html in place of these, not after them (htsname.c, R14)
-_REPLACED_EXTS = frozenset({".php3", ".php", ".php4", ".php2", ".cgi", ".asp", ".jsp", ".pl",
-                            ".cfm", ".nsf", ".shtml", ".phtml", ".htmlx", ".shtm", ".phtm",
-                            ".htmx", "."})
+# An HTML page gets .html in place of these, not after them (htsname.c:1200-1215, R14):
+# htsmime.c hts_ext_dynamic, htslib.c ishtml_ext, a bare trailing dot, and every extension
+# of htsmime.c hts_mime + hts_mime_modern (is_knowntype).
+_REPLACED_EXTS = frozenset("." + e for e in """
+php3 php php4 php2 cgi asp jsp pl cfm nsf shtml phtml htmlx shtm phtm htmx
+323 7z aab aac aam aas acx ai aif aifc aiff arj asf asr asx au avi avif axs bas bcpio bin
+bmp bz2 c cat cc ccad cco cdf cer cgi class clp cmx cod cpio cpt crd crl crt csh css dcr
+der dir dms doc docx dot dotx drw dtd dvi dwf dwg dxf dxr eps etx evy f90 fh fh4 fh5 fh7
+fhc fif flac flr g gif gtar gz gzip h hdf heic hh hlp hqx hta htc htm html htt ice ico ief
+iges iii ins isg isp jfif jpe jpeg jpg js json jsonld kar ksh latex lha lsf lsx lzh m m13
+m14 m3u m4a man md mdb me mesh mht mhtml mid midi mif mjs mny mov movie mp2 mp3 mp4 mpa mpe
+mpeg mpg mpga mpp mpv2 ms msh mvb nc nws oda odb odc odf odg odi odm odp ods odt oga ogg
+ogv opus otf otg oth otp ots ott p10 p12 p7b p7c p7m p7r p7s part pbm pdb pdf pfx pgm pict
+pko pma pmc pml pmr pmw png pnm pot potx ppm pps ppsx ppt prf prt ps pub qt ra ram rar ras
+rgb rm rmi roff rpm rtf rtx scd sct set setpay setreg sgm sgml sh shar silo sit skd skm skp
+skt sldx smi smil sml snd sol spc spl src sst step stl stm stp sv4cpio sv4crc svg swf t tar
+tcl tex texi texinfo tgz tif tiff torrent tr trm ts tsv ttf txt uls unv ustar vcd vcf vda
+vrml w6w wasm wav wcm wdb weba webm webmanifest webp wks wmf wmv woff woff2 word wps wri
+wrl wrz xaf xbm xla xlc xlm xls xlsx xlt xltx xlw xml xof xpm xwd xyz z zip zst
+""".split()) | {"."}
 
 
 class NameRegistry:
@@ -90,6 +106,8 @@ class NameRegistry:
             stem += hashlib.md5(parts.query.encode()).hexdigest()[:4]
         is_html = (content_type or "").split(";")[0].strip().lower() == "text/html"
         if is_html and ext.lower() not in (".html", ".htm"):
+            # shortcut: no htssniff.c magic check, so a real PDF served as text/html still
+            # gets doc.html where HTTrack keeps doc.pdf; upgrade if mislabeled binaries matter.
             ext = ".html" if ext.lower() in _REPLACED_EXTS else ext + ".html"
         full = os.path.realpath(os.path.join(self._root, host, *segs, stem + ext))
         if os.path.commonpath([self._root, full]) != self._root:

@@ -54,6 +54,16 @@ def test_html_replaces_dynamic_and_html_family_extensions_like_httrack(tmp_path)
     assert reg.assign("http://e.com/x.php", "application/pdf") == os.path.join(d, "x.php")
 
 
+def test_html_replaces_any_extension_httrack_knows(tmp_path):
+    # htsname.c cuts an extension of HTTrack's MIME table (is_knowntype) before adding .html;
+    # its tests/01_engine-savename.test pins /x.pdf and /x.gif served as text/html -> x.html
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "h.test")
+    for name in ("notes.txt", "a.pdf", "b.GIF", "c.json", "d.md", "e.webp", "f.svg"):
+        assert reg.assign(f"https://h.test/{name}", "text/html") == os.path.join(d, name.split(".")[0] + ".html")
+    assert reg.assign("https://h.test/plain.txt", "text/plain") == os.path.join(d, "plain.txt")
+
+
 def test_forbidden_characters_become_underscores(tmp_path):
     reg, root = _reg(tmp_path)
     d = os.path.join(root, "h")
