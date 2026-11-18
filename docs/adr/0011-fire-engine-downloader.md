@@ -87,8 +87,10 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   `--impersonate`, porque misturar a identidade do HTTrack com um handshake de
   Chrome é exatamente a incoerência que um WAF detecta. Consequência
   aceita: os `Sec-Fetch-*` são os fixos do perfil (navegação), não os do link
-  (`FetchMeta`), e `--user-agent` não é enviado (pendência em
-  `docs/DECISIONS.md`).
+  (`FetchMeta`). Um `--user-agent` dado pelo usuário substitui o
+  `User-Agent` do perfil (decisão do mantenedor, 2026-11-18, provisória: o
+  comportamento exato do Firecrawl está em pesquisa no #136); sem ele, vale o
+  do perfil.
 - **Corpo limitado no lado do curl.** A decodificação do curl fica desligada
   (`HTTP_CONTENT_DECODING` 0): o writer do curl (`content_callback`) recebe o
   corpo como veio do fio, aborta a transferência além de `MAX_BODY_BYTES` e

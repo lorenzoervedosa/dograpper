@@ -358,6 +358,33 @@ def test_real_download_mirrors_the_site(server, tmp_path):
     assert sorted(e["url"] for e in files.values()) == [f"{base}/docs/", f"{base}/docs/a.html"]
 
 
+def test_real_explicit_user_agent_replaces_the_impersonated_one(server):
+    # Maintainer decision: an explicit --user-agent is sent (#136 aligns it with Firecrawl).
+    base, script, _ = server
+    log = []
+    script["/p"] = recorded(log, (200, {"Content-Type": "text/html"}, b"<html>hi</html>"))
+
+    res = real_fetcher(user_agent="MyDocsBot/1.0").get(base + "/p", kind="navigate")
+
+    assert res.status == 200
+    assert log[0]["User-Agent"] == "MyDocsBot/1.0"
+
+
+def test_real_download_sends_the_user_agent_given_on_the_command_line(server, tmp_path):
+    pytest.importorskip("curl_cffi")
+    base, script, _ = server
+    _docs_site(script)
+    log = []
+    script["/docs/a.html"] = recorded(log, script["/docs/a.html"])
+
+    result = CliRunner().invoke(
+        cli, ["download", f"{base}/docs/", "-o", str(tmp_path / "m"), "--downloader",
+              "fire-engine", "--user-agent", "MyDocsBot/1.0", *FAST])
+
+    assert result.exit_code == 0, result.output
+    assert [h["User-Agent"] for h in log] == ["MyDocsBot/1.0"]
+
+
 def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp_path):
     """The update mode of the httrack profile (HTTrack -C2), over curl: the validators the
     first run recorded go on the wire, and a 304 keeps each file byte-identical."""

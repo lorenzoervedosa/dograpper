@@ -633,7 +633,10 @@ On the wire, the browser profile sends its own identity headers
 (`User-Agent`, `Accept`, `Accept-Language`, `Accept-Encoding`, `Sec-Fetch-*`,
 client hints) in its own order; of the `httrack` header set only the
 request-specific ones are sent: `Referer` and, on an update, `If-None-Match` /
-`If-Modified-Since`. `--user-agent` therefore has no effect under this profile.
+`If-Modified-Since`. A `--user-agent` you give (on the command line or in
+config) replaces the profile's `User-Agent`; the rest of the identity stays the
+profile's. How this should match Firecrawl exactly is open in
+[#136](https://github.com/lorenzoervedosa/dograpper/issues/136).
 
 #### Incremental
 

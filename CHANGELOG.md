@@ -51,7 +51,8 @@ and fixes alone are a PATCH bump.
 - `download --downloader fire-engine` (and on `sync`): the httrack crawl over a
   `curl_cffi` transport that sends a browser TLS/HTTP-2 fingerprint, for docs
   behind a WAF that rejects the stdlib handshake. Adds `--proxy` and
-  `--impersonate`; needs the optional `fire-engine` extra (`curl_cffi`, plus
+  `--impersonate` (an explicit `--user-agent` replaces the impersonated
+  profile's User-Agent); needs the optional `fire-engine` extra (`curl_cffi`, plus
   `brotli` and `zstandard` to decode what the browser profile accepts), and
   fails loud with an install hint when it is missing. Same discovery, scope,
   pacing, robots.txt, link rewriting and update mode (a re-run revalidates the

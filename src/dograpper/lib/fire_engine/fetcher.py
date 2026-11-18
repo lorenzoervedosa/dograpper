@@ -21,7 +21,8 @@ from ...utils.redact import redact_url
 from ..httrack.fetcher import MAX_BODY_BYTES, Fetcher, wire_host
 
 # Of the httrack request headers, only the request-specific ones go to curl; the
-# impersonated browser sends its own identity (User-Agent, Accept*, Sec-Fetch-*) (ADR-0011).
+# impersonated browser sends its own identity (User-Agent, Accept*, Sec-Fetch-*) (ADR-0011),
+# except a User-Agent the user gave, which replaces the profile's (#136 aligns it with Firecrawl).
 _FORWARDED = frozenset({"referer", "if-none-match", "if-modified-since"})
 
 _WRITE_ABORT = 0xFFFFFFFF  # libcurl's CURL_WRITEFUNC_ERROR: the writer stops the transfer
@@ -93,8 +94,10 @@ class CurlCffiFetcher(Fetcher):
     """
 
     def __init__(self, policy, *, proxy: str | None = None,
-                 impersonate: str = "chrome", session_factory=None, **kw):
+                 impersonate: str = "chrome", user_agent: str | None = None,
+                 session_factory=None, **kw):
         super().__init__(policy, **kw)
+        self._user_agent = user_agent
         self._proxy, self._proxy_auth = split_proxy(proxy)
         self._impersonate = impersonate
         self._session_factory = session_factory or _default_session_factory
@@ -113,6 +116,8 @@ class CurlCffiFetcher(Fetcher):
         netloc = wire_host(parts)  # the port included; ValueError on a host the checks reject
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
         req_headers = {k: v for k, v in headers if k.lower() in _FORWARDED}
+        if self._user_agent:
+            req_headers["User-Agent"] = self._user_agent
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
         session = self._session()  # outside the try: a missing curl_cffi is no transport error

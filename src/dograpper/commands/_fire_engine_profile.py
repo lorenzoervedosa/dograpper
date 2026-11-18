@@ -38,7 +38,8 @@ def run_fire_engine(url, output, depth, delay, include_extensions, headless, ver
     try:  # curl_cffi is imported by the first GET: robots.txt, or discovery under --no-robots
         return run_profile(
             "fire-engine",
-            lambda policy: CurlCffiFetcher(policy, proxy=proxy, impersonate=impersonate),
+            lambda policy: CurlCffiFetcher(policy, proxy=proxy, impersonate=impersonate,
+                                           user_agent=policy_kw.get('user_agent')),
             url, output, depth, delay, include_extensions, verbose, policy_kw, from_config,
             discover, filters, previous, front_failed=_front_failed, fallback=_SPA_MSG)
     except CurlCffiMissing as e:

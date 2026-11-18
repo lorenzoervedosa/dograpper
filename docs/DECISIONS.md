@@ -180,10 +180,10 @@ picked option (a).
   mismatch a WAF flags.
 - **Rejected:** forwarding the whole httrack set (breaks the fingerprint);
   forwarding the per-link `Sec-Fetch-*` (no site in the project needs it yet).
-- **Pending:** `--user-agent` is accepted under `fire-engine` but not sent.
-  Reject it there (usage error, like the `[httrack]` flags under `wget`) or
-  send it over the profile's User-Agent? Left as is: either changes the
-  documented flag surface.
+- **Pending:** none. `--user-agent` under `fire-engine` was resolved by the
+  maintainer (2026-11-18): an explicit value replaces the profile's
+  User-Agent, the rest of the identity unchanged. The exact Firecrawl
+  behavior to copy is researched in #136.
 
 ## 2026-11-18 — Anti-bot evasion is no longer an anti-goal
 
