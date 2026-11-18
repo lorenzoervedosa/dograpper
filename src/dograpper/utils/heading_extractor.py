@@ -176,5 +176,7 @@ def format_context_header(
     if not payload or payload == {"schema_version": "v1"}:
         return ""
 
-    json_str = json.dumps(payload, indent=2, ensure_ascii=False)
+    # json.dumps leaves ">" alone, so a value holding "-->" would close the comment;
+    # ">" only ever occurs inside JSON strings here, where > decodes back to it.
+    json_str = json.dumps(payload, indent=2, ensure_ascii=False).replace(">", "\\u003e")
     return f"<!-- dograpper-context-v1\n{json_str}\n-->\n\n"

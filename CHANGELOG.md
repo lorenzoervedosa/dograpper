@@ -148,6 +148,10 @@ and fixes alone are a PATCH bump.
   matched on their path in the mirror, so a page in a subdirectory no longer
   takes the URL of a same-named page at the site root; a file that matches
   several entries gets no `url` and is listed in the summary. ([#90])
+- `pack --context-header` writes `>` in header values as the JSON escape
+  `\u003e`, so a heading or source path holding `-->` no longer closes the
+  `dograpper-context-v1` comment early; JSON parsers read the same value.
+  ([ADR-0010](docs/adr/0010-per-page-pack-layout.md))
 
 ### Security
 

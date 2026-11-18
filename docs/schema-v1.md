@@ -10,6 +10,10 @@ Each chunk begins with a metadata block in an HTML comment:
 -->
 ```
 
+The JSON is indented by 2, one field per line. Every `>` in a value is
+written as the JSON escape `\u003e`, so a value holding `-->` cannot close
+the comment; a JSON parser reads the original character back.
+
 ## Fields
 
 | Field | Type | Required | Description |
