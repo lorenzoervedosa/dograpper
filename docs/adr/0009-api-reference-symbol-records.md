@@ -78,3 +78,40 @@ The generic split does not reach the member's own detail, for two reasons:
   - member records have p99 ≤ 100 words and max ≤ 3,000;
   - container records have max ≤ 5,000 words;
   - pack time is at most 2× the baseline.
+
+## Amendment (2026-11-18)
+
+The member-record p99 bound in the acceptance bar is now set per generator:
+
+| Generator | Member record p99 |
+|---|---|
+| Javadoc | ≤ 100 words |
+| Sphinx autodoc | ≤ 300 words |
+
+Every other criterion still applies to every generator:
+
+- member records max ≤ 3,000 words;
+- container records max ≤ 5,000 words;
+- at least 80% of about 20 lookups in the top 5;
+- 100% of sampled signatures keep their type parameters;
+- pack time at most 2× the baseline.
+
+Evidence comes from the Sphinx autodoc acceptance run
+([#75](https://github.com/lorenzoervedosa/dograpper/issues/75), phase 2). The
+corpus was the packaging docs (packaging.pypa.io, Sphinx 9.1, 237 member
+records).
+
+- Member p99 was 250 words and the largest member had 299 words.
+- Python docstrings carry doctest examples and parameter lists, which the
+  Javadoc corpus did not have. Each record holds one member's own
+  documentation, so a lower bound would mean dropping docstring content.
+- The larger records did not hurt retrieval. All 22 curated lookups hit the
+  declaring member or its container record in the top 5, and in 21 of them
+  the member record itself was in the top 5.
+
+Each future generator (rustdoc, TypeDoc, Doxygen) declares its own member p99
+bound in its phase PR and adds it to the table above. The PR must show
+evidence for that bound:
+
+- the measured size distribution on its acceptance corpus;
+- the lookup results showing that the bound does not hurt retrieval.
