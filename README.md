@@ -25,7 +25,7 @@ URL → Mirror → Extract → Dedup → Score → Chunk → Export (MD/JSONL)
 
 | Stage | What it does | Flag |
 |-------|-----------|------|
-| **Mirror** | Mirrors site locally via wget/playwright | `download` |
+| **Mirror** | Mirrors site locally via wget/playwright, or the `httrack` / `fire-engine` downloaders | `download` |
 | **Extract** | Strips boilerplate, preserves main content | (automatic) |
 | **Dedup** | Eliminates repeated blocks across pages | `--dedup` |
 | **Score** | Audits context quality per chunk | `--score` |
@@ -40,7 +40,7 @@ URL → Mirror → Extract → Dedup → Score → Chunk → Export (MD/JSONL)
 After [installing](#install):
 
 ```bash
-# One-time setup: generate a config for your target (notebooklm / rag / claude-project)
+# One-time setup: generate a config for your target (notebooklm / rag / claude-project / claude-code)
 dograpper init
 
 # Full pipeline: download + pack optimized for NotebookLM
@@ -209,7 +209,7 @@ dograpper download <url> -o <directory> [options]
 | Option | Alias | Default | Description |
 |---|---|---|---|
 | `--output` | `-o` | *required* | Destination directory |
-| `--depth` | `-d` | `0` (unlimited) | Maximum link depth |
+| `--depth` | `-d` | `0` (unlimited) | Maximum link depth: link hops for `wget --mirror`, Playwright and the httrack crawl; for an llms.txt or sitemap URL list, path segments below the start URL |
 | `--headless` | — | `false` | Skip wget and use playwright directly |
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions (csv) |
@@ -232,7 +232,9 @@ next one when the previous fails or returns fewer than 3 usable URLs
    scoping by **same-netloc OR canonicalized path-prefix**. Covers hosts
    like Mintlify whose sub-sitemap lives on a CDN
    (`www.mintlify.com/<project>/`) but the path identifies the project.
-   The probe also tries `sitemap_index.xml` and `sitemap-index.xml`.
+   The probe also tries `sitemap_index.xml` and `sitemap-index.xml`; under
+   `httrack` and `fire-engine`, the `Sitemap:` lines of robots.txt (same host
+   only) are probed first.
 3. **`wget --mirror`** — traditional link-graph crawl, `User-Agent` of
    Chrome/120 to avoid being blocked by edge WAFs (Cloudflare, Vercel).
    Runs with `--no-parent` (lifted by a `+` [URL filter](#url-filters---filter)),
@@ -298,7 +300,7 @@ The Playwright crawl's per-page `Downloading: <url>` line needs `--verbose`.
 
 `--filter RULE` scopes a crawl with HTTrack's scan rules. It is repeatable, is
 read from `"filter": [...]` in `.dograpper.json` (a list; explicit flags replace
-it) and is forwarded by `sync`. It works with both downloaders and is applied to
+it) and is forwarded by `sync`. It works with every downloader and is applied to
 every discovered link before it is fetched: the llms.txt and sitemap lists,
 `wget --mirror`, the Playwright crawl, and the httrack profile's seeded list,
 recursive crawl and redirect targets. The start URL itself is never filtered.
@@ -448,12 +450,13 @@ as changed.
 
 **Updates (`httrack`, `fire-engine`).** A run on an `-o` that already holds a manifest is an
 update, as HTTrack's `-C2` on a finished mirror: on both paths, each file the
-previous run recorded from a `200` with an `ETag` or a date, still on disk and
-not empty, is revalidated.
+previous run recorded from a `200` (or a `203`), still on disk and not empty,
+is requested again.
 
 - The request starts with `If-None-Match: <etag>` and `If-Modified-Since:
   <date>` (or the one recorded), as HTTrack sends them. The date is the
-  response's `Last-Modified`, else its `Date`.
+  response's `Last-Modified`, else its `Date`. A file recorded with neither
+  gets a plain request, and a 2xx replaces it.
 - **304 Not Modified:** the file is left byte-identical (its links are not
   rewritten again) and keeps its manifest record; the crawl follows the links
   of a kept page, stylesheet or script from that copy.
@@ -501,8 +504,12 @@ counts these as `Kept on a matching size (--updatehack): N`.
 
 **Change report (`--changes`, HTTrack `-%d`, off).** The run writes
 `hts-changes.json` in `-o`, in HTTrack's format, and prints its summary
-(`Change report: 2 new, 1 changed, 40 unchanged, 1 gone (hts-changes.json)`).
-Each file is listed once, with its URL and its size:
+(`Change report: 2 new, 1 changed, 40 unchanged, 1 gone (hts-changes.json)`;
+on a first crawl `Change report: first crawl, N files mirrored, nothing to
+compare against (hts-changes.json)`, and under `--cache 0` `Change report: no
+mirror index (the cache is off), N files mirrored, deletions not detected
+(hts-changes.json)`). Each file is listed once, with its `url`, its `file`
+(the path under `-o`) and its `size`:
 
 - `new`: no copy before this run;
 - `changed` (with `previous_size`): a page whose payload, the body as
@@ -514,9 +521,12 @@ Each file is listed once, with its URL and its size:
   requested without keeping it is `unchanged`).
 
 `first_crawl` is `true` without a previous manifest, and `null` under
-`--cache 0`, which lists nothing as gone. `purged` is always `false`. A URL is
-written as the manifest writes it (`""` when the manifest records none). A
-run that fails leaves the previous report as it was.
+`--cache 0`, which lists nothing as gone. `purged` and `partial` are always
+`false`; `schema`, `generator`, `date` and `counts` (files per bucket) head the
+document. A URL is written as the manifest writes it (`""` when the manifest
+records none); a `gone` file, and a file of the previous run that was
+requested without being kept, has `"url": ""`, and a `gone` file has no
+`size`. A run that fails leaves the previous report as it was.
 
 **`--do-not-recatch` (HTTrack `-%n`, off).** A recorded file other than a
 page, a script or a stylesheet that was erased or emptied since is not fetched
@@ -600,8 +610,10 @@ advertises only what it can decode. Python 3.14's stdlib `compression.zstd`
 is used when available. The release binary includes this extra.
 
 **Current gaps (temporary).** Under `httrack`, the Playwright fallback is
-not implemented yet and fails loud (exit 1); use `--downloader wget` for
-those sites. It is no deviation from HTTrack.
+not implemented yet and fails loud (exit 1): `--headless` is rejected up
+front, and a result that looks client-rendered (an SPA shell, or a crawl that
+saved at most one HTML page) ends the run with the same message. Use
+`--downloader wget` for those sites. It is no deviation from HTTrack.
 
 ##### fire-engine
 
@@ -621,8 +633,12 @@ decoders of the `httrack` extra: curl hands the body over as it came, and the
 profile decodes it with the `httrack` decoder, under the same size and zstd
 window limits. `--timeout` is the time to connect, then the longest silence
 while receiving, as under `httrack`. Without the extra, the
-profile fails loud with an install hint. `--headless` is rejected (the profile
-has its own transport). If the site still challenges the request after the
+profile fails loud with an install hint; the release binary does not bundle
+this extra, so `fire-engine` needs a source install. `--headless` is rejected
+(the profile has its own transport), and a result that looks client-rendered
+exits 1 pointing at `--downloader wget --headless`, since the profile runs no
+JavaScript. `--proxy`, or an `--impersonate` other than the default, is a
+usage error (exit 2) under any other downloader. If the site still challenges the request after the
 browser fingerprint, the run exits 1 and suggests `--proxy` with a different
 IP or `--downloader wget`; a manual-login browser solver is planned
 ([ADR-0011](docs/adr/0011-fire-engine-downloader.md)). Automatic challenge or
@@ -904,9 +920,10 @@ deduplicated, with or without that flag: its blocks are neither removed nor
 used as the first-seen copy that removes blocks elsewhere, so a signature
 that several types declare, such as an override, stays on every page
 ([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). The summary
-and `--dry-run` report `Pages exempted: N (API reference)`. API reference
-pages from a generator without an adapter (TypeDoc, rustdoc, Doxygen) are
-still deduplicated: run without `--dedup` on those corpora.
+reports `Pages exempted: N (API reference)`, and `--dry-run` reports
+`Dedup pages exempted: N (API reference)`. API reference pages from a
+generator without an adapter (TypeDoc, rustdoc, Doxygen) are still
+deduplicated: run without `--dedup` on those corpora.
 
 #### Context header (`--context-header`)
 
@@ -917,21 +934,23 @@ Injects structured metadata in the `dograpper-context-v1` format
 <!-- dograpper-context-v1
 {
   "source": "flask.palletsprojects.com/en/stable/quickstart/index.html",
-  "context_breadcrumb": ["Quickstart", "Routing"],
+  "url": "https://flask.palletsprojects.com/en/stable/quickstart/",
   "chunk_index": 2,
   "total_chunks": 5,
   "word_count": 4820,
-  "url": "https://flask.palletsprojects.com/en/stable/quickstart/",
+  "context_breadcrumb": ["Quickstart", "Routing"],
   "llm_readiness": {"score": 0.92, "grade": "A", "noise_ratio": 0.08},
   "schema_version": "v1"
 }
 -->
 ```
 
-Optional fields (`url`, `llm_readiness`, and the MediaWiki page metadata
-`version` and `version_status`, written after `url`) are omitted when not
-available (they never appear as `null`). A `>` in a value is written as
-`\u003e`, so a value holding `-->` cannot close the comment. Full spec:
+Optional fields (`url`, `context_breadcrumb`, `llm_readiness`, the MediaWiki
+page metadata `version` and `version_status`, written after `url`, and
+`chunk_index` / `total_chunks`, written only for a file split into several
+sub-chunks) are omitted when not available (they never appear as `null`). A
+`>` in a value is written as `\u003e`, so a value holding `-->` cannot close
+the comment. Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
 
 In the page layout (`--layout page`) each page file gets exactly one header,
@@ -1069,9 +1088,9 @@ Per-chunk 0–1 score derived from three weighted metrics:
 
 | Metric | Weight | What it measures |
 |---|---|---|
-| `noise_ratio` | 40% | Boilerplate remaining after extraction |
-| `boundary_integrity` | 30% | Fraction of unbroken code/table blocks |
-| `context_depth` | 30% | Mean heading depth (proxy for hierarchy) |
+| `noise_ratio` | 40% | Share of the source words that extraction removed as boilerplate (the less removed, the higher the score) |
+| `boundary_integrity` | 30% | All or nothing: the chunk holds no unclosed fenced code block and no unbalanced `<pre>` |
+| `context_depth` | 30% | Deepest heading level in the chunk: 2 or deeper scores in full, 1 scores half, no heading scores 0 |
 
 Final grade:
 - **A** — score ≥ 0.8 (ready for direct use)
@@ -1116,7 +1135,9 @@ Shortcuts for common combinations.
 - **`notebooklm`** — hard ceiling, not a default: caps `max-chunks` at
   50 and `max-words-per-chunk` at 500,000 regardless of what the CLI
   flags request (`--max-chunks 100 --bundle notebooklm` still yields
-  50 chunks). Does not set `strategy` or `format`.
+  50 chunks). Does not set `strategy` or `format`. It also redistributes
+  whole files across the chunks to even out their word counts, so a corpus
+  with no more files than the chunk cap gets one chunk per file.
 - **`rag-standard`** — no restrictions; sets nothing.
 
 Both presets generate `IMPORT_GUIDE.md` alongside the chunks.
@@ -1201,8 +1222,8 @@ out/
   `Glob **/IsoPlayer.md` finds `zombie/characters/IsoPlayer.html`. The
   characters HTTrack forbids (`\ : * ? " < > | ~`, control characters) become
   `_`; a Windows reserved name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
-  `LPT1`–`LPT9`, any case) and a name ending in a dot or a space get a
-  trailing `_`. Names that differ only in case get `-2`, `-3`… in sorted
+  `LPT1`–`LPT9`, any case) gets a trailing `_`, and a final dot or space
+  becomes `_`. Names that differ only in case get `-2`, `-3`… in sorted
   source order, so the same tree always gives the same names.
 - **`INDEX.md`.** Two header lines, then one line per page sorted by path,
   so `grep -i term INDEX.md` answers "which page":
@@ -1305,7 +1326,9 @@ URL, breadcrumb, per-chunk readiness), cross-references from
 `cross_refs.json` (`references_to` / `referenced_by`), readiness detail
 from `llm-readiness.json`, and the content preview — including the
 `[-> chunk_id]` annotations exactly as the LLM sees them. Works with
-`md`, `txt` and `jsonl` packs.
+`md`, `txt` and `jsonl` packs. Exits 1 when `CHUNKS_DIR` holds no
+`<prefix>*` chunk file, or when the chunk id is unknown (the message lists
+the ids available).
 
 ### `dograpper sync`
 
@@ -1415,7 +1438,7 @@ dograpper eval <chunks_dir> [options]
 |---|---|---|---|
 | `CHUNKS_DIR` | — | *required* | Directory containing the JSONL pack |
 | `--top-k` | `-k` | `5` | Retrieval depth used to compute hit-rate |
-| `--output` | `-o` | *(none)* | Write the JSON report to this path |
+| `--output` | `-o` | *(none)* | Write the JSON report (`k`, `total_questions`, `hits`, `hit_rate`, `mrr`, `per_grade`) to this path; the summary is printed either way |
 | `--prefix` | — | `docs_chunk_` | Chunk filename prefix to load |
 
 Prerequisite: a pack built with `--format jsonl --context-header` —
@@ -1518,7 +1541,7 @@ MCP tools exposed:
 
 | Tool | Purpose |
 |---|---|
-| `search_chunks(query, k)` | Deterministic BM25 top-k retrieval (id, source, breadcrumb, grade, excerpt) |
+| `search_chunks(query, k)` | Deterministic BM25 top-k retrieval (id, chunk_id, source, rank, score, breadcrumb, grade, words, excerpt) |
 | `get_chunk(id)` | Full content of a record by id |
 | `get_cross_refs(chunk_id)` | `references_to` / `referenced_by` navigation (needs `--cross-refs` pack) |
 | `get_readiness(chunk_id?)` | Per-chunk readiness entry or the pack summary (needs `--score` pack) |
@@ -1527,6 +1550,7 @@ Retrieval reuses the same BM25 engine as `dograpper eval`, with stable
 tie-breaking — the same query always returns the same order. The server
 reads stdin line-by-line (JSON-RPC 2.0) and exits when the client closes
 the pipe. Status messages go to stderr; stdout carries only the protocol.
+Exits 1 if no JSONL chunks match `--prefix`.
 
 ### `dograpper docs`
 
@@ -1552,10 +1576,11 @@ Stop the server with Ctrl+C.
 
 | Flag | Alias | Default | Description |
 |---|---|---|---|
-| `--verbose` | `-v` | `false` | Detailed log (DEBUG + `[cascade]` prefixes) |
+| `--verbose` | `-v` | `false` | Detailed log (DEBUG level); the `[cascade]` lines are printed without it |
 | `--quiet` | `-q` | `false` | Critical errors only |
 | `--config` | — | `.dograpper.json` | Configuration file |
 | `--version` | — | — | Print the installed version and exit |
+| `--help` | `-h` | — | Show help and exit (every subcommand takes it too) |
 
 `--verbose` and `--quiet` are mutually exclusive.
 
@@ -1566,17 +1591,27 @@ Stop the server with Ctrl+C.
 | Code | Origin | Meaning | Remediation |
 |------|--------|---------|-------------|
 | 0 | any | success | — |
+| 1 | any | `--verbose` together with `--quiet`, or a `--config` file that is not valid JSON | drop one flag; fix the file |
+| 2 | any | usage error: unknown option, missing argument, invalid value | see `--help` |
 | 1 | doctor (default) | one or more deps missing | run `dograpper doctor --install` |
 | 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
-| 1 | download --downloader httrack | every seed, or the start URL of the crawl, refused/challenged | retry later, switch to `--downloader wget`, or change network |
+| 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl, refused/challenged; `--headless`; a result that looks client-rendered; `fire-engine` without its extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
+| 2 | download / sync | a `[httrack]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
-| 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
+| 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
+| 2 | pack --api-records | `--format` other than `jsonl`, or `--bundle notebooklm` | use `--format jsonl`; drop the bundle |
+| 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge or saved error page; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run`; `--format xml` (deprecated) | fix the input or the flags |
 | 1 | download | the manifest cannot be written | fix permissions or free space in `--output`; the mirror itself is complete |
 | 1 | pack --delta | `pack_state.json` cannot be written | fix permissions or free space in `--output`; the chunks are complete, the next `--delta` run packs in full |
 | 2 | pack | `--output` is the same directory as `INPUT_DIR` | use a subdirectory or another path |
+| 1 | explain / eval / serve | no chunk file matches `--prefix` (JSONL for `eval` and `serve`); `explain`: unknown chunk id; `eval`: no record carries a heading breadcrumb | re-run `pack` with the format and flags the command needs |
+| 1 | drift | a snapshot or the delta manifest is unreadable or malformed; with `--fail-on-drift`, drift was found | fix the file; with `--fail-on-drift` the exit is the signal asked for |
+| 1 | init | the config file exists (`--yes` without `--force`, or the overwrite prompt declined) | pass `--force`, or another `--output` |
+| 2 | init | `--yes` without `--target`, or `--skill-dir` with a target other than `claude-code` | add `--target`; drop `--skill-dir` |
+| 1 | docs | the port is in use | pick another `--port` |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
@@ -1678,6 +1713,7 @@ longer read and can be deleted once `input-dir` holds the new one.
 | Artifact | Flag | Description |
 |----------|------|-----------|
 | `docs_chunk_*.md` | (default) | Markdown chunks (headings, links, lists, tables, code) |
+| `docs_chunk_*.txt` | `--format txt` | Plain-text chunks |
 | `docs_chunk_*.jsonl` | `--format jsonl` | One JSON line per source file |
 | `pages/**/*.md` | `--layout page` | One file per page, mirroring the input tree (`.txt` with `--format txt`) |
 | `INDEX.md` | `--layout page` | One line per page: title, path, word count, URL |
@@ -1689,6 +1725,7 @@ longer read and can be deleted once `input-dir` holds the new one.
 | `pack_state.json` | `--delta` | Corpus state as of this pack; the next `--delta` run diffs against it |
 | `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes), in the `-o` directory |
 | `hts-changes.json` | `download --changes` | HTTrack's change report of the last run, in the `-o` directory |
+| `.dograpper.json`, `SKILL.md` | `init` | Config for the chosen target; skill stub for the `claude-code` target (never overwritten) |
 
 ---
 
@@ -1792,7 +1829,9 @@ Conditional extra lines (per enabled flag):
 | `--show-tokens` | `Tokens per chunk`, `Total tokens`, `Encoding` |
 | `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Matches kept`, `Pages exempted`, `Words removed` |
 | `--cross-refs` | `Cross-refs: ./chunks/cross_refs.json (N links, M unresolved)` |
-| `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, `Grade distribution` |
+| `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, then the grade counts (`5x A, 2x B, 0x C (avg: 0.87)`) |
+| `--report` | after the summary: `Readiness report (worst first):`, one graded row per chunk, `Report: <path>` |
+| `--api-records` | `API records: N pages split into M records (C container, K member), P pages kept whole` |
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
 | bot-challenge pages found | `Challenge pages: N` |
