@@ -1223,6 +1223,26 @@ tie-breaking — the same query always returns the same order. The server
 reads stdin line-by-line (JSON-RPC 2.0) and exits when the client closes
 the pipe. Status messages go to stderr; stdout carries only the protocol.
 
+### `dograpper docs`
+
+Serve a **local reference site** for every command and option, generated at
+run time from the installed CLI, so it always matches `--help`. One
+self-contained page (no external stylesheet, script, font or image), so it
+works offline and from the release binary. Each option has an anchor, for
+example `#download--depth`.
+
+```bash
+dograpper docs                      # serves http://127.0.0.1:8000/ and opens the browser
+dograpper docs --port 9000 --no-browser
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--port` | `8000` | TCP port, bound on `127.0.0.1` only. A busy port exits non-zero; it never moves to another port |
+| `--no-browser` | off | Only print the URL (always printed) instead of opening the browser |
+
+Stop the server with Ctrl+C.
+
 ### Global flags
 
 | Flag | Alias | Default | Description |

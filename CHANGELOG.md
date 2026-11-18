@@ -48,6 +48,10 @@ and fixes alone are a PATCH bump.
 
 ### Added
 
+- `dograpper docs`: serves a self-contained, offline reference page for every
+  command and option on `127.0.0.1` (`--port`, default 8000; `--no-browser`),
+  generated from the installed CLI. Command descriptions and option help
+  strings were rewritten to say what each flag does. ([#110])
 - `pack` detects bot-challenge interstitial pages (Cloudflare "Just a
   moment..." title) in its input, warns once with the affected files, keeps
   them out of the chunks and reports `Challenge pages: N` in the summary; it
@@ -358,3 +362,4 @@ and fixes alone are a PATCH bump.
 [#95]: https://github.com/lorenzoervedosa/dograpper/issues/95
 [#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
 [#88]: https://github.com/lorenzoervedosa/dograpper/issues/88
+[#110]: https://github.com/lorenzoervedosa/dograpper/issues/110

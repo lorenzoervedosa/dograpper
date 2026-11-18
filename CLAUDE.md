@@ -28,6 +28,7 @@ src/dograpper/
 ├── commands/
 │   ├── _httrack_profile.py # Modo `--downloader httrack` do download: resolve_profile() (opções do perfil, guarda sob wget, policy_kw), discovery_fetch() (robots antes do GET), run_httrack() (fetch semeado + relatório + fail-loud)
 │   ├── _page_layout.py     # Modo `pack --layout page` (ADR-0010): check_flags() (flags só-chunk na CLI ou no config, --bundle, --for-queries, --api-records, --format jsonl, --dedup ≠ off → exit 2), check_ownership() (pages/ sem INDEX.md → exit 1), write() (falha de escrita → exit 1)
+│   ├── docs.py             # `dograpper docs`: build_page() (HTML puro, autocontido, gerado da árvore click) + make_server() (http.server em 127.0.0.1; porta ocupada falha, nunca troca de porta)
 │   ├── doctor.py           # Detecta e instala deps pesadas (wget, chromium) em DOGRAPPER_HOME; --check-system-libs
 │   ├── download.py         # Opções click + despacho do --downloader; cascade 4-layer do wget: llms.txt → sitemap → wget --mirror → Playwright bounded (layers 1+2 compartilhadas com o perfil httrack)
 │   ├── drift.py            # Drift de contexto entre dois llm-readiness.json (+ delta_manifest.json opcional)
@@ -111,6 +112,7 @@ tests/
 ├── test_delta_artifacts.py # Delta como portão de mudança: artefatos completos, pack_state.json, fluxo sync (ADR-0008)
 ├── test_delta_manifest.py  # Delta: diff_manifests e o contrato do delta_manifest.json
 ├── test_dep_resolver.py    # Resolução de wget/chromium via DOGRAPPER_HOME (fallback para PATH, reload de módulo)
+├── test_docs_command.py    # docs: âncoras por comando/opção, tipos de opção, página autocontida, escape HTML, bind/porta/--no-browser
 ├── test_doctor.py          # Doctor: detecção, --install (download verificado, lock, idempotência), --check-system-libs
 ├── test_download.py        # wget mock, SPA detector, manifest roundtrip, UA/headers, run_wget_urls, bounded hydration
 ├── test_download_cascade.py # Cascade 4-layer: layer-1/2/3/4 wins, below-threshold fall-through, headless, post-wget-i SPA, observability
@@ -232,6 +234,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_boundary_chunking.py` | Antes de alterar `_split_text_by_words` ou `utils/code_fence.py` |
 | `CHANGELOG.md` | **Toda vez que a mudança for observável pelo usuário.** O cabeçalho do arquivo define a regra: o que ganha entrada, em qual seção, e quando (no mesmo PR, em `## [Unreleased]`) |
 | `docs/schema-v1.md` | Referência do schema `dograpper-context-v1` — manter sincronizado com `heading_extractor.py` e `chunker.py` |
+| `tests/test_docs_command.py` | Antes de alterar `commands/docs.py` (página gerada da árvore click, bind em 127.0.0.1, política de porta) |
 | `tests/test_doctor.py` | Antes de alterar `commands/doctor.py` (detecção, `--install`, lock, `--check-system-libs`) |
 | `tests/test_dep_resolver.py` | Antes de alterar `utils/dep_resolver.py` ou a semântica de `DOGRAPPER_HOME` |
 | `tests/test_cli_help_coverage.py` | Antes de adicionar comando ou opção: ambos precisam de descrição/help escrito, dizendo o que fazem e o efeito do default |
