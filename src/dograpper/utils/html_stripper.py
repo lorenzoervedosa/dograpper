@@ -2,7 +2,9 @@
 
 ``strip_html`` writes plain text, one paragraph per block, with ``<pre>`` blocks
 fenced (#86). With ``markdown=True`` (md output, #87) it also writes headings,
-links, lists and tables as Markdown.
+links, lists and tables as Markdown. Links are reference links (#115): the
+line holds ``[text][n]``, and the page ends with one ``[n]: destination`` line
+per distinct destination.
 """
 
 from collections import Counter
@@ -250,6 +252,33 @@ def escape_link_text(text: str) -> str:
     return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
+# A reference definition line, ``[n]: destination``: the block of them that ends
+# an md page defines its links (#115). A destination holds no whitespace, unless
+# it is written as <...>.
+DEFINITION = re.compile(r"\[(\d+)\]: (<[^<>\n]*>|\S+)")
+# The ``][n]`` that ends a reference link.
+REFERENCE = re.compile(r"\]\[(\d+)\]")
+
+
+def split_definitions(text: str) -> tuple:
+    """(body, definitions): ``text`` without the block of reference definitions that
+    ends it, and that block ("" when it ends with none). Only the last block counts:
+    md output writes the definitions there, after every block that refers to them.
+    A newline that ends the text, as in a page file, is not part of the block."""
+    cut = text.rstrip("\n").rfind("\n\n")
+    block = (text[cut + 2:] if cut >= 0 else text).rstrip("\n")
+    if block and all(DEFINITION.fullmatch(line) for line in block.split("\n")):
+        return text[:max(cut, 0)], block
+    return text, ""
+
+
+def definitions_used(text: str, definitions: str) -> str:
+    """The lines of ``definitions`` that a reference in ``text`` uses, in their order."""
+    used = set(REFERENCE.findall(text))
+    return "\n".join(line for line in definitions.split("\n")
+                     if DEFINITION.fullmatch(line).group(1) in used)
+
+
 def _link_destination(href, page: str):
     """Markdown link destination for ``href``, or None when the link keeps only its
     text: no target, a target on the same page (``#x``, or ``page#x`` as mirrors
@@ -352,6 +381,7 @@ class MarkdownStripper(HTMLStripper):
         self.link = None  # (frame, index of its "[" placeholder, destination)
         self.code = 0       # open <code> elements
         self.signature = 0  # <div> depth inside a Javadoc member signature
+        self.references = {}  # destination -> its number, in first-use order
 
     def handle_starttag(self, tag, attrs):
         if not self.ignore and not self.pre.depth:
@@ -364,10 +394,14 @@ class MarkdownStripper(HTMLStripper):
             self._close(tag)
 
     def finish(self) -> list:
-        """Close everything still open and return the output parts."""
+        """Close everything still open and return the output parts, the page's
+        link definitions last."""
         self.text.extend(self.pre.close())
         while len(self.frames) > 1:
             self._end()
+        if self.references:
+            self.text.append(_Verbatim("\n".join(
+                f"[{n}]: {dest}" for dest, n in self.references.items())))
         return self.frames[0].parts
 
     def _push(self, frame):
@@ -510,11 +544,12 @@ class MarkdownStripper(HTMLStripper):
         if not words:
             return
         # Prose is unescaped once more when rendered (_prose_blocks): what goes in
-        # here is escaped so that pass gives back the label and the destination.
+        # here is escaped so that pass gives back the label.
         label = html.escape(escape_link_text(html.unescape(" ".join(words))), quote=False)
         lead = " " if text[0].isspace() else ""
         trail = " " if text[-1].isspace() else ""
-        link = _Link(f"{lead}[{label}]({html.escape(dest, quote=False)}){trail}")
+        number = self.references.setdefault(dest, len(self.references) + 1)
+        link = _Link(f"{lead}[{label}][{number}]{trail}")
         link.text = lead + " ".join(words) + trail
         del parts[at + 1:]
         parts[at] = link

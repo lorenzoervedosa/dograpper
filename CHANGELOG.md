@@ -183,6 +183,16 @@ and fixes alone are a PATCH bump.
   maintenance box is removed from its section (the empty `## Navigation` that
   ended most wiki pages). A heading whose section still has content stays.
   ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
+- `pack --format md` writes links as reference links: `[text][n]` in the line
+  and one `[n]: target` line per distinct target at the end of each page,
+  numbered by first use, instead of `[text](target)`, so a line is as long as
+  its visible text and every line of a page-layout pack fits one `Read`. In
+  the chunk layout each page section ends with its own definitions, and each
+  section a `--context-header` split makes ends with those of the links it
+  holds. Word counts, `txt` and `jsonl` are unchanged; `--cross-refs` markers
+  follow the `[n]` and never enter a definition; `--dedup` never removes a
+  definition and compares links by target.
+  ([#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
 - `pack --format md` writes a link inside code (`<code>`, `<pre>`, a Javadoc
   `div.member-signature`) as its text, so a signature reads as the source
   shows it and greps as a phrase (`rg 'ItemContainer getInventory'`); links in

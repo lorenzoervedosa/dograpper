@@ -42,11 +42,32 @@ def test_heading_is_its_own_block_with_inline_markup_flattened():
 # ---------------------------------------------------------------------------
 
 def test_links_keep_their_target_as_written():
+    # #115: the target moves from the line to a reference definition at the end of the page.
     html = ('<p>See <a href="Lua_(API).html">the Lua API</a>, <a href="mailto:a@b.c">mail</a> '
             'and <a href="https://x.org/w/index.php?title=T&amp;action=edit&amp;section=2">docs</a>.</p>')
-    assert md(html) == ("See [the Lua API](<Lua_(API).html>), [mail](mailto:a@b.c) and "
-                        "[docs](https://x.org/w/index.php?title=T&action=edit&section=2).")
+    assert md(html) == ("See [the Lua API][1], [mail][2] and [docs][3].\n\n"
+                        "[1]: <Lua_(API).html>\n[2]: mailto:a@b.c\n"
+                        "[3]: https://x.org/w/index.php?title=T&action=edit&section=2")
     assert strip_html(html) == "See the Lua API, mail and docs."
+
+
+def test_each_target_is_defined_once_in_first_use_order_at_the_end():
+    html = ('<p><a href="b.html">B</a> <a href="a.html">A</a> <a href="b.html">again</a></p>'
+            '<ul><li><a href="c.html">C</a></li></ul><h2>See <a href="a.html">A</a></h2>')
+    assert md(html) == ("[B][1] [A][2] [again][1]\n\n- [C][3]\n\n## See [A][2]\n\n"
+                        "[1]: b.html\n[2]: a.html\n[3]: c.html")
+    assert md("<p>no links</p>") == "no links"
+
+
+def test_a_line_of_links_is_as_long_as_its_text():
+    # Item_tag.html: one table row lists every item of a tag (#115).
+    row = ", ".join(f'<a href="https://pzwiki.net/wiki/Item_{i}_with_a_long_name">I{i}</a>'
+                    for i in range(500))
+    body, definitions = md(f"<table><tr><th>Tag</th><th>Items</th></tr>"
+                           f"<tr><td>t</td><td>{row}</td></tr></table>").split("\n\n")
+    assert body.split("\n")[-1] == "| t | " + ", ".join(f"[I{i}][{i + 1}]" for i in range(500)) + " |"
+    assert definitions.split("\n")[:2] == ["[1]: https://pzwiki.net/wiki/Item_0_with_a_long_name",
+                                           "[2]: https://pzwiki.net/wiki/Item_1_with_a_long_name"]
 
 
 @pytest.mark.parametrize("href", [
@@ -63,20 +84,20 @@ def test_link_to_the_page_itself_keeps_only_the_text():
     html = ('<h2>Usage<a class="headerlink" href="p.html#usage">¶</a></h2>'
             '<p><a href="p.html#">Back to top</a>, <a href="q.html#x">other</a></p>')
     assert strip_html(html, markdown=True, page="p.html") == (
-        "## Usage¶\n\nBack to top, [other](q.html#x)")
+        "## Usage¶\n\nBack to top, [other][1]\n\n[1]: q.html#x")
     doc = extract_with_headings(html, source_path="docs/p.html", markdown=True)
     assert doc.text == strip_html(html, markdown=True, page="p.html")
 
 
 def test_link_target_and_text_cannot_break_out_of_the_link():
-    assert md('<a href="a b<c>\\d\x07">x</a>') == "[x](a%20b%3Cc%3E%5Cd%07)"
-    assert md('<a href="f(x">y</a>') == "[y](<f(x>)"
-    assert md('<a href="u">a [b] \\ c</a>') == "[a \\[b\\] \\\\ c](u)"
+    assert md('<a href="a b<c>\\d\x07">x</a>') == "[x][1]\n\n[1]: a%20b%3Cc%3E%5Cd%07"
+    assert md('<a href="f(x">y</a>') == "[y][1]\n\n[1]: <f(x>"
+    assert md('<a href="u">a [b] \\ c</a>') == "[a \\[b\\] \\\\ c][1]\n\n[1]: u"
 
 
 def test_link_whitespace_stays_outside_the_brackets():
     html = 'x<a href="u"> y </a>z'
-    assert md(html) == "x [y](u) z"
+    assert md(html) == "x [y][1] z\n\n[1]: u"
     assert strip_html(html) == "x y z"
 
 
@@ -130,7 +151,7 @@ def test_lists_get_markers_and_nesting_in_one_block():
 def test_paragraphs_inside_an_item_stay_on_its_line():
     html = ('<ul class="simple"><li><p>first</p></li>'
             '<li><p>second <a href="x.html">link</a></p><p>more</p></li></ul>')
-    assert md(html) == "- first\n- second [link](x.html) more"
+    assert md(html) == "- first\n- second [link][1] more\n\n[1]: x.html"
 
 
 def test_item_holding_sections_is_rendered_as_blocks_without_a_marker():
@@ -244,6 +265,15 @@ def test_deep_nesting_and_huge_tables_render_in_linear_time():
     assert time.perf_counter() - start < 10
 
 
+def test_many_links_render_in_linear_time():
+    n = 20000
+    start = time.perf_counter()
+    out = md("<p>" + "".join(f'<a href="u{i % 1000}">x{i}</a> ' for i in range(n)) + "</p>"
+             + "<table>" + '<tr><td><a href="v">k</a></td></tr>' * n + "</table>")
+    assert len(out.rsplit("\n\n", 1)[1].split("\n")) == 1001
+    assert time.perf_counter() - start < 10
+
+
 # ---------------------------------------------------------------------------
 # Heading offsets and word counts
 # ---------------------------------------------------------------------------
@@ -275,6 +305,14 @@ def test_markdown_markup_is_not_counted_as_words():
     assert count_words(rendered) == len(rendered.split()) > count_words(rendered, markdown=True)
 
 
+def test_link_definitions_are_not_counted_as_words():
+    assert count_words("a [b c][1] d\n\n[1]: u\n[2]: <v w>", markdown=True) == 4
+    # Only the block that ends the text is the page's definitions.
+    assert count_words("[1]: u\n\nend", markdown=True) == 3
+    assert count_words("a[1]: u", markdown=True) == 2
+    assert count_words("[1]: u\n[2]: v\n", markdown=True) == 0
+
+
 @pytest.mark.parametrize("block,token", [
     ("## Parameters of the map", "Parameters"),
     ("| title | Title of the map. |\n| --- | --- |", "title"),
@@ -302,7 +340,7 @@ def _pack(tmp_path, fmt, *extra, pages=None):
 def test_pack_md_renders_markdown_and_txt_stays_plain(tmp_path):
     written = next(_pack(tmp_path, "md", "--no-index").glob("*.md")).read_text()
     assert "## Parameters\n" in written
-    assert "[the map info page](Map.info.html)" in written
+    assert "[the map info page][1]" in written and written.endswith("\n\n[1]: Map.info.html")
     assert "| title | Title of the map - shown in menus. |\n" in written
     assert "- one item\n- two\n  1. nested\n" in written
     txt = next(_pack(tmp_path, "txt", "--no-index").glob("*.txt")).read_text()
@@ -346,8 +384,43 @@ def test_page_layout_md_renders_markdown_and_counts_without_markup(tmp_path):
     assert f"), {words} words" in (out / "INDEX.md").read_text()
     readiness = json.loads((out / "llm-readiness.json").read_text())
     assert [c["word_count"] for c in readiness["chunks"]] == [words]
+    assert body.endswith("\n\n[1]: Map.info.html\n")
     txt = (_pack(tmp_path, "txt", "--layout", "page") / "pages" / "page.txt").read_text()
-    assert "## " not in txt and "](" not in txt and "| --- |" not in txt
+    assert "## " not in txt and "](" not in txt and "| --- |" not in txt and "[1]" not in txt
+
+
+def test_each_page_of_a_chunk_ends_with_its_own_definitions(tmp_path):
+    pages = {"a.html": '<p>see <a href="x.html">x</a></p>',
+             "b.html": '<p>see <a href="y.html">y</a></p>'}
+    text = next(_pack(tmp_path, "md", "--no-index", pages=pages).glob("*.md")).read_text()
+    assert text == ("<!-- SOURCE: a.html -->\n\nsee [x][1]\n\n[1]: x.html\n\n"
+                    "<!-- SOURCE: b.html -->\n\nsee [y][1]\n\n[1]: y.html")
+
+
+SPLIT_PAGE = ("<html><body><main>"
+              + "".join(f'<h2>Part {i}</h2><p>{"word " * 30}<a href="t{i % 2}.html">target {i}</a>'
+                        ' and <a href="common.html">common</a>.</p>' for i in range(4))
+              + "</main></body></html>")
+
+
+def test_each_context_section_ends_with_the_definitions_it_uses(tmp_path):
+    # A page split over several context headers: no section depends on another's definitions.
+    def sections(fmt):
+        out = _pack(tmp_path, fmt, "--context-header", "--max-words-per-chunk", "40",
+                    pages={"page.html": SPLIT_PAGE})
+        text = next(out.glob(f"*.{fmt}")).read_text()
+        return [s.split("\n-->\n\n", 1) for s in text.split("<!-- dograpper-context-v1\n")[1:]]
+
+    md_sections = sections("md")
+    assert len(md_sections) == 4
+    for i, (header, body) in enumerate(md_sections):
+        prose, definitions = body.rstrip("\n").rsplit("\n\n", 1)
+        # Page-wide numbers: t0.html is 1, common.html 2, t1.html 3.
+        assert definitions == ("[1]: t0.html\n[2]: common.html" if i % 2 == 0
+                               else "[2]: common.html\n[3]: t1.html")
+        assert json.loads(header)["word_count"] == count_words(prose, markdown=True) > 30
+    assert [json.loads(h)["word_count"] for h, _ in md_sections] == [
+        json.loads(h)["word_count"] for h, _ in sections("txt")]
 
 
 
@@ -357,7 +430,8 @@ def test_pack_md_drops_links_to_the_page_itself(tmp_path):
             "</main></body></html>")
     for extra in ((), ("--context-header",)):
         out = _pack(tmp_path, "md", "--no-index", *extra, pages={"page.html": page})
-        assert "See above and [other](other.html)." in next(out.glob("*.md")).read_text()
+        written = next(out.glob("*.md")).read_text()
+        assert "See above and [other][1]." in written and "\n\n[1]: other.html" in written
 
 
 # ---------------------------------------------------------------------------

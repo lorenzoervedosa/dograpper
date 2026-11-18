@@ -423,9 +423,11 @@ def test_cross_refs_point_at_page_paths(tmp_path):
     })
     result = _pack("docs", "-o", "out", "--layout", "page", "--cross-refs")
     assert result.exit_code == 0, result.output
-    # md keeps the link as written (#87); the marker names the page file.
-    assert "[Beta page](sub/b.html) [-> pages/sub/b.md]" in _read("out/pages/a.md")
-    assert "[Alpha](../a.html) [-> pages/a.md]" in _read("out/pages/sub/b.md")
+    # md writes reference links (#115); the marker follows the link and names the page file.
+    assert _read("out/pages/a.md").endswith(
+        "[Beta page][1] [-> pages/sub/b.md] now.\n\n[1]: sub/b.html\n")
+    assert _read("out/pages/sub/b.md").endswith(
+        "[Alpha][1] [-> pages/a.md].\n\n[1]: ../a.html\n")
     refs = json.loads(_read("out/cross_refs.json"))
     assert refs["pages/a.md"]["references_to"] == ["pages/sub/b.md"]
     assert "[->" not in _read("out/INDEX.md")

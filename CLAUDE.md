@@ -39,7 +39,7 @@ src/dograpper/
 │   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
 │   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader, as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py) e --layout
 ├── lib/
-│   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile (Chunk.page_path no layout page), chunk_id() (id único de chunk nos sidecars), write_chunks() (md, txt, jsonl)
+│   ├── chunker.py          # Estratégias size e semantic, dataclasses Chunk/ChunkFile (Chunk.page_path no layout page), chunk_id() (id único de chunk nos sidecars), write_chunks() (md, txt, jsonl; no md cada seção de context header termina com as definições de link que usa)
 │   ├── config_loader.py    # Merge com precedência: defaults < JSON < CLI (usa ctx.get_parameter_source); read_config_section() — seção do JSON (quais chaves o config define)
 │   ├── eval_harness.py     # evaluate() — hit-rate@k e MRR sobre pares golden, com breakdown por readiness grade
 │   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
@@ -77,13 +77,13 @@ src/dograpper/
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
     ├── code_fence.py       # fence() / code_span() / split_blocks() / unfence() — bloco de código cercado (CommonMark): fonte única para o stripper (escreve), dedup e chunker (nunca partem um bloco em linha em branco), scorer e writers txt/jsonl (tiram a cerca)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
-    ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy)
+    ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy); nunca remove as definições de link do md e compara blocos pelo destino do link, não pelo número
     ├── dep_resolver.py     # resolve_wget()/resolve_browser_dir() — deps em DOGRAPPER_HOME (env lido no import)
     ├── dry_run_report.py   # generate_report() — relatório formatado para --dry-run
     ├── generator.py        # page_generator() — conteúdo do <meta name="generator"> (javadoc/…, MediaWiki …) nos primeiros 64 KiB; fonte única da detecção de gerador dos adaptadores (ADR-0009)
     ├── heading_extractor.py # extract_with_headings(), get_active_headings(), format_context_header() — formato dograpper-context-v1 (`title` só no layout page; metadata da página, ex. `version`, após `url`; `>` escrito como \u003e)
-    ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML; <pre> verbatim em bloco cercado com a linguagem das classes mw-highlight-lang-*/language-*/lang-*/highlight-* do <pre>, <code> ou div mais próxima que declare (PreCapture, render_text() compartilhados com heading_extractor); markdown=True (md): MarkdownStripper/render_markdown() escrevem títulos #, links [texto](href) (sem âncora da própria página nem esquema fora de http/https/mailto), listas -/N. aninhadas (item com bloco sai sem marcador) e tabelas pipe uma linha por linha, em tempo linear; escape_link_text() compartilhado com o INDEX.md
-    ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs() (marcador depois de um link Markdown, nunca no destino)
+    ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML; <pre> verbatim em bloco cercado com a linguagem das classes mw-highlight-lang-*/language-*/lang-*/highlight-* do <pre>, <code> ou div mais próxima que declare (PreCapture, render_text() compartilhados com heading_extractor); markdown=True (md): MarkdownStripper/render_markdown() escrevem títulos #, links de referência [texto][n] com um bloco `[n]: href` no fim da página, numerado por primeiro uso (sem âncora da própria página nem esquema fora de http/https/mailto; link dentro de <code>/<pre>/div.member-signature sai só como texto), listas -/N. aninhadas (item com bloco sai sem marcador) e tabelas pipe uma linha por linha, em tempo linear; escape_link_text() compartilhado com o INDEX.md; split_definitions()/definitions_used() (DEFINITION, REFERENCE) leem o bloco de definições para word_counter, dedup, chunker, link_extractor e page_layout
+    ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs() (marcador depois de um link Markdown [texto](url) ou [texto][n], nunca no destino nem numa linha de definição)
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
     ├── mediawiki.py        # is_mediawiki() (meta generator via generator.py), clean(), page_metadata() e find_redirect_aliases() — limpeza por página de MediaWiki antes do extrator genérico: corta do fonte navbox, mw-editsection e caixas de manutenção (mbox com toggle mw-customtoggle-mbox-*); o banner de versão vira version/version_status do header e do registro JSONL (senão a 1ª categoria oculta Version X); banner de redação desconhecida fica no texto; alias de redirect (wgRedirectedFrom) cujo alvo (mesmo wgPageName) está no run é pulado pelo pack; página não-MediaWiki volta intacta
     ├── portable_names.py   # FORBIDDEN (caracteres proibidos pelo HTTrack → _), claim_unique() (colisão casefold → -N), resolve_under() (caminho real contido na raiz) — regras de nome compartilhadas por lib/httrack/naming.py e o layout por página do pack (ADR-0010)
@@ -92,7 +92,7 @@ src/dograpper/
     ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
-    └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora) e count_words_file()
+    └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora, bloco de definições de link no fim) e count_words_file()
 tests/
 ├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl e test_download_cascade)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)

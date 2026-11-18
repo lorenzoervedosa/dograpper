@@ -14,14 +14,16 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import List, Dict
 
+from .html_stripper import DEFINITION
+
 logger = logging.getLogger(__name__)
 
 # Schemes that indicate an external (non-local) link.
 _EXTERNAL_SCHEMES = ("http://", "https://", "mailto:", "javascript:")
 
-# The "](destination)" of a Markdown link, in the two forms md output writes:
-# bare (no whitespace, no parentheses) or <...>.
-_DESTINATION = re.compile(r"\]\((?:<[^>\n]*>|[^\s()]*)\)")
+# The "](destination)" of a Markdown link, in its two forms: bare (no whitespace,
+# no parentheses) or <...>; or the "][n]" of a reference link, as md output writes (#115).
+_DESTINATION = re.compile(r"\]\((?:<[^>\n]*>|[^\s()]*)\)|\]\[\d+\]")
 
 
 @dataclass
@@ -198,8 +200,9 @@ def annotate_cross_refs(
     word that merely contains it as a substring (e.g. "Installation") or
     a dotted identifier (e.g. "pkg.AttachedItems.AttachedItems").
 
-    In md text a match that labels a link ``[text](url)`` gets the marker
-    after the link, and a match inside a link's destination is skipped.
+    In md text a match that labels a link ``[text](url)`` or ``[text][n]``
+    gets the marker after the link, and a match inside a link's destination,
+    its reference or a reference definition line (``[n]: url``) is skipped.
     """
     annotated = set()  # link_text values already processed
 
@@ -213,6 +216,8 @@ def annotate_cross_refs(
             continue
 
         for m in _link_text_pattern(lt).finditer(text):
+            if _in_definition(text, m.start()):
+                continue
             end = m.end()
             destination = _DESTINATION.match(text, end)
             if destination:
@@ -227,13 +232,21 @@ def annotate_cross_refs(
 
 
 def _in_destination(text: str, pos: int) -> bool:
-    """True when ``pos`` falls inside a link destination. A destination never
+    """True when ``pos`` falls inside a link destination or reference. Neither
     spans lines, so the search stops at the line start."""
-    start = text.rfind("](", text.rfind("\n", 0, pos) + 1, pos)
+    line_start = text.rfind("\n", 0, pos) + 1
+    start = max(text.rfind("](", line_start, pos), text.rfind("][", line_start, pos))
     if start < 0:
         return False
     destination = _DESTINATION.match(text, start)
     return destination is not None and destination.end() > pos
+
+
+def _in_definition(text: str, pos: int) -> bool:
+    """True when ``pos`` falls on a reference definition line."""
+    end = text.find("\n", pos)
+    return DEFINITION.fullmatch(text, text.rfind("\n", 0, pos) + 1,
+                                len(text) if end < 0 else end) is not None
 
 
 # ---------------------------------------------------------------------------

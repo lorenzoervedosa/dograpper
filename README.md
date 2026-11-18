@@ -558,7 +558,10 @@ chunking treat a code block as one unit, blank lines included.
 keep plain text, unchanged.
 
 - `h1`–`h6` become `#`–`######` lines.
-- A link becomes `[text](target)`, with the `href` as the page wrote it: a
+- A link becomes a reference link: the line holds `[text][n]`, and the page
+  ends with one `[n]: target` line per distinct target, numbered by first use
+  in the page, so a line is as long as its visible text however long its
+  targets are. The target is the `href` as the page wrote it: a
   relative target names a file of the mirror (`Lua_(API).html`), an absolute
   one is kept. A target holding parentheses is written as `<...>`; spaces,
   `<`, `>`, `\` and control characters are percent-encoded. A link to the same
@@ -576,14 +579,24 @@ keep plain text, unchanged.
   becomes a code span, and a list in a cell is written inline. A table whose
   cell holds multi-line code, a heading or another table is written one cell
   per paragraph instead, so the code block keeps its lines.
-- Word counts leave the markup out: heading and list markers, table pipes and
-  the delimiter row are not words (context headers, `INDEX.md`,
-  `llm-readiness.json`). `--max-words-per-chunk` measures each page's plain
+- In the chunk layout each page section ends with its own definitions,
+  numbered from 1, so the numbers repeat across the pages of one chunk file: a
+  reference resolves to the definitions that end its section, the first `[n]:`
+  line after it. When `--context-header` splits a page into several sections,
+  each section ends with the definitions of the references it holds, under the
+  page's numbers, so a section read alone resolves all its links. A Markdown
+  renderer resolves a repeated number to the first definition of the file, so
+  render pages from the page layout (`--layout page`), where a file is a page.
+- Word counts leave the markup out: heading and list markers, table pipes,
+  the delimiter row and the link definitions are not words (context headers,
+  `INDEX.md`, `llm-readiness.json`). `--max-words-per-chunk` measures each page's plain
   text, as for `txt`, so both formats put pages in the same chunks.
 - Dedup and chunking treat a list or a table as one block, so `--dedup`
-  removes a table repeated on several pages as a whole.
-- `--cross-refs` writes its marker after the link it labels:
-  `[Item](Item.html) [-> docs_chunk_02]`.
+  removes a table repeated on several pages as a whole. `--dedup` never
+  removes a page's definitions, and it compares links by target, not by
+  number, so it removes the same blocks as it would with inline links.
+- `--cross-refs` writes its marker after the link it labels, never in a
+  definition: `[Item][2] [-> docs_chunk_02]`.
 
 #### Deduplication (`--dedup`)
 

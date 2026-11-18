@@ -3,7 +3,7 @@
 import os
 import re
 from .code_fence import sub_closed_fences
-from .html_stripper import strip_html
+from .html_stripper import split_definitions, strip_html
 from .content_extractor import extract_content
 
 # A heading or list marker opening a line of strip_html(..., markdown=True),
@@ -15,9 +15,12 @@ _DELIMITER_ROW = re.compile(r"\|(?: *:?-+:? *\|)+")
 def count_words(text: str, markdown: bool = False) -> int:
     """Word count (ADR-0003). ``markdown`` leaves out the markup that
     ``strip_html(..., markdown=True)`` writes outside code blocks: heading and
-    list markers, table pipes and the table delimiter row (#87)."""
+    list markers, table pipes and the table delimiter row (#87), and the link
+    definitions that end a page (#115)."""
     words = len(text.split())
     if markdown:
+        text, definitions = split_definitions(text)
+        words -= len(definitions.split())
         for line in sub_closed_fences(text, lambda block: "").split("\n"):
             if _DELIMITER_ROW.fullmatch(line):
                 words -= len(line.split())

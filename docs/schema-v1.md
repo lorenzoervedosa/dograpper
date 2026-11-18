@@ -27,7 +27,7 @@ the comment; a JSON parser reads the original character back.
 | version_status | string | no | Page metadata, with `version` when it comes from the banner: `current` (revised for the current stable version), `outdated` (an older version of the current build) or `older-build` (a version of an earlier build). Omitted when the version comes from a category or is unknown. |
 | chunk_index | int | no | Sub-chunk position (1-based). Omitted if file is not split. |
 | total_chunks | int | no | Total sub-chunks for this file. Omitted if file is not split. |
-| word_count | int | no | Word count of this chunk's content (excluding header). In `md`, the Markdown markup (heading and list markers, table pipes and delimiter row) is not counted |
+| word_count | int | no | Word count of this chunk's content (excluding header). In `md`, the Markdown markup (heading and list markers, table pipes and delimiter row, link reference definitions) is not counted |
 | context_breadcrumb | string[] | no | Heading hierarchy at chunk start. Omitted if no headings. |
 | llm_readiness | object | no | Readiness metrics (present when --score is used) |
 | schema_version | string | yes | Always "v1" |
