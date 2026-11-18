@@ -2,11 +2,14 @@
 
 import json
 import os
+import re
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
 
+from dograpper.utils import link_extractor
 from dograpper.utils.link_extractor import (
     LinkRef,
     extract_links,
@@ -220,6 +223,17 @@ def test_word_boundary_link_text_still_annotated():
     assert "Install [-> docs_chunk_01]" in result
 
 
+def test_link_text_preceded_by_word_char_not_annotated():
+    """The left boundary holds too: a word that merely ends in the link text
+    is skipped and the next whole-word occurrence is annotated."""
+    text = "ReInstall the tool, then Install it."
+    links = [LinkRef("a.html", "install.html", "", "Install")]
+    file_to_chunk = {"install.html": "docs_chunk_01"}
+
+    result = annotate_cross_refs(text, links, file_to_chunk)
+    assert result == "ReInstall the tool, then Install [-> docs_chunk_01] it."
+
+
 def test_regex_special_chars_in_link_text_escaped():
     """Link text containing regex-special characters is treated literally."""
     text = "See C++ (advanced) for details."
@@ -386,3 +400,45 @@ def test_cross_refs_text_formats_annotate_only_the_linking_page(fmt, extra):
     assert "- Item.html (15 words)" in text
     assert "call the getter on Item [-> docs_chunk_01] and check" in text
     assert text.count("[-> ") == 1
+
+
+def test_cross_refs_compile_one_pattern_per_distinct_link_text(monkeypatch):
+    """Hundreds of pages sharing link texts compile one pattern per distinct
+    text, not one per link per record (#67: a ~1,900-page corpus did not
+    finish in 10 minutes)."""
+    compiled = []
+
+    def counting_compile(pattern, *args):
+        compiled.append(pattern)
+        return re.compile(pattern, *args)
+
+    monkeypatch.setattr(link_extractor, "re",
+                        SimpleNamespace(compile=counting_compile, escape=re.escape))
+
+    n_pages, n_targets, links_per_page = 300, 20, 5
+    specs = [(f"t{t:02d}.html", f"<html><body><main><p>Target{t:02d} body</p></main></body></html>")
+             for t in range(n_targets)]
+    for i in range(n_pages):
+        targets = [(i + j) % n_targets for j in range(links_per_page)]
+        links = " ".join(f'<a href="t{t:02d}.html">Target{t:02d}</a>' for t in targets)
+        specs.append((f"p{i:03d}.html", f"<html><body><main><p>Page {i} links {links}</p></main></body></html>"))
+
+    with tempfile.TemporaryDirectory() as d:
+        input_dir = os.path.join(d, 'input')
+        os.makedirs(input_dir)
+        _create_html_files(input_dir, specs)
+        output_dir = os.path.join(d, 'out')
+        result = CliRunner().invoke(pack, [input_dir, '-o', output_dir, '--format', 'jsonl',
+                                           '--cross-refs', '--max-words-per-chunk', '200'])
+        assert result.exit_code == 0, result.output
+
+        records = []
+        for name in sorted(os.listdir(output_dir)):
+            if name.endswith('.jsonl'):
+                with open(os.path.join(output_dir, name), encoding='utf-8') as f:
+                    records.extend(json.loads(line) for line in f)
+
+    pages = [r for r in records if r["source"].startswith("p")]
+    assert len(pages) == n_pages
+    assert all(r["content"].count("[-> ") == links_per_page for r in pages)
+    assert len(compiled) <= n_targets
