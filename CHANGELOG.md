@@ -59,6 +59,8 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack --score` no longer grades a chunk with empty extracted content as `A`;
+  it is graded `C` with score 0. ([#69])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
@@ -147,3 +149,4 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#69]: https://github.com/lorenzoervedosa/dograpper/issues/69

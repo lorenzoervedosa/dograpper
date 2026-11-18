@@ -499,6 +499,9 @@ Final grade:
 - **B** — 0.5 ≤ score < 0.8 (usable, consider refining extraction)
 - **C** — score < 0.5 (review `.docsignore` or run `--dedup`)
 
+A chunk whose extracted content is empty (0 words) is always graded **C**
+with score 0, regardless of the other metrics.
+
 Results are saved to `llm-readiness.json`. When combined with
 `--context-header` or `--format jsonl`, the grade is injected into
 headers/records.

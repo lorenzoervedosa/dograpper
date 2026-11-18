@@ -168,6 +168,10 @@ def score_chunk(
     boundary_ok = check_boundary_integrity(text)
     depth = calculate_context_depth(headings_count, max_heading_level)
     score, grade = calculate_grade(noise, boundary_ok, depth)
+    if extracted_words == 0:
+        # An empty record scores perfect on every metric (no noise, no broken
+        # blocks), but there is nothing to feed a model: never better than C.
+        score, grade = 0.0, "C"
 
     return ChunkScore(
         chunk_id=chunk_id,
