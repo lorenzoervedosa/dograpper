@@ -285,7 +285,10 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 
 ### 5.6 Storage and incremental runs (DL-11, DL-12, DL-13)
 
-- **Layout:** as in §3.
+- **Layout:** as in §3. An IPv6 literal host keeps its brackets and its colons
+  become `_`, as in HTTrack (`src/htsname.c:1436`, `1579-1600`; `[` and `]` are
+  legal on NTFS, APFS and ext4). A non-default port is appended as for any
+  host: `http://[::1]:8080/a` → `[__1]:8080/a.html`.
 - **Naming:** a query string adds 4 hex digits of its MD5 to the filename
   (`page.html?x=1` → `page4B54.html`). Collisions get a `-2`, `-3` suffix.
   Names are compared case-insensitively, as HTTrack's save-name hash does

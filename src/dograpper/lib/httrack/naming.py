@@ -59,6 +59,8 @@ class NameRegistry:
         host = parts.hostname
         if not host or "\x00" in parts.geturl() or host in (".", ".."):
             return None
+        if ":" in host:  # IPv6 literal: HTTrack names the dir [addr], its colons then "_"
+            host = f"[{host}]"
         host = host.translate(_FORBIDDEN)
         try:
             port = parts.port

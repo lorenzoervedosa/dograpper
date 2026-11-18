@@ -22,6 +22,15 @@ def test_host_dir_port_only_when_non_default(tmp_path):
     assert reg.assign("http://example.com:8080/a.html", None) == os.path.join(root, "example.com:8080", "a.html")
 
 
+def test_ipv6_literal_host_dir_keeps_brackets(tmp_path):
+    # HTTrack keeps the brackets and turns the address's colons into "_" (htsname.c);
+    # a non-default port follows the same host:port rule as any other host
+    reg, root = _reg(tmp_path)
+    assert reg.assign("http://[::1]:8080/a", "text/html") == os.path.join(root, "[__1]:8080", "a.html")
+    assert reg.assign("http://[2001:DB8::1]/a", None) == os.path.join(root, "[2001_db8__1]", "a")
+    assert reg.assign("https://[::1]:443/b", None) == os.path.join(root, "[__1]", "b")
+
+
 def test_html_extension_adjusted(tmp_path):
     reg, root = _reg(tmp_path)
     d = os.path.join(root, "e.com")
