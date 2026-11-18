@@ -564,6 +564,14 @@ block identical on several pages is still kept only on the first, even
 when it is per-page metadata such as a version banner with the same
 version.
 
+On API reference corpora (Javadoc, TypeDoc, rustdoc, Doxygen) `--dedup`
+can remove real members: a signature and doc comment that several types
+declare, such as an override, is kept on the first page only, so the other
+pages lose a member they declare, with no trace
+([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). Pages split
+by [`--api-records`](#api-reference-records---api-records) bypass dedup;
+for any other API reference page, run without `--dedup`.
+
 #### Context header (`--context-header`)
 
 Injects structured metadata in the `dograpper-context-v1` format
