@@ -205,9 +205,10 @@ class TestDeduplicateExact:
 class TestDeduplicateFuzzy:
 
     def test_removes_near_duplicates(self):
+        # Differs by one word; a version-only difference is kept (TestDeduplicateNumbersOnly).
         texts = {
             "a.txt": "This feature was introduced in version 2.0 and provides comprehensive API access for all registered users of the platform.",
-            "b.txt": "This feature was introduced in version 3.0 and provides comprehensive API access for all registered users of the platform.",
+            "b.txt": "This feature was introduced in version 2.0 and provides comprehensive API access for all registered users of the service.",
         }
         result = deduplicate(texts, mode="fuzzy", hamming_threshold=10)
         assert result.stats.blocks_removed_fuzzy == 1
@@ -286,6 +287,10 @@ ZOOM_DESC = "Zoom " + CAMERA_DESC
 MAP_INFO_PAGE = (f"zoomX\n\n{POSITION_DESC}\n\nzoomY\n\n{POSITION_DESC}"
                  f"\n\nzoomS\n\n{ZOOM_DESC}")
 
+# Version banner: the version is the only content that differs.
+BANNER = ("This page was written for an older release of the toolkit ({}). "
+          "The current stable release is 4.22.2, so information on this page may be inaccurate.")
+
 HORIZONTAL = ("Camera parameter that sets the horizontal position of the camera on the "
               "world map when the player picks a spawn point to start a new game.")
 VERTICAL = HORIZONTAL.replace("horizontal", "vertical")
@@ -356,6 +361,24 @@ class TestDeduplicateLeadingToken:
         result = deduplicate({"a.txt": a, "b.txt": b}, mode="fuzzy", hamming_threshold=10)
         assert result.stats.blocks_removed == 0
         assert result.stats.blocks_kept_leading_token == 1
+
+
+class TestDeduplicateNumbersOnly:
+
+    def test_keeps_banner_that_differs_only_by_version(self):
+        old, new = BANNER.format("4.5.1"), BANNER.format("4.17.0")
+        assert _distance(old, new) <= 10
+        result = deduplicate({"a.txt": new, "b.txt": old}, mode="both", hamming_threshold=10)
+        assert "4.5.1" in result.texts["b.txt"]
+        assert result.stats.blocks_removed == 0
+        assert result.stats.blocks_kept_numbers == 1
+
+    def test_identical_banners_are_still_exact_duplicates(self):
+        # Same version on two pages: no differing number to protect (#88 covers metadata).
+        banner = BANNER.format("4.5.1")
+        result = deduplicate({"a.txt": banner, "b.txt": banner}, mode="fuzzy")
+        assert result.stats.blocks_removed_fuzzy == 1
+        assert result.stats.blocks_kept_numbers == 0
 
 
 class TestDeduplicateCrossPageBoilerplate:

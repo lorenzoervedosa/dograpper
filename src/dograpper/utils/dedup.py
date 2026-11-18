@@ -22,10 +22,12 @@ MIN_BLOCK_WORDS = 10
 
 # Default Hamming distance threshold for fuzzy dedup.
 # Simhash 64-bit: 0 = identical, 64 = completely different.
-# Threshold of 3 works well for version-number variations.
 DEFAULT_HAMMING_THRESHOLD = 3
 
 SIMHASH_BITS = 64
+
+# A token holding a digit: version, date, count, id.
+_NUMBER_TOKEN = re.compile(r"\S*\d\S*")
 
 
 @dataclass
@@ -38,6 +40,7 @@ class DedupStats:
     # Blocks that matched an earlier block but were kept by a _keep_reason rule.
     blocks_kept_same_page: int = 0
     blocks_kept_leading_token: int = 0
+    blocks_kept_numbers: int = 0
 
     @property
     def blocks_removed(self) -> int:
@@ -160,6 +163,10 @@ def _keep_reason(path: str, text: str, other_path: str, other_text: str):
         # A different key, tag or parameter name: a different entry whose
         # body happens to look alike (base:hardcover vs base:hollowbook).
         return "blocks_kept_leading_token"
+    if text != other_text and _NUMBER_TOKEN.sub("#", text) == _NUMBER_TOKEN.sub("#", other_text):
+        # Only numbers differ, so they are the page's own data: a version
+        # banner (42.5.1 vs 42.17.0), a date, a count.
+        return "blocks_kept_numbers"
     return None
 
 
