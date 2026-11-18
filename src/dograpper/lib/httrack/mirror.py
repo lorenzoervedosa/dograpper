@@ -29,7 +29,7 @@ from dograpper.utils.redact import redact_url
 from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, moved_request,
                     previous_files, record_of, relink, reserve_names, sends)
 from .fetcher import Fetcher, same_host
-from .links import css_links, page_links, url_key
+from .links import JS_MIMES, css_links, page_links, script_links, url_key
 from .naming import NameRegistry, no_page, url_extension
 from .policy import NAVIGATION, FetchMeta, HttrackPolicy
 from .report import RunReport
@@ -62,7 +62,7 @@ _KEPT_ROOT = "http://kept.invalid/"  # output_dir as a URL, to resolve a kept pa
 
 
 def _kept_links(body: bytes, url: str, path: str, root: str, url_of: dict[str, str], *,
-                frame: str, robots: bool) -> list:
+                frame: str, robots: bool, **scans) -> list:
     """Links of the page `url` kept from the previous run at `path`, which HTTrack
     re-parses from its cache (htsback.c:4437-4494). relink() made its links to saved files
     relative paths: one that resolves, against the page's own path under `root`, to a file
@@ -74,8 +74,8 @@ def _kept_links(body: bytes, url: str, path: str, root: str, url_of: dict[str, s
         return p.replace("%", "%25").replace("#", "%23")
     base = _KEPT_ROOT + local(os.path.relpath(path, root).replace(os.sep, "/"))
     links = []
-    for real, link in zip(page_links(body, url, frame=frame, robots=robots),
-                          page_links(body, base, frame=frame, robots=robots), strict=True):
+    for real, link in zip(page_links(body, url, frame=frame, robots=robots, **scans),
+                          page_links(body, base, frame=frame, robots=robots, **scans), strict=True):
         name = re.sub("%(25|23)", lambda m: "%" if m[1] == "25" else "#",
                       urlsplit(link.url).path[1:]) if link.url.startswith(_KEPT_ROOT) else None
         if name is not None and os.path.isfile(os.path.join(root, name)):
@@ -210,11 +210,15 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         state["front_ok"] |= entry.front
         ctype = res.headers.get("content-type")
         mime = (ctype or "").split(";")[0].strip().lower()
+        scans = {"parse_scripts": policy.parse_scripts,
+                 "extended_parsing": policy.extended_parsing}
         if mime == "text/html":
             links = page_links(res.body, entry.url, frame=entry.meta.dest,
-                               robots=policy.obey_robots)
+                               robots=policy.obey_robots, **scans)
         elif mime == "text/css":
-            links = css_links(res.body, entry.url)
+            links = css_links(res.body, entry.url, **scans)
+        elif mime in JS_MIMES:  # a script's links take its page's base (htsparse.c:1280-1285)
+            links = script_links(res.body, entry.url, entry.referer or entry.url, **scans)
         else:
             links = []
         # second copy of crawl.fetch_url_list's write(): name, --include-extensions, write
@@ -253,7 +257,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         kept.add(p.path)
         fields[p.path] = p.record
         mime = (p.record["content_type"] or "").split(";")[0].strip().lower()
-        if mime not in ("text/html", "text/css") or res.error is not None or (
+        if mime not in ("text/html", "text/css", *JS_MIMES) or res.error is not None or (
                 failed and entry.front):
             return []
         try:
@@ -262,10 +266,14 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         except OSError as exc:
             report.errors.append((safe, f"kept copy unreadable: {exc}", via))
             return []
+        scans = {"parse_scripts": policy.parse_scripts,
+                 "extended_parsing": policy.extended_parsing}
         if mime == "text/css":
-            return css_links(body, entry.url)
+            return css_links(body, entry.url, **scans)
+        if mime in JS_MIMES:  # as handle() scans a fetched script
+            return script_links(body, entry.url, entry.referer or entry.url, **scans)
         return _kept_links(body, entry.url, p.path, root, url_of, frame=entry.meta.dest,
-                           robots=policy.obey_robots)
+                           robots=policy.obey_robots, **scans)
 
     root = os.path.realpath(output_dir)
     window = 2 * policy.connections  # responses held at once stay bounded

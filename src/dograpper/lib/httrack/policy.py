@@ -63,6 +63,8 @@ class HttrackPolicy:
     max_retry_after: int
     delay_ms: int
     obey_robots: bool
+    parse_scripts: bool     # HTTrack -j: scan scripts and stylesheets for links
+    extended_parsing: bool  # HTTrack -%P: guess links in strings and other attributes
 
 
 def _clamp(name, value, cap, disabled):
@@ -77,7 +79,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  max_conn_rate: float = 5.0, max_bandwidth: int = 100_000,
                  timeout: float = 120.0, retries: int = 2, max_links: int = 100_000,
                  max_retry_after: int = 60, delay_ms: int = 0, obey_robots: bool = True,
-                 disable_security_limits: bool = False) -> HttrackPolicy:
+                 disable_security_limits: bool = False, parse_scripts: bool = True,
+                 extended_parsing: bool = True) -> HttrackPolicy:
     # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
     for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
                         ("max_bandwidth", max_bandwidth), ("timeout", timeout),
@@ -104,6 +107,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         max_retry_after=max_retry_after,
         delay_ms=delay_ms,
         obey_robots=obey_robots,
+        parse_scripts=parse_scripts,
+        extended_parsing=extended_parsing,
     )
 
 

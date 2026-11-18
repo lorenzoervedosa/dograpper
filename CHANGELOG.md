@@ -60,9 +60,12 @@ and fixes alone are a PATCH bump.
   fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
-  `--max-retry-after`, `--disable-security-limits`). When llms.txt and the
+  `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`,
+  `--no-extended-parsing`). When llms.txt and the
   sitemap give no URL list, it crawls the site from the start URL as HTTrack
-  does: links from `href`, HTTrack's link attributes, meta refresh and CSS;
+  does: links from `href`, HTTrack's link attributes, meta refresh and CSS,
+  from scripts and event handlers (HTTrack `-j`) and from quoted strings that
+  name a file (HTTrack `-%P`), both on by default as in HTTrack;
   the start host and directory, `--filter` and `--depth` link hops as scope;
   meta robots `nofollow` honored and `/cdn-cgi/` never fetched; redirect
   targets queued as links; a deterministic output whatever the request order;

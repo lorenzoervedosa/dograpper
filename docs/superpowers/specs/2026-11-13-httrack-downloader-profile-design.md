@@ -253,6 +253,15 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - It is a static scan; nothing is executed.
   - The URLs it finds go through scope, filters and `--include-extensions`
     like any other link, so assets are still dropped.
+  - Turned off as in HTTrack, with `[httrack]` flags (usage errors under
+    `wget`, like §5.7's): `--no-parse-scripts` is `-j4`, which also stops CSS
+    `url()` / `@import` (one scanner in HTTrack); `--no-extended-parsing` is
+    `-%P0`, the same effect as `-j8`. `-j`'s other bits only switch HTTrack's
+    external parser modules, which 3.51 no longer ships (#122).
+  - Contexts (tags, attribute values, `<script>` / `<style>` bodies) are the
+    ones PR 2's HTML5 tokenizer reads; inside each, HTTrack's byte rules
+    apply. The two differ only on markup HTTrack's byte parser reads apart,
+    such as a `>` inside a quoted event handler.
 - **Scope** (*call*, settling the competing definitions in the code today):
   - **Host:** same host only.
   - **Down-only:** the recursive crawl uses the *directory* of the start URL,
@@ -424,16 +433,13 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- **JavaScript scan (`-j`) and extended parsing (`-%P`)** are not in the
-  recursive crawl of PR 2.
-  - HTTrack runs both by default (`src/htslib.c:5406`, `5425`;
-    `src/htsparse.c:2160-2276`), so it follows URLs that only a script, or an
-    attribute outside its link table, names (§5.5).
-  - Pending a follow-up PR under #78 (#122).
-  - Reason: the linear-time tokenizer came first. PR 2 replaced `html.parser`,
-    which is quadratic on unclosed tags before CPython's 2025 fixes, with its
-    own tokenizer in `lib/httrack/links.py`. Both scanners will be ported onto
-    it, so parsing stays linear on hostile pages.
+- **Links found in scripts, stylesheets and by `-%P` are not rewritten
+  (`-K0`).** HTTrack rewrites every link it records, those in a script or a
+  stylesheet too (`src/htsparse.c:3385-3393`; `history.txt:151`, #1616); the profile rewrites the link
+  attributes of HTML pages only, so such a link still points at the site.
+  - The crawl follows them (#122); only offline browsing of those links is
+    affected, not what `pack` reads.
+  - Pending a follow-up under #78.
 
 - **HTTrack's other cache modes and update options** are not in PR 3:
   - `-C0` (no cache) and `-C1`/`--continue` (trust the cache: no request for a

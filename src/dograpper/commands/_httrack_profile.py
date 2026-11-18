@@ -31,7 +31,10 @@ _PLAYWRIGHT_MSG = ("httrack profile: Playwright fallback is not implemented yet 
 # The [httrack] options of `download` (single list; sync forwards these plus --downloader).
 PROFILE_OPTIONS = ('user_agent', 'no_robots', 'connections', 'max_conn_rate', 'max_bandwidth',
                    'timeout', 'retries', 'max_links', 'max_retry_after',
-                   'disable_security_limits')
+                   'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing')
+# --no-X flags: the policy holds the positive switch
+_NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
+            'no_extended_parsing': 'extended_parsing'}
 
 
 def _flag(name: str) -> str:
@@ -61,8 +64,7 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
         for param in params:
             if param.name not in from_config or values[param.name] != param.default:
                 raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack")
-    policy_kw = {k: v for k, v in values.items() if k not in ('no_robots',)}
-    policy_kw['obey_robots'] = not values['no_robots']
+    policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     return policy_kw, from_config
 
 

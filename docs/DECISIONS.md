@@ -97,6 +97,49 @@ Entry format:
 - **Rejected:** porting them in the same PR (doubles its spread).
 - **Pending:** an issue for the follow-up PR under #78.
 
+## 2026-11-18 — HTTrack -j and -%P in the httrack profile (#122)
+
+- **Decision:** two boolean `[httrack]` flags, `--no-parse-scripts` (HTTrack
+  `-j4`) and `--no-extended-parsing` (`-%P0`, the same effect as `-j8`), not
+  a `-j` bitmask flag.
+- **Why:** of `-j`'s bits only `|4` and `|8` change anything here. `|2` and
+  `-j0` switch HTTrack's external parser modules (`src/htscore.c:2020-2022`),
+  plug-in callbacks dograpper has none of; the built-in `.class` parser is
+  gone (`history.txt:458`). Two booleans cover every effective state, and
+  match `--no-robots`'s shape.
+- **Rejected:** `--parse-java N` with HTTrack's bitmask (two of its values do
+  nothing here, and `-j0` would silently keep scripts scanned, as HTTrack's
+  code does against its help text).
+- **Pending:** the maintainer may prefer HTTrack's names or bitmask.
+
+- **Decision:** the scans run on the contexts PR 2's HTML5 tokenizer reads (a
+  tag's attributes, a `<script>`/`<style>` body), HTTrack's byte rules inside
+  each; a script attribute ends at its HTML5 value, or earlier where HTTrack
+  ends it (the byte after `=`, or `>`).
+- **Why:** porting HTTrack's byte-level tag reader would replace PR 2's
+  tokenizer, the piece that keeps parsing linear; the two read apart only
+  markup such as a `>` inside a quoted event handler.
+- **Rejected:** a byte-level port of HTTrack's whole loop (disproportionate,
+  and it would undo PR 2's linear-time guarantee).
+- **Pending:** whether this belongs in spec §5 as a deviation; recorded in
+  §5.5 and the evidence doc as a convention.
+
+- **Decision:** CSS `url()` / `@import` now go through the ported
+  `hts_js_scan_link` (in CSS mode) instead of PR 2's regex, and so stop with
+  `--no-parse-scripts`.
+- **Why:** HTTrack has one scanner for both (`src/htsparse.c:584`, 630-640),
+  so `-j4` turns CSS links off too.
+- **Rejected:** keeping the regex (a second, diverging CSS rule).
+- **Pending:** none.
+
+- **Decision:** `document.write("…")` parsing (`src/htsparse.c:1828-1880`)
+  is not ported, and links found by the scans are not rewritten (`-K0`).
+- **Why:** the first never fires on a string with content in HTTrack 3.51
+  (its closing-quote loop stops on the opening quote, lines 1847-1852); the
+  second is recorded as a known gap in the spec.
+- **Rejected:** none.
+- **Pending:** a follow-up for the rewrite under #78.
+
 ## 2026-11-18 — Harness patterns mirrored from open-notes (#35)
 
 - **Decision:** Phases 2–5 of the epic ship as one commit each in a single

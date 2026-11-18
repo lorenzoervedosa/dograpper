@@ -377,6 +377,19 @@ HTTrack's mirror loop:
   content="nofollow">` stops link extraction for the rest of that page
   (ignored with `--no-robots`). Each request carries the `Referer` and the
   `Sec-Fetch-*` values HTTrack sends for that kind of link.
+- **Scripts** (HTTrack `-j`, on): `<script>` and `<style>` bodies, `onXxx=`
+  and `style=` values, `javascript:` URLs and fetched scripts are scanned
+  statically, as HTTrack does, outside comments and strings, for
+  `x.src = "…"`, `location = "…"`, `.href`, `.open("…")`, `url(…)`,
+  `import "…"` and `from "…"` (nothing is executed). A script's links resolve
+  against the page that loaded it, a module specifier against the script, and
+  carry no `Sec-Fetch-*`. Scripts are fetched only when `js` is in
+  `--include-extensions`.
+- **Extended parsing** (HTTrack `-%P`, on): a quoted string after `=`, `(` or
+  `,`, in a script or in an attribute that is not a link one (`data-page="a.html"`,
+  `content="/og.png"`), is followed when it names a file (a known extension, or
+  a scheme), except in attributes that never hold one (`alt`, `class`, `title`,
+  `id`…) and framework bindings (`:x`, `v-x`, `@x`).
 - **Scope:** the start host only; under the start URL's directory
   (`/docs/index.html` → `/docs/`, `/modding` → `/`, `/modding/` →
   `/modding/`) unless a `--filter` rule decides; `--depth` counts link hops
@@ -457,6 +470,8 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--max-links` | `100000` | Max URLs fetched per run |
 | `--max-retry-after` | `60` | Max seconds honored from `Retry-After` / `Crawl-delay` (hard cap 3600) |
 | `--disable-security-limits` | off | Lift the connection, rate and bandwidth clamps |
+| `--no-parse-scripts` | off | Do not scan scripts, event handlers and stylesheets for links (HTTrack `-j4`, which stops CSS `url()` / `@import` too) |
+| `--no-extended-parsing` | off | Do not follow quoted strings that look like links (HTTrack `-%P0`, or `-j8`) |
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -499,11 +514,9 @@ is used when available. The release binary includes this extra.
 
 **Current gaps (temporary).** Under `httrack`, the Playwright fallback is
 not implemented yet and fails loud (exit 1); use `--downloader wget` for
-those sites. Until a follow-up PR under #78 ports them
-([#122](https://github.com/lorenzoervedosa/dograpper/issues/122)), the crawl
-does not scan JavaScript (HTTrack `-j`) or guess URLs in other attributes and
-script strings (HTTrack `-%P`), so a page that only a script links to is not
-fetched. With a manifest an update always revalidates (HTTrack `-C2`): the
+those sites. Links found in scripts, stylesheets and by extended parsing are
+followed but not rewritten to the saved files (HTTrack rewrites them too).
+With a manifest an update always revalidates (HTTrack `-C2`): the
 other cache modes (`-C0`, `-C1`/`--continue`), the `-%s`, `-%n` and
 `--changes` options and file times from `Last-Modified` are not ported yet.
 None of these is a deviation from HTTrack.
@@ -1196,7 +1209,7 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
 | `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |

@@ -497,6 +497,32 @@ def test_kept_page_follows_its_style_links_relink_left_as_written(server, tmp_pa
     assert "/docs/s.css" in seen and "/docs/p" in seen
 
 
+def test_kept_pages_and_scripts_are_scanned_under_the_same_flags(server, tmp_path):
+    """A 304 page or script is re-parsed as a fetched one is (htsback.c:4437-4494), so -j
+    and -%P apply to kept copies too, and turning them off stops those links."""
+    base, script, seen = server
+    log = []
+    vsite(script, {"/": page(extra='<script src="app.js"></script>'
+                                   '<script>img.src = "a.html";</script>'),
+                   "/app.js": ({"content-type": "text/javascript"}, b'x.src = "c.html";'),
+                   "/a.html": page(), "/c.html": page()}, log)
+
+    def run(out, previous=None, **kw):
+        policy = build_policy(retries=0, **kw)
+        return mirror_site(f"{base}/", str(out), policy, "html,js", fetcher=Spy(policy),
+                           previous=previous)
+
+    first = run(tmp_path)
+    assert rel(first, tmp_path) == ["a.html", "app.js", "c.html", "index.html"]
+    previous = build_manifest(f"{base}/", str(tmp_path), first.urls, records=first.records)
+    seen.clear()
+    res = run(tmp_path, previous)
+    assert {"/a.html", "/c.html"} <= set(seen) and res.report.not_modified == 4
+    seen.clear()
+    run(tmp_path, previous, parse_scripts=False, extended_parsing=False)
+    assert "/a.html" not in seen and "/c.html" not in seen
+
+
 def test_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp_path):
     base, script, _ = server
     log = []
@@ -522,3 +548,23 @@ def test_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp
     fields = ("url", "status", "content_type", "etag", "last_modified", "redirected", "content_hash")
     assert {k: [e[f] for f in fields] for k, e in after.items()} == {
         k: [e[f] for f in fields] for k, e in before.items()}
+
+
+def test_scripts_are_scanned_for_links_as_httrack_does(server, tmp_path):
+    # -j: inline scripts and a fetched script (a JavaScript type, htslib.h:893-897) are
+    # scanned; a script's links take the base of the page that loaded it
+    # (htsparse.c:1280-1285) and carry no fetch metadata (htsparse.c:819-820); -%P adds the
+    # strings of other attributes (htsparse.c:2160-2276)
+    base, script, _ = server
+    site(script, {"/": page(extra='<script src="static/app.js"></script>'
+                                  '<script>img.src = "a.html";</script><div data-p="b.html">'),
+                  "/static/app.js": ({"content-type": "text/javascript"}, b'x.src = "c.html";'),
+                  "/a.html": page(), "/b.html": page(), "/c.html": page()})
+    res, spy = crawl(f"{base}/", tmp_path, exts="html,js")
+    assert rel(res, tmp_path) == ["a.html", "b.html", "c.html", "index.html", "static/app.js"]
+    calls = {u: kw for u, kw in spy.calls if not u.endswith("/robots.txt")}
+    assert calls[f"{base}/c.html"]["referer"] == f"{base}/static/app.js"
+    assert calls[f"{base}/c.html"]["meta"] == FetchMeta("", "no-cors", False)
+    res, _ = crawl(f"{base}/", tmp_path / "off", exts="html,js", parse_scripts=False,
+                   extended_parsing=False)
+    assert rel(res, tmp_path / "off") == ["index.html", "static/app.js"]
