@@ -8,7 +8,9 @@ Blocks = text segments separated by blank lines (paragraphs); a fenced code
 block is one block, blank lines included.
 
 Dedup is cross-file: a match only removes a block when no keep rule applies
-(see _keep_reason).
+(see _keep_reason). The link definitions that end an md page (#115) are never
+removed, and a block is compared with each reference read as its destination,
+so the page-local numbers do not change what matches.
 """
 
 import hashlib
@@ -17,6 +19,7 @@ import logging
 from dataclasses import dataclass
 
 from .code_fence import split_blocks
+from .html_stripper import DEFINITION, REFERENCE, split_definitions
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,8 @@ class DedupStats:
     blocks_kept_same_page: int = 0
     blocks_kept_leading_token: int = 0
     blocks_kept_numbers: int = 0
+    # Pages the caller left out of dedup entirely; set by the caller, deduplicate() never sees them.
+    pages_exempt: int = 0
 
     @property
     def blocks_removed(self) -> int:
@@ -87,7 +92,9 @@ def deduplicate(
     result_texts: dict = {}
 
     for path in sorted_paths:
-        text = texts[path]
+        text, definitions = split_definitions(texts[path])
+        targets = dict(DEFINITION.fullmatch(line).groups()
+                       for line in definitions.split("\n")) if definitions else {}
         blocks = _split_blocks(text)
         kept_blocks: list = []
 
@@ -99,7 +106,7 @@ def deduplicate(
                 kept_blocks.append(block)
                 continue
 
-            normalized = _normalize(block)
+            normalized = _normalize(_resolve_references(block, targets))
             kept_by = None  # DedupStats counter of the rule that kept a match
 
             # --- Exact dedup ---
@@ -148,7 +155,7 @@ def deduplicate(
                 logger.debug(f"[dedup] {kept_by}: kept block ({word_count} words) in \"{path}\"")
             kept_blocks.append(block)
 
-        result_texts[path] = "\n\n".join(kept_blocks)
+        result_texts[path] = "\n\n".join(kept_blocks + ([definitions] if definitions else []))
 
     return DedupResult(texts=result_texts, stats=stats)
 
@@ -178,6 +185,11 @@ def _leading_token(text: str) -> str:
     a code fence (```lua), so code blocks are keyed by their first code token."""
     return next((t for t in text.split()
                  if re.search(r"\w", t) and not t.startswith("```")), "")
+
+
+def _resolve_references(block: str, targets: dict) -> str:
+    """``block`` with each ``[text][n]`` written ``[text](destination)``, as before #115."""
+    return REFERENCE.sub(lambda m: f"]({targets[m[1]]})" if m[1] in targets else m[0], block)
 
 
 def _split_blocks(text: str) -> list:

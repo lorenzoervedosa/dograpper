@@ -1,7 +1,8 @@
 """`pack --api-records`: API reference pages split into container and member records (ADR-0009).
 
-The fixture is javadoc 25 output for the sources in tests/fixtures/javadoc/src
-(regenerate with tests/fixtures/javadoc/regenerate.sh).
+The fixtures are javadoc 25 output for the sources in tests/fixtures/javadoc/src
+(regenerate with tests/fixtures/javadoc/regenerate.sh) and Sphinx 9.2 autodoc output
+for tests/fixtures/sphinx/src (tests/fixtures/sphinx/regenerate.sh).
 """
 
 import json
@@ -86,6 +87,21 @@ def test_parsing_stays_linear_on_hostile_markup():
     assert time.perf_counter() - start < 5.0  # ~1.2 s locally; a list scan per member name took 7 s
     with pytest.raises(NotSplit):
         split_page(head + '<section class="detail" id="x">' * n)
+
+
+def test_javadoc_qualified_names_are_bounded():
+    # Every member symbol repeats the type's name, so a huge name times many members would make
+    # the output quadratic in the page size.
+    n = 10000
+    page = ('<meta name="generator" content="javadoc/ClassWriter">'
+            f'<h1 class="title" title="Class {"X" * n}"><section class="class-description">'
+            '</section><section id="field-detail">'
+            + "".join(f'<section class="detail" id="f{i}"><h3>f{i}</h3>'
+                      f'<div class="member-signature">int f{i}</div></section>' for i in range(n)))
+    start = time.perf_counter()
+    with pytest.raises(NotSplit, match="unsupported Javadoc markup: a qualified name over 1000 characters"):
+        split_page(page)
+    assert time.perf_counter() - start < 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -384,3 +400,288 @@ def test_config_key_api_records(tmp_path):
     assert "--format jsonl" in rejected.output
     assert _pack(str(src), "-o", str(out), "--format", "jsonl").exit_code == 0
     assert any(r.get("symbol") == "fixture.api.Box" for r in _jsonl(out))
+
+
+# ---------------------------------------------------------------------------
+# --dedup never touches an API reference page, with or without --api-records (#68)
+# ---------------------------------------------------------------------------
+
+def _prose_corpus(tmp_path):
+    src = tmp_path / "prose"
+    src.mkdir()
+    shared = " ".join(f"word{i}" for i in range(30))
+    for name in ("a", "b"):
+        (src / f"{name}.html").write_text(
+            f"<html><body><h1>Page {name}</h1><p>unique {name} text here</p><p>{shared}</p></body></html>",
+            encoding="utf-8")
+    return src
+
+
+def test_dedup_keeps_a_shared_member_on_every_javadoc_page(tmp_path):
+    src, out = _corpus(tmp_path), tmp_path / "out"
+    shutil.copytree(src / "fixture", src / "copy")
+    result = _pack(str(src), "-o", str(out), "--format", "jsonl", "--dedup", "both")
+    assert result.exit_code == 0, result.output
+    by_id = {r["id"]: r for r in _jsonl(out)}
+    assert by_id["01_copy/api/Box.html"]["content"].replace("copy", "fixture") == \
+        by_id["01_fixture/api/Box.html"]["content"]
+    assert "Words removed:     0 (~0%)" in result.output
+    assert "Pages exempted:    14 (API reference)" in result.output
+
+
+def test_dedup_leaves_a_non_api_corpus_unchanged(tmp_path):
+    src, out = _prose_corpus(tmp_path), tmp_path / "out"
+    result = _pack(str(src), "-o", str(out), "--format", "jsonl", "--dedup", "both")
+    assert result.exit_code == 0, result.output
+    assert "Blocks removed:    1 (1 exact + 0 fuzzy)" in result.output
+    assert "Pages exempted:    0 (API reference)" in result.output
+
+
+def test_dry_run_reports_exempted_pages(tmp_path):
+    src, out = _corpus(tmp_path), tmp_path / "out"
+    result = _pack(str(src), "-o", str(out), "--dry-run", "--dedup", "both")
+    assert result.exit_code == 0, result.output
+    assert "Dedup pages exempted:  " in result.output
+# Sphinx autodoc
+# ---------------------------------------------------------------------------
+
+SPHINX = Path(__file__).parent / "fixtures" / "sphinx" / "html"
+
+
+def _sphinx_page(name):
+    return (SPHINX / name).read_text(encoding="utf-8")
+
+
+def _sphinx_records(name):
+    return {r.symbol: r for r in split_page(_sphinx_page(name))}
+
+
+def test_sphinx_api_pages_are_split_and_prose_pages_kept_whole():
+    split = split_api_pages(sorted(str(p) for p in SPHINX.iterdir()), str(SPHINX))
+    assert sorted(split.records) == ["shapes.html", "tools.html"]
+    assert split.kept_whole == [("index.html", "no supported generator")]
+
+
+def test_sphinx_records_keep_page_order_with_the_module_first():
+    assert [r.symbol for r in split_page(_sphinx_page("shapes.html"))] == [
+        "fixture.shapes", "fixture.shapes.DEFAULT_NAME",
+        "fixture.shapes.Shape", "fixture.shapes.Shape.sides", "fixture.shapes.Shape.name",
+        "fixture.shapes.Shape.area",
+        "fixture.shapes.Box", "fixture.shapes.Box.CAPACITY", "fixture.shapes.Box.Lid",
+        "fixture.shapes.Box.Lid.is_closed", "fixture.shapes.Box.items", "fixture.shapes.Box.of",
+        "fixture.shapes.Box.fits", "fixture.shapes.Box.size", "fixture.shapes.Box.put",
+        "fixture.shapes.Box.map", "fixture.shapes.Box.shake",
+        "fixture.shapes.Point", "fixture.shapes.Point.x", "fixture.shapes.Point.y",
+        "fixture.shapes.Point.moved",
+        "fixture.shapes.ShapeError", "fixture.shapes.BoxFullError",
+        "fixture.shapes.apply", "fixture.shapes.scale",
+    ]
+
+
+def test_sphinx_module_container_record():
+    module = split_page(_sphinx_page("shapes.html"))[0]
+    assert (module.symbol, module.kind, module.symbol_kind) == ("fixture.shapes", "container", "module")
+    assert (module.anchor, module.container, module.generator) == ("", "", "sphinx")
+    assert module.breadcrumb == ["fixture.shapes"]
+    assert module.text == "\n".join([
+        "fixture.shapes (module)",
+        "fixture.shapes",
+        "Shapes and the boxes that store them.",
+        "Typical use:",
+        'box = Box.of("apple")',
+        'box.put("pear")',
+        "Data: DEFAULT_NAME",
+        "Classes: Shape, Box, Point",
+        "Exceptions: ShapeError, BoxFullError",
+        "Functions: apply, scale",
+    ])
+
+
+def test_sphinx_class_container_record():
+    box = _sphinx_records("shapes.html")["fixture.shapes.Box"]
+    assert (box.kind, box.symbol_kind, box.anchor, box.container) == (
+        "container", "class", "fixture.shapes.Box", "")
+    assert box.breadcrumb == ["fixture.shapes.Box"]
+    assert box.text == "\n".join([
+        "fixture.shapes.Box (class)",
+        "class fixture.shapes.Box(items: list[T] | None = None)",
+        "Bases: Shape, Generic[T]",
+        "A generic box that stores items in insertion order.",
+        "Parameters:",
+        "items – the first items",
+        "Attributes: CAPACITY, items",
+        "Classes: Lid",
+        "Methods: of, fits, put, map, shake",
+        "Properties: size",
+    ])
+    # A member's docstring lives on its member record only.
+    assert "Store one item." not in box.text
+
+
+def test_sphinx_nested_class_gets_its_own_container_record():
+    recs = _sphinx_records("shapes.html")
+    lid = recs["fixture.shapes.Box.Lid"]
+    assert (lid.kind, lid.symbol_kind) == ("container", "class")
+    assert lid.text == "\n".join([
+        "fixture.shapes.Box.Lid (class)", "class Lid", "Bases: object", "The lid of a box.",
+        "Methods: is_closed"])
+    closed = recs["fixture.shapes.Box.Lid.is_closed"]
+    assert closed.container == "fixture.shapes.Box.Lid"
+    assert closed.breadcrumb == ["fixture.shapes.Box.Lid", "is_closed"]
+
+
+def test_sphinx_exception_and_dataclass_containers():
+    recs = _sphinx_records("shapes.html")
+    error = recs["fixture.shapes.BoxFullError"]
+    assert error.symbol_kind == "exception"
+    assert error.text.split("\n")[:3] == [
+        "fixture.shapes.BoxFullError (exception)",
+        "exception fixture.shapes.BoxFullError(capacity: int)",
+        "Bases: ShapeError",
+    ]
+    point = recs["fixture.shapes.Point"]
+    assert point.text.split("\n")[1] == "class fixture.shapes.Point(x: int, y: int = 0)"
+    assert "Attributes: x, y" in point.text.split("\n")
+    assert recs["fixture.shapes.Point.y"].text == \
+        "fixture.shapes.Point.y\ny: int = 0\nVertical position."
+
+
+@pytest.mark.parametrize("symbol, symbol_kind, container, signature", [
+    ("fixture.shapes.DEFAULT_NAME", "data", "fixture.shapes", "fixture.shapes.DEFAULT_NAME = 'shape'"),
+    ("fixture.shapes.Shape.name", "property", "fixture.shapes.Shape", "property name: str"),
+    ("fixture.shapes.Box.CAPACITY", "attribute", "fixture.shapes.Box", "CAPACITY: int = 16"),
+    ("fixture.shapes.Box.of", "method", "fixture.shapes.Box", "classmethod of(*items: T) → Box[T]"),
+    ("fixture.shapes.Box.fits", "method", "fixture.shapes.Box", "static fits(count: int) → bool"),
+    ("fixture.shapes.Box.map", "method", "fixture.shapes.Box", "map(func: Callable[[T], U]) → Box[U]"),
+    ("fixture.shapes.apply", "function", "fixture.shapes",
+     "fixture.shapes.apply(func: Callable[[T], U], items: list[T]) → list[U]"),
+])
+def test_sphinx_member_kinds_and_signatures(symbol, symbol_kind, container, signature):
+    rec = _sphinx_records("shapes.html")[symbol]
+    assert (rec.kind, rec.symbol_kind, rec.container, rec.anchor) == ("member", symbol_kind, container, symbol)
+    assert rec.breadcrumb == [container, symbol.rsplit(".", 1)[1]]
+    assert rec.text.split("\n")[:2] == [symbol, signature]
+
+
+def test_sphinx_member_record_holds_the_docstring_and_fields():
+    put = _sphinx_records("shapes.html")["fixture.shapes.Box.put"]
+    assert put.text == "\n".join([
+        "fixture.shapes.Box.put",
+        "put(item: T) → None",
+        "Store one item.",
+        "Parameters:",
+        "item – the item to store",
+        "Raises:",
+        "BoxFullError – when the box already holds CAPACITY items",
+    ])
+
+
+def test_sphinx_undocumented_member_keeps_its_signature():
+    recs = _sphinx_records("shapes.html")
+    assert recs["fixture.shapes.Box.shake"].text == "fixture.shapes.Box.shake\nshake(times: int) → None"
+    assert recs["fixture.shapes.Box.items"].text == "fixture.shapes.Box.items\nitems: list[T]"
+
+
+def test_sphinx_overloads_keep_every_signature():
+    assert _sphinx_records("shapes.html")["fixture.shapes.scale"].text == "\n".join([
+        "fixture.shapes.scale",
+        "fixture.shapes.scale(value: int, factor: int) → int",
+        "fixture.shapes.scale(value: float, factor: float) → float",
+        "Multiply value by factor, keeping its type.",
+    ])
+
+
+def test_sphinx_page_without_a_module_directive_names_its_module_from_the_objects():
+    recs = split_page(_sphinx_page("tools.html"))
+    assert [r.symbol for r in recs] == [
+        "fixture.tools", "fixture.tools.Registry", "fixture.tools.Registry.get",
+        "fixture.tools.Registry.register", "fixture.tools.first"]
+    assert recs[0].text == "\n".join([
+        "fixture.tools (module)", "Tools", "Helpers for registries.", "Registry", "Functions",
+        "Classes: Registry", "Functions: first"])
+    assert recs[2].text.split("\n")[1] == "get(key: K, default: V | None = None) → V | None"
+    assert recs[3].text.split("\n")[1] == "register(key: K) → Callable[[V], V]"
+
+
+def test_sphinx_record_url_carries_the_object_id():
+    recs = _sphinx_records("shapes.html")
+    page = "https://example.com/docs/shapes.html"
+    assert recs["fixture.shapes"].url(page) == page
+    assert recs["fixture.shapes.Box.put"].url(page) == page + "#fixture.shapes.Box.put"
+
+
+@pytest.mark.parametrize("old, new, problem", [
+    ('role="main"', 'role="article"', 'no role="main" element'),
+    ('<dl class="py property">', '<dl class="py widget">', "unknown object type py widget"),
+    ('<dt class="sig sig-object py" id="fixture.shapes.Box.put">', '<dt class="sig sig-object py">',
+     "an object without an id"),
+    ('id="fixture.shapes.Box.map"', 'id="fixture.shapes.Box.put"', "duplicate object id"),
+    ('<span class="sig-name descname"><span class="pre">put</span></span>', "put",
+     "a signature without a sig-name"),
+])
+def test_a_sphinx_page_with_other_markup_is_not_split(old, new, problem):
+    page = _sphinx_page("shapes.html")
+    assert old in page
+    with pytest.raises(NotSplit, match=f"unsupported Sphinx markup: .*{problem}"):
+        split_page(page.replace(old, new, 1))
+
+
+def test_sphinx_parsing_stays_linear_on_hostile_markup():
+    def obj(i):
+        return (f'<dl class="py function"><dt class="sig sig-object py" id="m.f{i}">'
+                f'<span class="sig-prename descclassname">m.</span>'
+                f'<span class="sig-name descname">f{i}</span>()</dt><dd><p>doc</p></dd></dl>')
+    n = 20000
+    # Deep unclosed nesting, stray end tags, nested name spans, then many objects.
+    hostile = ('<div role="main"><p>' + "<b>" * n + "</i>" * n + "</p>" * n
+               + '<dl class="py class"><dt class="sig sig-object py" id="m.C">'
+               + '<span class="sig-name descname">' * n + "C" + "</span>" * n + "</dt><dd>"
+               + "".join(obj(i) for i in range(n)))
+    start = time.perf_counter()
+    assert len(split_page(hostile)) == n + 2
+    assert time.perf_counter() - start < 5.0  # ~1 s locally
+    with pytest.raises(NotSplit):
+        split_page('<div role="main">' + '<dl class="py class"><dt class="sig sig-object py">' * n)
+    # A chain of unclosed nested objects: each name repeats its ancestors', so output would be quadratic.
+    chain = '<div role="main">' + "".join(
+        f'<dl class="py class"><dt class="sig sig-object py" id="m.c{i}">'
+        f'<span class="sig-prename descclassname">m.</span>'
+        f'<span class="sig-name descname">c</span></dt><dd>' for i in range(n))
+    start = time.perf_counter()
+    with pytest.raises(NotSplit, match="a qualified name over 1000 characters"):
+        split_page(chain)
+    assert time.perf_counter() - start < 5.0
+
+
+def _sphinx_corpus(tmp_path):
+    src = tmp_path / "docs"
+    shutil.copytree(SPHINX, src)
+    return src
+
+
+def test_pack_writes_sphinx_records(tmp_path):
+    src, out = _sphinx_corpus(tmp_path), tmp_path / "out"
+    result = _pack(str(src), "-o", str(out), "--format", "jsonl", "--api-records")
+    assert result.exit_code == 0, result.output
+    by_id = {r["id"]: r for r in _jsonl(out)}
+    module = by_id["01_shapes.html"]
+    assert {k: module[k] for k in ("symbol", "kind", "symbol_kind", "generator", "breadcrumb")} == {
+        "symbol": "fixture.shapes", "kind": "container", "symbol_kind": "module",
+        "generator": "sphinx", "breadcrumb": ["fixture.shapes"]}
+    put = by_id["01_shapes.html#fixture.shapes.Box.put"]
+    assert (put["kind"], put["symbol_kind"], put["container"], put["breadcrumb"]) == (
+        "member", "method", "fixture.shapes.Box", ["fixture.shapes.Box", "put"])
+    assert put["words"] == len(put["content"].split())
+    assert "symbol" not in by_id["01_index.html"]
+    assert "index.html: no supported generator" in result.stderr
+    assert "API records:     2 pages split into 30 records (9 container, 21 member), 1 pages kept whole" \
+        in result.output
+
+
+def test_serve_finds_the_sphinx_member_record(tmp_path):
+    src, out = _sphinx_corpus(tmp_path), tmp_path / "out"
+    assert _pack(str(src), "-o", str(out), "--format", "jsonl", "--api-records").exit_code == 0
+    chunks = load_chunks(str(out))
+    tools = {t.name: t for t in build_tools(chunks, build_index(chunks), {}, {}, "docs_chunk_")}
+    hits = tools["search_chunks"].handler({"query": "Box put item", "k": 3})["results"]
+    assert hits[0]["id"] == "01_shapes.html#fixture.shapes.Box.put"

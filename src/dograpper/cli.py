@@ -13,6 +13,7 @@ from .commands.eval import eval as eval_cmd
 from .commands.init import init
 from .commands.explain import explain
 from .commands.serve import serve
+from .commands.docs import docs
 
 try:
     __version__ = _pkg_version("dograpper")
@@ -65,6 +66,7 @@ cli.add_command(eval_cmd, name="eval")
 cli.add_command(init)
 cli.add_command(explain)
 cli.add_command(serve)
+cli.add_command(docs)
 
 def main():
     cli(obj={})

@@ -14,6 +14,7 @@ import pytest
 
 from dograpper.lib.httrack import policy
 from dograpper.lib.httrack.policy import (
+    FetchMeta,
     build_policy,
     make_ssl_context,
     request_headers,
@@ -167,6 +168,44 @@ def test_https_referer_never_sent_to_http():
     got = dict(request_headers(build_policy(), "localhost", kind="linked",
                                referer="http://localhost/a", scheme="https"))
     assert got["Referer"] == "http://localhost/a"
+
+
+@pytest.mark.parametrize("meta,uir,fetch", [
+    # htsfetch.c hts_fetch_classify + htslib.c:1240-1297, one row per kind of destination
+    (FetchMeta("iframe", "navigate", False), True, [("Sec-Fetch-Mode", "navigate"),
+                                                    ("Sec-Fetch-Dest", "iframe")]),
+    (FetchMeta("image", "no-cors", False), False, [("Sec-Fetch-Mode", "no-cors"),
+                                                   ("Sec-Fetch-Dest", "image")]),
+    (FetchMeta("font", "cors", False), False, [("Sec-Fetch-Mode", "cors"),
+                                               ("Sec-Fetch-Dest", "font")]),
+    (FetchMeta("", "navigate", True), False, []),  # unclassified link: no fetch metadata
+])
+def test_fetch_metadata_follows_the_link_destination(meta, uir, fetch):
+    got = request_headers(build_policy(), "h.test", kind="linked", referer="https://h.test/",
+                          scheme="https", meta=meta)
+    names = _names(got)
+    assert ("Upgrade-Insecure-Requests" in names) is uir
+    sec = [(k, v) for k, v in got if k.startswith("Sec-Fetch-") and k != "Sec-Fetch-Site"]
+    assert sec == fetch
+    assert ("Sec-Fetch-Site" in names) is bool(fetch)
+
+
+def test_fetch_metadata_can_fix_sec_fetch_site():
+    # a redirect chain carries the site hts_fetch_through computed, whatever the Referer
+    got = dict(request_headers(build_policy(), "h.test", kind="linked",
+                               referer="https://h.test/latest/", scheme="https",
+                               meta=FetchMeta(site="none")))
+    assert got["Sec-Fetch-Site"] == "none" and got["Referer"] == "https://h.test/latest/"
+
+
+@pytest.mark.parametrize("page,url,want", [
+    ("https://h.test/a", "https://h.test/b", "same-origin"),
+    ("https://h.test/a", "https://h.test:8443/b", "same-site"),
+    ("https://h.test/a", "http://h.test/b", "cross-site"),
+    (None, "https://h.test/b", "none"),
+])
+def test_site_of_compares_a_page_and_a_url(page, url, want):
+    assert policy.site_of(page, url) == want
 
 
 @pytest.mark.parametrize("page,want", [

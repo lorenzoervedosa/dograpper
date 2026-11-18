@@ -2,7 +2,9 @@
 
 ``strip_html`` writes plain text, one paragraph per block, with ``<pre>`` blocks
 fenced (#86). With ``markdown=True`` (md output, #87) it also writes headings,
-links, lists and tables as Markdown.
+links, lists and tables as Markdown. Links are reference links (#115): the
+line holds ``[text][n]``, and the page ends with one ``[n]: destination`` line
+per distinct destination.
 """
 
 from collections import Counter
@@ -21,6 +23,10 @@ BLOCK_TAGS = frozenset({
     "li", "tr", "blockquote", "pre", "ul", "ol",
     "table", "dl", "dt", "dd", "figcaption", "figure", "hr",
 })
+
+# What <br> leaves in the text until the prose is rendered: \s does not match it, so
+# whitespace collapsing keeps it. A page's own U+E000 is replaced by U+FFFD on the way in.
+_BR = "\ue000"
 
 # Classes naming a code block's language: MediaWiki (mw-highlight-lang-*),
 # Prism / highlight.js (language-*), lang-* and Sphinx (highlight-*). The name
@@ -127,6 +133,8 @@ class HTMLStripper(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in self.ignore_tags:
             self.ignore = True
+        elif tag == "br" and not self.ignore and not self.pre.depth:
+            self.text.append(_BR)
         self.pre.starttag(tag, attrs)
 
     def handle_endtag(self, tag):
@@ -145,7 +153,7 @@ class HTMLStripper(HTMLParser):
         if self.pre.depth:
             self.pre.data(d)
         else:
-            self.text.append(d)
+            self.text.append(d.replace(_BR, "\ufffd"))
 
 
 def strip_html(text: str, markdown: bool = False, page: str = "") -> str:
@@ -209,12 +217,13 @@ def _flatten(parts: list):
 
 def _prose_blocks(data: str) -> list:
     # Unescape HTML entities that might be lingering
-    data = html.unescape(data)
+    # (an entity can decode to the marker here, so each piece is neutralized after decoding)
+    data = _BR.join(html.unescape(piece).replace(_BR, "\ufffd") for piece in data.split(_BR))
     # Collapse 3+ newlines into exactly 2 (preserve block separators)
     data = re.sub(r'\n{3,}', '\n\n', data)
     # Within each block, collapse whitespace (but not across \n\n boundaries)
     lines = data.split('\n\n')
-    lines = [re.sub(r'\s+', ' ', block).strip() for block in lines]
+    lines = [re.sub(r' ?(?:\ue000 ?)+', '\n', re.sub(r'\s+', ' ', block)).strip() for block in lines]
     # Drop empty blocks
     return [block for block in lines if block]
 
@@ -241,6 +250,33 @@ MAX_LIST_DEPTH = 16
 def escape_link_text(text: str) -> str:
     """``text`` that cannot end the ``[...]`` of a Markdown link early."""
     return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+
+# A reference definition line, ``[n]: destination``: the block of them that ends
+# an md page defines its links (#115). A destination holds no whitespace, unless
+# it is written as <...>.
+DEFINITION = re.compile(r"\[(\d+)\]: (<[^<>\n]*>|\S+)")
+# The ``][n]`` that ends a reference link.
+REFERENCE = re.compile(r"\]\[(\d+)\]")
+
+
+def split_definitions(text: str) -> tuple:
+    """(body, definitions): ``text`` without the block of reference definitions that
+    ends it, and that block ("" when it ends with none). Only the last block counts:
+    md output writes the definitions there, after every block that refers to them.
+    A newline that ends the text, as in a page file, is not part of the block."""
+    cut = text.rstrip("\n").rfind("\n\n")
+    block = (text[cut + 2:] if cut >= 0 else text).rstrip("\n")
+    if block and all(DEFINITION.fullmatch(line) for line in block.split("\n")):
+        return text[:max(cut, 0)], block
+    return text, ""
+
+
+def definitions_used(text: str, definitions: str) -> str:
+    """The lines of ``definitions`` that a reference in ``text`` uses, in their order."""
+    used = set(REFERENCE.findall(text))
+    return "\n".join(line for line in definitions.split("\n")
+                     if DEFINITION.fullmatch(line).group(1) in used)
 
 
 def _link_destination(href, page: str):
@@ -274,7 +310,7 @@ def _inline(parts, plain: bool = False) -> str:
         else:
             out += _prose_blocks("".join(p.text if plain and isinstance(p, _Link) else p
                                          for p in run))
-    return " ".join(out)
+    return " ".join(out).replace("\n", "; ")  # a <br> in one line
 
 
 def _pipe_table(rows) -> str:
@@ -343,6 +379,9 @@ class MarkdownStripper(HTMLStripper):
         self.open = Counter()
         self.text = self.frames[0].parts
         self.link = None  # (frame, index of its "[" placeholder, destination)
+        self.code = 0       # open <code> elements
+        self.signature = 0  # <div> depth inside a Javadoc member signature
+        self.references = {}  # destination -> its number, in first-use order
 
     def handle_starttag(self, tag, attrs):
         if not self.ignore and not self.pre.depth:
@@ -355,10 +394,14 @@ class MarkdownStripper(HTMLStripper):
             self._close(tag)
 
     def finish(self) -> list:
-        """Close everything still open and return the output parts."""
+        """Close everything still open and return the output parts, the page's
+        link definitions last."""
         self.text.extend(self.pre.close())
         while len(self.frames) > 1:
             self._end()
+        if self.references:
+            self.text.append(_Verbatim("\n".join(
+                f"[{n}]: {dest}" for dest, n in self.references.items())))
         return self.frames[0].parts
 
     def _push(self, frame):
@@ -370,9 +413,16 @@ class MarkdownStripper(HTMLStripper):
         frame = self.frames[-1]
         if frame.tag == "li" and tag in _ITEM_BLOCKERS:
             frame.block = True
+        if tag == "code":
+            self.code += 1
+        elif tag == "div" and (self.signature
+                               or "member-signature" in (dict(attrs).get("class") or "").split()):
+            self.signature += 1
         if tag == "a":
             self.link = None  # an <a> inside an open one leaves the outer as text
-            dest = _link_destination(dict(attrs).get("href"), self.page)
+            # Inside code a link keeps only its text: a signature reads as the source shows it.
+            dest = (None if self.code or self.signature
+                    else _link_destination(dict(attrs).get("href"), self.page))
             if dest is not None:
                 self.link = (frame, len(frame.parts), dest)
                 frame.parts.append("")
@@ -405,7 +455,11 @@ class MarkdownStripper(HTMLStripper):
                     self._push(cell)
 
     def _close(self, tag):
-        if tag == "a":
+        if tag == "code":
+            self.code = max(self.code - 1, 0)
+        elif tag == "div" and self.signature:
+            self.signature -= 1
+        elif tag == "a":
             self._close_link()
         elif tag in _HEADING_LEVELS:
             self._close_to(_HEADING_LEVELS, ())
@@ -490,11 +544,12 @@ class MarkdownStripper(HTMLStripper):
         if not words:
             return
         # Prose is unescaped once more when rendered (_prose_blocks): what goes in
-        # here is escaped so that pass gives back the label and the destination.
+        # here is escaped so that pass gives back the label.
         label = html.escape(escape_link_text(html.unescape(" ".join(words))), quote=False)
         lead = " " if text[0].isspace() else ""
         trail = " " if text[-1].isspace() else ""
-        link = _Link(f"{lead}[{label}]({html.escape(dest, quote=False)}){trail}")
+        number = self.references.setdefault(dest, len(self.references) + 1)
+        link = _Link(f"{lead}[{label}][{number}]{trail}")
         link.text = lead + " ".join(words) + trail
         del parts[at + 1:]
         parts[at] = link

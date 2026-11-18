@@ -16,7 +16,7 @@ from dograpper.utils.challenge import is_challenge
 from dograpper.lib.httrack import fetcher as fetcher_mod, policy as policy_mod
 from dograpper.lib.httrack.crawl import fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher
-from dograpper.lib.httrack.policy import build_policy, request_headers
+from dograpper.lib.httrack.policy import FetchMeta, build_policy, request_headers
 from dograpper.lib.httrack.robots import NO_RULES
 
 
@@ -275,6 +275,10 @@ def test_request_headers_sent_in_order(server):
                                          scheme="http")
     f.get(base + "/p?q=1", kind="navigate")
     assert len(seen) == 2  # persistent connection reused
+    image = FetchMeta("image", "no-cors", False)
+    f.get(base + "/p?q=1", kind="linked", referer=base + "/", meta=image)
+    assert seen[2][1] == request_headers(f.policy, host, kind="linked", referer=base + "/",
+                                         scheme="http", meta=image)
 
 
 def test_is_challenge_is_linear_on_hostile_bodies():

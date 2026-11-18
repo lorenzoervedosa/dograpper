@@ -416,6 +416,47 @@ def test_delta_gates_the_run_and_a_run_that_passes_rebuilds_everything(tmp_path)
         "pages/Modding/vi.md"}
 
 
+def test_links_to_packed_pages_point_at_their_files(tmp_path):
+    _write("docs", {
+        "a.html": ('<main><p>See <a href="sub/b.html#x">B</a>, <a href="gone.html">gone</a>, '
+                   '<a href="https://example.com/sub/b.html">web</a> and '
+                   '<a href="sub/b.html?x=1">query</a>.</p></main>'),
+        "sub/b.html": ('<main><p>Back to <a href="../a.html">A</a>, <a href="c%20(d).html">C</a> '
+                       'or <a href="../../out.html">out</a>.</p></main>'),
+        "sub/c (d).html": "<main><p>C</p></main>",
+    })
+    result = _pack("docs", "-o", "out", "--layout", "page")
+    assert result.exit_code == 0, result.output
+    # A packed page: its file, relative to the linking one. Anything else: as written (#118).
+    assert _read("out/pages/a.md").endswith(
+        "\n\n[1]: <sub/b.md#x>\n[2]: gone.html\n[3]: https://example.com/sub/b.html\n"
+        "[4]: sub/b.html?x=1\n")
+    assert _read("out/pages/sub/b.md").endswith(
+        "\n\n[1]: <../a.md>\n[2]: <c (d).md>\n[3]: ../../out.html\n")
+    words = count_words(_read("out/pages/sub/b.md"), markdown=True)
+    assert f"(<pages/sub/b.md>), {words} words" in _read("out/INDEX.md") and words == 6
+
+
+def _mediawiki_page(name, redirected_from=None, body=""):
+    config = {"wgPageName": name, **({"wgRedirectedFrom": redirected_from} if redirected_from else {})}
+    return ('<html><head><meta name="generator" content="MediaWiki 1.43.10">'
+            f"<script>RLCONF={json.dumps(config)};</script></head>"
+            f"<body><main><p>{name} page. {body}</p></main></body></html>")
+
+
+def test_a_link_to_a_skipped_redirect_alias_points_at_its_target(tmp_path):
+    _write("docs", {
+        "Map.info.html": _mediawiki_page("Map.info", body='See <a href="Translations.html">translation</a>.'),
+        "Translation.html": _mediawiki_page("Translation"),
+        "Translations.html": _mediawiki_page("Translation", redirected_from="Translations"),
+    })
+    result = _pack("docs", "-o", "out", "--layout", "page")
+    assert result.exit_code == 0, result.output
+    assert "1 redirect alias page(s) skipped" in result.output
+    assert _read("out/pages/Map.info.md").endswith(
+        "See [translation][1].\n\n[1]: <Translation.md>\n")
+
+
 def test_cross_refs_point_at_page_paths(tmp_path):
     _write("docs", {
         "a.html": "<html><body><main><p>See <a href=\"sub/b.html\">Beta page</a> now.</p></main></body></html>",
@@ -423,9 +464,11 @@ def test_cross_refs_point_at_page_paths(tmp_path):
     })
     result = _pack("docs", "-o", "out", "--layout", "page", "--cross-refs")
     assert result.exit_code == 0, result.output
-    # md keeps the link as written (#87); the marker names the page file.
-    assert "[Beta page](sub/b.html) [-> pages/sub/b.md]" in _read("out/pages/a.md")
-    assert "[Alpha](../a.html) [-> pages/a.md]" in _read("out/pages/sub/b.md")
+    # md writes reference links (#115) to the page files (#118); the marker follows the link.
+    assert _read("out/pages/a.md").endswith(
+        "[Beta page][1] [-> pages/sub/b.md] now.\n\n[1]: <sub/b.md>\n")
+    assert _read("out/pages/sub/b.md").endswith(
+        "[Alpha][1] [-> pages/a.md].\n\n[1]: <../a.md>\n")
     refs = json.loads(_read("out/cross_refs.json"))
     assert refs["pages/a.md"]["references_to"] == ["pages/sub/b.md"]
     assert "[->" not in _read("out/INDEX.md")

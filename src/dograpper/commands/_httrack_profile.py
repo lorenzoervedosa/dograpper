@@ -1,4 +1,4 @@
-"""`download --downloader httrack`: profile options, discovery fetch and the seeded run.
+"""`download --downloader httrack`: profile options, discovery fetch, seeded fetch or crawl.
 
 download.py keeps the click options and the dispatch; this module owns the mode.
 """
@@ -13,6 +13,7 @@ from ..lib.config_loader import is_explicit
 from ..lib.httrack.crawl import MAX_REDIRECTS, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
+from ..lib.httrack.mirror import mirror_site
 from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import format_report
 from ..lib.spa_detector import is_spa
@@ -123,8 +124,8 @@ def discovery_fetch(fetcher) -> Callable[[str], bytes | None]:
 
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
                 policy_kw, from_config, discover, filters) -> Tuple[int, int, List[str], Dict[str, str]]:
-    """Seeded fetch only. `discover` is download's layers 1+2 (`_discover_urls`);
-    `filters` (--filter) scopes the discovered list and the redirect targets.
+    """Seeded fetch when `discover` (download's layers 1+2, `_discover_urls`) finds a URL
+    list, else the recursive crawl from `url`; `filters` (--filter) scopes both.
     Returns (downloaded, skipped, report lines, written file -> URL fetched)."""
     warn_if_old_openssl()
     if headless:
@@ -135,24 +136,33 @@ def run_httrack(url, output, depth, delay, include_extensions, headless, verbose
     sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
     discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints,
                                          filters)
-    if not discovered:
-        raise click.ClickException(
-            "httrack profile: recursive crawl is not implemented yet (planned); "
-            "use --downloader wget")
-    logger.info(f"[cascade] httrack: fetching {len(discovered)} URLs from {winning_layer}")
-    res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher,
-                         filters=filters)
+    if discovered:
+        logger.info(f"[cascade] httrack: fetching {len(discovered)} URLs from {winning_layer}")
+        res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher,
+                             filters=filters)
+    else:
+        logger.info("[cascade] layer-3 httrack crawl: link-graph fallback")
+        res = mirror_site(url, output, policy, include_extensions, depth=depth,
+                          fetcher=fetcher, filters=filters)
     if res.front_failed or not res.success:
         for line in format_report(res.report, verbose):
             click.echo(f"  {line}", err=True)
     if res.front_failed:
-        cause = ("the site refused or challenged every seed URL (likely bot protection)"
-                 if res.report.challenged else
-                 "every seed URL was blocked by robots.txt or failed (see the report above)")
+        if discovered:
+            cause = ("the site refused or challenged every seed URL (likely bot protection)"
+                     if res.report.challenged else
+                     "every seed URL was blocked by robots.txt or failed (see the report above)")
+        else:
+            cause = ("the site challenged the start URL (likely bot protection)"
+                     if res.report.challenged else
+                     "the start URL was blocked by robots.txt, redirected out of scope or "
+                     "failed (see the report above)")
         raise click.ClickException(
             f"httrack profile: {cause}. See the README section \"Downloader profiles\".")
     if not res.success:
         raise click.ClickException("httrack fetch failed.")
-    if is_spa(output):
+    # the wget cascade's Playwright triggers: an SPA shell, or a crawl that found one page
+    html_count = sum(f.lower().endswith((".html", ".htm")) for f in res.files_downloaded)
+    if is_spa(output) or (not discovered and html_count <= 1):
         raise click.ClickException(_PLAYWRIGHT_MSG)
     return len(res.files_downloaded), 0, format_report(res.report, verbose), res.urls

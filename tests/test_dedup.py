@@ -627,3 +627,37 @@ class TestDeduplicateCLI:
             ])
             assert result.exit_code == 0, result.output
             assert "Dedup matches kept:    2 same-page, 0 leading-token, 1 numbers-only" in result.output
+
+
+# ---------------------------------------------------------------------------
+# md reference links (#115)
+# ---------------------------------------------------------------------------
+
+class TestReferenceLinks:
+    """md pages end with their link definitions; dedup must not orphan a reference."""
+
+    DEFINITIONS = "\n".join(f"[{n}]: https://example.com/wiki/Page_{n}" for n in range(1, 7))
+
+    def test_definitions_block_is_never_removed(self):
+        body = "Links: " + " ".join(f"[P{n}][{n}]" for n in range(1, 7))
+        texts = {"a.md": f"Page A has its own text.\n\n{body} here.\n\n{self.DEFINITIONS}",
+                 "b.md": f"Page B has other text.\n\n{body} there.\n\n{self.DEFINITIONS}"}
+        result = deduplicate(texts, mode="both", hamming_threshold=64)
+        assert result.texts["b.md"].endswith("\n\n" + self.DEFINITIONS)
+        assert result.stats.total_blocks == 4
+
+    def test_blocks_compare_by_target_not_by_reference_number(self):
+        # The same nav paragraph is [1]/[2] on one page and [2]/[3] on the next:
+        # removed as it was with inline links. Same text to other targets is kept.
+        nav = "Navigation for every page of this wiki: see the {} and the {} pages."
+        a = (nav.format("[Main][1]", "[Help][2]")
+             + "\n\n[1]: Main.html\n[2]: Help.html")
+        b = ("Page [intro][1].\n\n" + nav.format("[Main][2]", "[Help][3]")
+             + "\n\n[1]: Intro.html\n[2]: Main.html\n[3]: Help.html")
+        c = (nav.format("[Main][1]", "[Help][2]")
+             + "\n\n[1]: Other.html\n[2]: Help.html")
+        result = deduplicate({"a.md": a, "b.md": b, "c.md": c}, mode="exact")
+        assert result.texts["b.md"] == ("Page [intro][1].\n\n"
+                                        "[1]: Intro.html\n[2]: Main.html\n[3]: Help.html")
+        assert result.texts["c.md"] == c
+        assert result.stats.blocks_removed_exact == 1

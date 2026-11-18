@@ -268,9 +268,17 @@ def _annotate_one(text, link_text, target):
     ("[docs](https://x.org/wiki/Item) and [Item](Item.html)",
      "[docs](https://x.org/wiki/Item) and [Item](Item.html) [-> c1]"),
     ("plain Item text", "plain Item [-> c1] text"),
+    # md output's reference links (#115): after the "[n]", never in a definition.
+    ("see [Item][3] now\n\n[3]: Item.html", "see [Item][3] [-> c1] now\n\n[3]: Item.html"),
+    ("see this\n\n[1]: https://x.org/wiki/Item", "see this\n\n[1]: https://x.org/wiki/Item"),
 ])
 def test_marker_follows_a_markdown_link_and_never_enters_its_destination(text, expected):
     assert _annotate_one(text, "Item", "Item.html") == expected
+
+
+def test_marker_never_enters_a_reference_label():
+    assert _annotate_one("see [x][3] and 3 more\n\n[3]: x.html", "3", "Item.html") == (
+        "see [x][3] and 3 [-> c1] more\n\n[3]: x.html")
 
 
 # ---------------------------------------------------------------------------
@@ -428,9 +436,11 @@ def test_cross_refs_text_formats_annotate_only_the_linking_page(fmt, extra):
 
     assert "- Item.html (15 words)" in text
     # md writes the link (#87); the marker follows it instead of entering its label.
-    link = {"md": "[Item](Item.html)", "txt": "Item"}[fmt]
+    link = {"md": "[Item][1]", "txt": "Item"}[fmt]
     assert f"call the getter on {link} [-> docs_chunk_01] and check" in text
     assert text.count("[-> ") == 1
+    if fmt == "md":
+        assert text.endswith("first.\n\n[1]: Item.html")
 
 
 def test_cross_refs_compile_one_pattern_per_distinct_link_text(monkeypatch):

@@ -276,3 +276,41 @@ def test_robots_allows_other_encoded_path(server, tmp_path):
     script["/c%20d"] = (200, HTML, b"x")
     res = run([f"{base}/c d"], tmp_path)
     assert "/c%20d" in seen and res.report.robots_blocked == []
+
+
+def test_progress_counts_the_seeds_of_the_list(server, tmp_path, caplog):
+    """[progress] in the fixed-list shape of wget -i: seeds done of the list and the
+    bytes written; a redirect onto a file another seed wrote adds no bytes."""
+    import logging
+    import re
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/big"] = (200, HTML, b"x" * 1_200_000)
+    script["/gone"] = (404, HTML, b"<p>gone</p>")
+    script["/old"] = (301, {"location": "/big"}, b"")
+    with caplog.at_level(logging.INFO, logger="dograpper"):
+        run([f"{base}/big", f"{base}/gone", f"{base}/old"], tmp_path)
+    progress = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[progress]")]
+    assert progress and re.fullmatch(r"\[progress\] httrack: 3/3 URLs \(100%\) · 1\.1 MB · \d+s",
+                                     progress[-1]), progress
+
+
+def test_links_between_seeded_pages_are_rewritten(server, tmp_path):
+    """-K0, as wget -i --convert-links: saved targets become relative paths, others absolute."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/a"] = (200, HTML, b'<a href="b">b</a> <a href="/docs/old">o</a> <a href="/x">x</a>')
+    script["/docs/b"] = (200, HTML, b'<a href="a#top">a</a>')
+    script["/docs/old"] = (301, {"location": "/docs/new/"}, b"")
+    script["/docs/new/"] = (200, HTML, b'<a href="../a">a</a>')
+    script["/docs/t.txt"] = (200, {"content-type": "text/plain"}, b'<a href="b">raw</a>')
+    res = run([f"{base}/docs/a", f"{base}/docs/b", f"{base}/docs/old", f"{base}/docs/t.txt"],
+              tmp_path, exts="html,txt")
+    docs = tmp_path / base.split("//")[1] / "docs"
+    assert (docs / "a.html").read_bytes() == (
+        f'<a href="b.html">b</a> <a href="new/index.html">o</a> <a href="{base}/x">x</a>'.encode())
+    assert (docs / "b.html").read_bytes() == b'<a href="a.html#top">a</a>'
+    # resolved against the URL the page came from after the redirect, not the seed
+    assert (docs / "new" / "index.html").read_bytes() == b'<a href="../a.html">a</a>'
+    assert (docs / "t.txt").read_bytes() == b'<a href="b">raw</a>'  # only HTML is rewritten
+    assert res.report.errors == []

@@ -268,14 +268,38 @@ INFO: [cascade] layer-2 sitemap: WIN (>=3)
 INFO: [cascade] layer-3 wget -i: fetching 120 URLs from sitemap.xml
 ```
 
+While pages are fetched (by `download`, and so by `sync`), each fetch step
+prints a `[progress]` line at most every 5 seconds and only when something
+changed, plus a final line when the step ends. These are INFO lines, so
+`--quiet` hides them, and their URLs are redacted like every logged URL.
+
+A fixed URL list (`wget -i` over the llms.txt or sitemap URLs, and the httrack
+profile's seeded list, shown as `httrack:`) counts URLs of the list, not saved
+files: wget also fetches robots.txt, redirect targets and page requisites. The
+ETA appears once 10 URLs are done:
+
+```
+INFO: [progress] wget -i: 37/120 URLs (31%) · 2.1 MB · 1m12s · ETA ~3m
+```
+
+A crawl whose total grows as it goes (`wget --mirror`, and Playwright, whose
+queue keeps growing even when seeded) has no percentage and no ETA:
+
+```
+INFO: [progress] wget --mirror: 142 files · 8.3 MB · 1m12s · last: https://example.com/guide/
+INFO: [progress] playwright: 23 files · 1m05s · queued 41 · last: https://example.com/api/
+```
+
+The Playwright crawl's per-page `Downloading: <url>` line needs `--verbose`.
+
 #### URL filters (`--filter`)
 
 `--filter RULE` scopes a crawl with HTTrack's scan rules. It is repeatable, is
 read from `"filter": [...]` in `.dograpper.json` (a list; explicit flags replace
 it) and is forwarded by `sync`. It works with both downloaders and is applied to
 every discovered link before it is fetched: the llms.txt and sitemap lists,
-`wget --mirror`, the Playwright crawl, and the httrack profile's seeded list and
-redirect targets. The start URL itself is never filtered.
+`wget --mirror`, the Playwright crawl, and the httrack profile's seeded list,
+recursive crawl and redirect targets. The start URL itself is never filtered.
 
 - `+pattern` accepts the URLs it matches and `-pattern` refuses them. Rules are
   read in order and the **last** matching rule decides.
@@ -335,7 +359,54 @@ Precedence is unchanged: defaults < JSON < explicit CLI.
   behavior (robots.txt longest-match, retries, pacing). Layers 1 and 2
   discover URLs through the same identity, following up to 5 same-host
   redirects with a robots.txt check before every hop; the seeded URLs are
-  then fetched by the new engine.
+  then fetched by the new engine, which rewrites the links between the saved
+  pages as the crawl below does. When neither layer finds a list, the
+  engine crawls the site from the start URL instead of `wget --mirror`
+  (below).
+
+**Recursive crawl (`httrack`).** Breadth-first from the start URL, as
+HTTrack's mirror loop:
+
+- **Links:** `href` and HTTrack's link attributes (`src`, `srcset`,
+  `data-src`, `poster`, `background`, `data`, `longdesc`, `xlink:href`...),
+  `<meta http-equiv="refresh">` and CSS `url()` / `@import` (`<style>`,
+  `style=` and fetched stylesheets). `<base href>` applies to the links after
+  it; form `action` is never followed. A `<meta name="robots"
+  content="nofollow">` stops link extraction for the rest of that page
+  (ignored with `--no-robots`). Each request carries the `Referer` and the
+  `Sec-Fetch-*` values HTTrack sends for that kind of link.
+- **Scope:** the start host only; under the start URL's directory
+  (`/docs/index.html` → `/docs/`, `/modding` → `/`, `/modding/` →
+  `/modding/`) unless a `--filter` rule decides; `--depth` counts link hops
+  from the start URL (0 = unlimited); `/cdn-cgi/` is never fetched; at most
+  `--max-links` URLs, after which the report says `Partial`. Links whose
+  extension HTTrack knows as a non-page type outside `--include-extensions`
+  (images, CSS, PDF...) are not requested; any other page is fetched, its
+  links followed, and kept only when its saved name passes
+  `--include-extensions`.
+- **Dedup and names:** a URL is fetched once per HTTrack key (fragment
+  dropped, `//` collapsed, query keys sorted) and saved with the same names
+  as the seeded fetch.
+- **Redirects:** the target is queued as a fresh link and passes the same
+  scope, filter and robots checks; links to the redirecting URL then point at
+  the target's file. As in HTTrack, a page target is requested with the
+  redirecting URL as `Referer` (a known non-page type, with the linking page),
+  the original link's `Sec-Fetch-*` and the worst `Sec-Fetch-Site` of the
+  chain (`none` after a start URL).
+- **Links rewritten** (HTTrack `-K0`): once the crawl ends, every saved HTML
+  page links to the files saved for its links with relative paths, other
+  links become absolute URLs, and `<base href>` is emptied. The mirror browses
+  offline and `pack --cross-refs` resolves its links. No other byte of the
+  page changes.
+- **Output is deterministic:** requests run in parallel, but responses are
+  handled in queue order, so names, files, report and manifest never depend on
+  which request finished first.
+- **Progress:** `[progress] httrack crawl: 142 files · 8.3 MB · 1m12s ·
+  queued 41 · last: https://example.com/guide/`.
+- **Exit 1** when the start URL (or the redirect chain it starts) is refused,
+  challenged, blocked by robots.txt or leaves the host. A crawl that saves at
+  most one HTML page, or an SPA shell, would fall back to Playwright, which the
+  profile does not have yet (see below).
 
 `[httrack]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
@@ -366,6 +437,11 @@ protect the corpus:
 - TLS certificate verification stays on.
 - robots rules are matched on the percent-escaped target, per RFC 9309;
   redirects when fetching robots.txt are followed on the same host only.
+- A start URL that redirects out of its directory on the same host moves the
+  crawl scope to the target's directory (HTTrack would mirror nothing).
+- A `--filter` rule never widens the crawl to another host.
+- No asset mirroring: the crawl does not request links whose extension is a
+  known non-page type left out of `--include-extensions`.
 
 **OpenSSL >= 3.5.** The TLS handshake only matches HTTrack's on OpenSSL 3.5
 or newer; on older builds `dograpper` warns and some CDNs may reject the
@@ -378,11 +454,13 @@ the profile advertise and decode `br` / `zstd` over TLS. Without them it
 advertises only what it can decode. Python 3.14's stdlib `compression.zstd`
 is used when available. The release binary includes this extra.
 
-**Current gaps (fail loud, exit 1).** Under `httrack`, recursive crawling
-(cascade layer 3 when no llms.txt/sitemap wins) and the Playwright fallback
-are not implemented yet; use `--downloader wget` for those sites. Link
-rewriting also lands later, so `pack --cross-refs` finds fewer references in
-httrack-fetched trees.
+**Current gaps (temporary).** Under `httrack`, the Playwright fallback is
+not implemented yet and fails loud (exit 1); use `--downloader wget` for
+those sites. Until a follow-up PR under #78 ports them
+([#122](https://github.com/lorenzoervedosa/dograpper/issues/122)), the crawl
+does not scan JavaScript (HTTrack `-j`) or guess URLs in other attributes and
+script strings (HTTrack `-%P`), so a page that only a script links to is not
+fetched. Neither is a deviation from HTTrack.
 
 #### Incremental
 
@@ -408,8 +486,9 @@ date; the Playwright and httrack layers record the URL they requested for
 each file they write. After a redirect it is still the requested URL, never
 the one the server redirected to: that one can carry a secret (a presigned
 `X-Amz-Signature=...` link, a `token=`), and the manifest and every pack
-built from it are meant to be shared. When several httrack seeds redirect to
-one file, the one that needed no redirect wins, else the smallest URL.
+built from it are meant to be shared. When several httrack seeds (or crawled
+links) reach one file, the one that needed no redirect wins, else the
+smallest URL.
 `user:password@` is dropped. A URL with a query is recorded only when every
 parameter name is a navigation name (`title`, `oldid`, `curid`, `diff`,
 `pagefrom`, `pageuntil`, `from`, `until`, `page`, `p`, `id`, `lang`,
@@ -485,7 +564,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
-| `--api-records` | — | `false` | Splits API reference pages (Javadoc) into one container record and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
+| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
 
 #### Pack internal pipeline
 
@@ -558,13 +637,19 @@ chunking treat a code block as one unit, blank lines included.
 keep plain text, unchanged.
 
 - `h1`–`h6` become `#`–`######` lines.
-- A link becomes `[text](target)`, with the `href` as the page wrote it: a
-  relative target names a file of the mirror (`Lua_(API).html`), an absolute
+- A link becomes a reference link: the line holds `[text][n]`, and the page
+  ends with one `[n]: target` line per distinct target, numbered by first use
+  in the page, so a line is as long as its visible text however long its
+  targets are. The target is the `href` as the page wrote it: a
+  relative target names a file of the mirror (`Lua_(API).html`; in the
+  [page layout](#page-layout---layout-page), a packed page's file), an absolute
   one is kept. A target holding parentheses is written as `<...>`; spaces,
   `<`, `>`, `\` and control characters are percent-encoded. A link to the same
   page (`#anchor`, or `page.html#anchor` as mirrors rewrite it), with no
   target, or with a scheme other than `http`, `https` or `mailto`
-  (`javascript:`, `data:`...) keeps only its text.
+  (`javascript:`, `data:`...) keeps only its text. So does a link inside code
+  (`<code>`, `<pre>`, a Javadoc `div.member-signature`), so a signature reads
+  as the source shows it: `public ItemContainer getInventory()`.
 - `ul` / `ol` items become `-` / `N.` lines (an `ol`'s `start` is kept), with
   nested lists indented under their item. An item that holds a block (a
   heading, a `div`, a table or code, as Javadoc's member sections do) is
@@ -574,14 +659,24 @@ keep plain text, unchanged.
   becomes a code span, and a list in a cell is written inline. A table whose
   cell holds multi-line code, a heading or another table is written one cell
   per paragraph instead, so the code block keeps its lines.
-- Word counts leave the markup out: heading and list markers, table pipes and
-  the delimiter row are not words (context headers, `INDEX.md`,
-  `llm-readiness.json`). `--max-words-per-chunk` measures each page's plain
+- In the chunk layout each page section ends with its own definitions,
+  numbered from 1, so the numbers repeat across the pages of one chunk file: a
+  reference resolves to the definitions that end its section, the first `[n]:`
+  line after it. When `--context-header` splits a page into several sections,
+  each section ends with the definitions of the references it holds, under the
+  page's numbers, so a section read alone resolves all its links. A Markdown
+  renderer resolves a repeated number to the first definition of the file, so
+  render pages from the page layout (`--layout page`), where a file is a page.
+- Word counts leave the markup out: heading and list markers, table pipes,
+  the delimiter row and the link definitions are not words (context headers,
+  `INDEX.md`, `llm-readiness.json`). `--max-words-per-chunk` measures each page's plain
   text, as for `txt`, so both formats put pages in the same chunks.
 - Dedup and chunking treat a list or a table as one block, so `--dedup`
-  removes a table repeated on several pages as a whole.
-- `--cross-refs` writes its marker after the link it labels:
-  `[Item](Item.html) [-> docs_chunk_02]`.
+  removes a table repeated on several pages as a whole. `--dedup` never
+  removes a page's definitions, and it compares links by target, not by
+  number, so it removes the same blocks as it would with inline links.
+- `--cross-refs` writes its marker after the link it labels, never in a
+  definition: `[Item][2] [-> docs_chunk_02]`.
 
 #### Deduplication (`--dedup`)
 
@@ -617,13 +712,15 @@ when it is per-page metadata. A MediaWiki version banner never reaches
 dedup: it is header metadata (see Smart extraction), so with
 `--context-header` every page keeps its `version`.
 
-On API reference corpora (Javadoc, TypeDoc, rustdoc, Doxygen) `--dedup`
-can remove real members: a signature and doc comment that several types
-declare, such as an override, is kept on the first page only, so the other
-pages lose a member they declare, with no trace
-([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). Pages split
-by [`--api-records`](#api-reference-records---api-records) bypass dedup;
-for any other API reference page, run without `--dedup`.
+A page recognised as an API reference (the generators
+[`--api-records`](#api-reference-records---api-records) supports) is never
+deduplicated, with or without that flag: its blocks are neither removed nor
+used as the first-seen copy that removes blocks elsewhere, so a signature
+that several types declare, such as an override, stays on every page
+([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). The summary
+and `--dry-run` report `Pages exempted: N (API reference)`. API reference
+pages from a generator without an adapter (TypeDoc, rustdoc, Doxygen) are
+still deduplicated: run without `--dedup` on those corpora.
 
 #### Context header (`--context-header`)
 
@@ -740,17 +837,32 @@ dograpper pack ./javadoc-mirror -o ./pack --format jsonl --api-records --context
 dograpper serve ./pack   # search_chunks now ranks member records
 ```
 
-- **Javadoc** (javadoc 25 type pages, `<meta name="generator"
-  content="javadoc/ClassWriter">`) is the only adapter so far.
-- **Container record** (`id` `NN_path`): qualified name and kind, inheritance,
-  implemented interfaces and known subclasses, signature, description, the
-  declared member names, and the "inherited from" lists. Summary tables are
-  dropped.
+- **Javadoc**: javadoc 25 type pages (`<meta name="generator"
+  content="javadoc/ClassWriter">`).
+- **Sphinx autodoc**: Python domain pages, measured on Sphinx 9.1 and 9.2
+  with the alabaster and furo themes. Sphinx writes no generator meta, so a
+  page is recognised by its object markup (`<dt class="sig sig-object py">`)
+  inside the `role="main"` region. The page's first record is its **module**
+  container record (the module of its first module-level object): the page
+  text outside the objects (title, module docstring, usage prose) and the
+  names of the top-level objects. Each class and exception gets a container
+  record (signature, `Bases:`, docstring, member names); each function,
+  method, property, attribute and data gets a member record
+  (`packaging.version.Version.is_prerelease`, every signature with its
+  annotations, overloads included, then the docstring and its fields). The
+  anchor is the object's HTML id (`#packaging.version.parse`). A page with a
+  `:no-index:` object or an object type outside those keeps one record.
+- **Container record** (`id` `NN_path` for the page's main container,
+  `NN_path#anchor` for a Sphinx class or exception): qualified name and kind,
+  inheritance, implemented interfaces and known subclasses, signature,
+  description, the declared member names, and the "inherited from" lists.
+  Summary tables are dropped.
 - **Member record** (`id` `NN_path#anchor`): the qualified name
-  (`zombie.characters.IsoGameCharacter#getInventory()`), the full signature
-  with its type parameters, the doc comment and the notes (Overrides,
-  Specified by, Parameters, Returns, Throws). `url` ends with the member's
-  anchor; `breadcrumb` is `[container, member]`.
+  (`zombie.characters.IsoGameCharacter#getInventory()`,
+  `packaging.version.parse`), the full signature with its type parameters,
+  the doc comment and the notes (Overrides, Specified by, Parameters,
+  Returns, Throws). `url` ends with the member's anchor; `breadcrumb` is
+  `[container, member]`.
 - **Other pages** (prose, package summaries, other generators, or a type page
   whose markup differs from the measured one) keep one record each. They are
   listed in a warning with the reason (the first 10; all with `--verbose`) and
@@ -924,6 +1036,12 @@ out/
   are neutralized and `\`, `[`, `]` are backslash-escaped. The URL comes from
   the manifest or the page marker, as for `--context-header`, and is left out
   when unknown. New fields are only ever appended to a line.
+- **Links.** In `md`, a link to a packed page points at that page's file,
+  relative to the linking file and written `<...>` as in `INDEX.md`
+  (`[1]: <../inventory/ItemContainer.md#getItems()>`), so it can be opened as
+  written; a link to a redirect alias that `pack` skipped points at its
+  target's file. A link to anything else (an absolute URL, a file outside the
+  pack) keeps its target as the page wrote it.
 - **Whole pages.** Pages are never split and lines never wrapped: a page
   larger than one `Read` call takes stays reachable with `grep -n` plus a
   `Read` with an offset. There is no word cap, no chunk cap and no size
@@ -1223,6 +1341,26 @@ tie-breaking — the same query always returns the same order. The server
 reads stdin line-by-line (JSON-RPC 2.0) and exits when the client closes
 the pipe. Status messages go to stderr; stdout carries only the protocol.
 
+### `dograpper docs`
+
+Serve a **local reference site** for every command and option, generated at
+run time from the installed CLI, so it always matches `--help`. One
+self-contained page (no external stylesheet, script, font or image), so it
+works offline and from the release binary. Each option has an anchor, for
+example `#download--depth`.
+
+```bash
+dograpper docs                      # serves http://127.0.0.1:8000/ and opens the browser
+dograpper docs --port 9000 --no-browser
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--port` | `8000` | TCP port, bound on `127.0.0.1` only. A busy port exits non-zero; it never moves to another port |
+| `--no-browser` | off | Only print the URL (always printed) instead of opening the browser |
+
+Stop the server with Ctrl+C.
+
 ### Global flags
 
 | Flag | Alias | Default | Description |
@@ -1245,7 +1383,7 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
-| 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
+| 1 | download --downloader httrack | every seed, or the start URL of the crawl, refused/challenged | retry later, switch to `--downloader wget`, or change network |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
@@ -1464,7 +1602,7 @@ Conditional extra lines (per enabled flag):
 | Flag | Extra lines |
 |---|---|
 | `--show-tokens` | `Tokens per chunk`, `Total tokens`, `Encoding` |
-| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Matches kept`, `Words removed` |
+| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Matches kept`, `Pages exempted`, `Words removed` |
 | `--cross-refs` | `Cross-refs: ./chunks/cross_refs.json (N links, M unresolved)` |
 | `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, `Grade distribution` |
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |

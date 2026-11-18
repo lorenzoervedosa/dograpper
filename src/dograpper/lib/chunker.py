@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Dict
 
 from ..utils.word_counter import count_words, count_words_file
-from ..utils.html_stripper import strip_html
+from ..utils.html_stripper import definitions_used, split_definitions, strip_html
 from ..utils.content_extractor import extract_content
 from ..utils.code_fence import split_blocks, unfence
 
@@ -444,11 +444,13 @@ def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max
     computes the active heading hierarchy for each sub-chunk, and
     writes the context header before each piece. ``plain`` writes code
     blocks without their fence (txt); otherwise HTML-derived text is
-    Markdown (md), counted without its markup.
+    Markdown (md), counted without its markup. In md each piece ends with the
+    definitions of the links it holds, so no piece depends on another (#115).
     """
     from ..utils.heading_extractor import get_active_headings, format_context_header
 
     markdown = not plain and is_html(cf.relative_path)
+    content, definitions = split_definitions(content) if markdown else (content, "")
     if headings and max_words > 0:
         sub_chunks = _split_text_by_words(content, max_words, markdown)
     else:
@@ -478,6 +480,9 @@ def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max
         )
         f.write(header)
         f.write(annotate(cf.relative_path, sub_text) if annotate else sub_text)
+        used = definitions_used(sub_text, definitions) if definitions else ""
+        if used:
+            f.write("\n\n" + used)
 
 
 def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, prefix: str = "docs_chunk_", annotate: Callable[[str, str], str] = None, page_meta: Dict[str, dict] = None):

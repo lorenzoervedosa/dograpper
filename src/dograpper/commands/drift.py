@@ -62,7 +62,7 @@ def _load_readiness(ctx, path, label):
     )
 )
 @click.option('--new', 'new_path', required=True, type=click.Path(),
-              help="Freshly generated llm-readiness.json (pack --score).")
+              help="llm-readiness.json from the latest `pack --score` run: the state to report on. Required.")
 @click.option('--old', 'old_path', type=click.Path(), default=None,
               help="Previous llm-readiness.json snapshot. Omit for first-run "
                    "mode (every chunk reported as added).")
@@ -80,7 +80,12 @@ def _load_readiness(ctx, path, label):
 @click.pass_context
 def drift(ctx, new_path, old_path, delta_path, output_format, output,
           fail_on_drift):
-    """Report context drift between two llm-readiness.json snapshots."""
+    """Report context drift between two llm-readiness.json snapshots.
+
+    Compares readiness grades chunk by chunk and lists the chunks that were
+    added, removed or changed grade or score. Prints the report to stdout, or to
+    --output.
+    """
     new_data = _load_readiness(ctx, new_path, "new")
 
     old_data = None

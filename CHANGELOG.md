@@ -48,6 +48,10 @@ and fixes alone are a PATCH bump.
 
 ### Added
 
+- `dograpper docs`: serves a self-contained, offline reference page for every
+  command and option on `127.0.0.1` (`--port`, default 8000; `--no-browser`),
+  generated from the installed CLI. Command descriptions and option help
+  strings were rewritten to say what each flag does. ([#110])
 - `pack` detects bot-challenge interstitial pages (Cloudflare "Just a
   moment..." title) in its input, warns once with the affected files, keeps
   them out of the chunks and reports `Challenge pages: N` in the summary; it
@@ -56,8 +60,16 @@ and fixes alone are a PATCH bump.
   fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
-  `--max-retry-after`, `--disable-security-limits`). Recursive crawl and the
-  Playwright fallback fail loud under this profile for now.
+  `--max-retry-after`, `--disable-security-limits`). When llms.txt and the
+  sitemap give no URL list, it crawls the site from the start URL as HTTrack
+  does: links from `href`, HTTrack's link attributes, meta refresh and CSS;
+  the start host and directory, `--filter` and `--depth` link hops as scope;
+  meta robots `nofollow` honored and `/cdn-cgi/` never fetched; redirect
+  targets queued as links; a deterministic output whatever the request order;
+  `[progress] httrack crawl:` lines. On both paths, links between saved pages
+  are rewritten to relative paths (HTTrack `-K0`), so the mirror browses
+  offline and `pack --cross-refs` resolves them. The Playwright fallback fails loud under this
+  profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
@@ -94,7 +106,8 @@ and fixes alone are a PATCH bump.
   `sync`): HTTrack scan rules (`+pattern` accepts, `-pattern` refuses, the last
   match wins) applied to every discovered link before it is fetched, under both
   downloaders: the llms.txt/sitemap lists, `wget --mirror` (as
-  `--accept-regex`/`--reject-regex`), Playwright and httrack redirect targets.
+  `--accept-regex`/`--reject-regex`), Playwright, and the httrack crawl and
+  redirect targets.
   A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
   filtered. Refused URLs are counted as `Filtered by --filter: N` in the
   summary ([#96](https://github.com/lorenzoervedosa/dograpper/issues/96)).
@@ -112,6 +125,19 @@ and fixes alone are a PATCH bump.
   notebooklm` or `--layout page` it exits 2.
   ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
   [#76](https://github.com/lorenzoervedosa/dograpper/issues/76))
+- `pack --api-records` also splits Sphinx autodoc pages (Python domain,
+  Sphinx 9.1/9.2, recognised by their object markup since Sphinx writes no
+  generator meta): the page's module becomes a container record (page text
+  outside the objects, names of the top-level objects), each class and
+  exception a container record, and each function, method, property,
+  attribute and data a member record with its qualified name
+  (`packaging.version.parse`), every signature with its annotations and its
+  docstring, anchored at the object's HTML id. `symbol_kind` gains `module`,
+  `exception`, `function`, `property`, `attribute` and `data`; `generator` is
+  `sphinx`. A page with a `:no-index:` object or unmeasured markup keeps one
+  record and is listed in the warning.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
 - `pack` cleans MediaWiki pages (detected by their `<meta name="generator">`)
   before extraction: navigation boxes (`navbox`), section edit links
   (`mw-editsection`) and maintenance boxes (stub, outdated, "help update"
@@ -125,6 +151,14 @@ and fixes alone are a PATCH bump.
   and counted as `Redirect aliases: N` in the summary. Pages from any other
   generator are extracted exactly as before. ([schema](docs/schema-v1.md),
   [#88])
+- `download` (and so `sync`) prints `[progress]` lines while pages are
+  fetched: at most one every 5 s per fetch step, only on change, plus a final
+  one. A fixed URL list (`wget -i`, the httrack profile's seeded list) shows
+  `37/120 URLs (31%) · 2.1 MB · 1m12s`, with an ETA once 10 URLs are done;
+  `wget --mirror` shows files, size, elapsed time and the last URL, and
+  Playwright files, elapsed time, queue size and the last URL. They are INFO
+  lines, so `--quiet` hides them. The Playwright crawl's per-page
+  `Downloading: <url>` line moves to `--verbose`. ([#98])
 
 ### Changed
 
@@ -164,6 +198,42 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack --dedup` no longer deduplicates a page recognised as an API reference
+  (Javadoc), with or without `--api-records`: a member block repeated across
+  pages, such as an override, stays on every page, and the summary and
+  `--dry-run` report `Pages exempted: N (API reference)`. ([#68])
+- `<br>` separates its neighbours instead of gluing them (`-debuglog=All-debuglog=Network,Sound`):
+  a line break in body text (md and txt), and `; ` inside an md pipe-table cell, so the row stays
+  on one line. Word counts are unchanged.
+- `pack` renders MediaWiki red links (`a.new`, `redlink=1` or `action=edit`
+  targets) as plain text, so no `index.php?...&action=edit&redlink=1`
+  destination reaches the output.
+  ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
+- `pack` drops the heading a MediaWiki page is left with once a navbox or
+  maintenance box is removed from its section (the empty `## Navigation` that
+  ended most wiki pages). A heading whose section still has content stays.
+  ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
+- `pack --layout page --format md` points a link to a packed page at that
+  page's file, relative to the linking file (`[1]: <../inventory/ItemContainer.md>`),
+  instead of the source `.html` name, which the pack does not hold; a link to
+  a redirect alias that `pack` skipped points at its target's file. Links to
+  anything else keep their target.
+  ([#118](https://github.com/lorenzoervedosa/dograpper/issues/118))
+- `pack --format md` writes links as reference links: `[text][n]` in the line
+  and one `[n]: target` line per distinct target at the end of each page,
+  numbered by first use, instead of `[text](target)`, so a line is as long as
+  its visible text and every line of a page-layout pack fits one `Read`. In
+  the chunk layout each page section ends with its own definitions, and each
+  section a `--context-header` split makes ends with those of the links it
+  holds. Word counts, `txt` and `jsonl` are unchanged; `--cross-refs` markers
+  follow the `[n]` and never enter a definition; `--dedup` never removes a
+  definition and compares links by target.
+  ([#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
+- `pack --format md` writes a link inside code (`<code>`, `<pre>`, a Javadoc
+  `div.member-signature`) as its text, so a signature reads as the source
+  shows it and greps as a phrase (`rg 'ItemContainer getInventory'`); links in
+  prose are still written as links.
+  ([#117](https://github.com/lorenzoervedosa/dograpper/issues/117))
 - `download` and `pack --delta` exit 1 with the path in the message when the
   manifest (`.dograpper-manifest.json`) or `pack_state.json` cannot be written,
   instead of logging an error and exiting 0; both files are now written
@@ -358,3 +428,6 @@ and fixes alone are a PATCH bump.
 [#95]: https://github.com/lorenzoervedosa/dograpper/issues/95
 [#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
 [#88]: https://github.com/lorenzoervedosa/dograpper/issues/88
+[#110]: https://github.com/lorenzoervedosa/dograpper/issues/110
+[#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
+[#98]: https://github.com/lorenzoervedosa/dograpper/issues/98

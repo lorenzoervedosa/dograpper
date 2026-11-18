@@ -1,13 +1,14 @@
 """API reference pages split into container and member records (ADR-0009): detection and dispatch.
 
-A page is split only when the generator it declares has an adapter here and its
-markup is the measured one. Any other page keeps one record and is reported,
-with the reason, by ``format_kept_whole``.
+A page is split only when an adapter here recognises its generator and its markup
+is the measured one. Javadoc declares itself in ``<meta name="generator">``; Sphinx
+writes no such meta, so its object markup tells. Any other page keeps one record and
+is reported, with the reason, by ``format_kept_whole``.
 """
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 from urllib.parse import quote
 
 from ..generator import page_generator
@@ -16,10 +17,20 @@ from ..redact import neutralize_controls
 NO_ADAPTER = "no supported generator"
 # Shown before "... N more (use --verbose)"; same cap as lib/source_urls.py MAX_SHOWN_MISSING.
 MAX_SHOWN_KEPT_WHOLE = 10
+# Records repeat their container's qualified name (every Javadoc member the type's, every Sphinx
+# object its ancestors'), so a huge or deeply nested name would make the output quadratic in the
+# page size; no real qualified name is this long.
+MAX_SYMBOL = 1000
 
 
 class NotSplit(Exception):
     """The page keeps one record; the message says why."""
+
+
+def check_symbol(symbol: str, unsupported: Callable[[str], NotSplit]) -> None:
+    """Raise the adapter's ``unsupported(problem)`` for a qualified name over MAX_SYMBOL characters."""
+    if len(symbol) > MAX_SYMBOL:
+        raise unsupported(f"a qualified name over {MAX_SYMBOL} characters")
 
 
 @dataclass
@@ -57,6 +68,9 @@ def split_page(html: str) -> List[ApiRecord]:
     if generator and generator.startswith("javadoc/"):
         from . import javadoc
         return javadoc.records(html, generator)
+    from . import sphinx
+    if sphinx.SIGNATURE in html:  # Sphinx writes no generator meta: its object markup tells
+        return sphinx.records(html)
     raise NotSplit(NO_ADAPTER)
 
 

@@ -18,6 +18,12 @@ generator meta says so (``utils/generator.py``). Measured on MediaWiki 1.43
   target's content under another file name. ``find_redirect_aliases`` names
   the ones whose target is in the run too, for ``pack`` to skip.
 
+- a red link (``a.new``, or a ``redlink=1`` / ``action=edit`` target) becomes
+  its plain text: the anchor tags are cut, the link text stays;
+- a heading whose section a cut left without content is dropped with it (the
+  "Navigation" heading of a navbox-only section), up to the next heading of
+  the same or a higher level.
+
 The cleanup cuts the dropped elements out of the page source, so the markup
 around them reaches the extractor unchanged.
 """
@@ -40,6 +46,12 @@ _VERSION_CATEGORY = re.compile(rf"Category:Version {_VERSION}")
 _CONFIG = re.compile(r'"(wgPageName|wgRedirectedFrom)"\s*:\s*"((?:[^"\\]|\\.){1,500})"')
 # Only these carry the classes above, so a void element never opens a region.
 _REGION_TAGS = frozenset({"div", "span", "table"})
+_RED_HREF = re.compile(r"[?&](?:redlink=1|action=edit)(?:&|$)")
+_HEADINGS = {f"h{n}": n for n in range(1, 7)}
+_VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+                   "source", "track", "wbr"})
+# Left where a span was cut, so the heading pass knows which sections lost something.
+_CUT = "dograpper-cut"
 
 
 def is_mediawiki(html: str) -> bool:
@@ -54,6 +66,11 @@ def page_metadata(html: str) -> dict:
     if scan.banner:
         return dict(zip(("version", "version_status"), scan.banner))
     return {"version": scan.category_versions[0]} if scan.category_versions else {}
+
+
+def page_config(head: str) -> dict:
+    """``wgPageName`` / ``wgRedirectedFrom`` from a MediaWiki page head; ``{}`` for any other page."""
+    return dict(_CONFIG.findall(head)) if is_mediawiki(head) else {}
 
 
 def find_redirect_aliases(paths) -> list:
@@ -71,7 +88,7 @@ def find_redirect_aliases(paths) -> list:
                 head = fh.read(SCAN_CHARS)
         except OSError:
             continue  # unreadable files are reported by the stage that reads them
-        config = dict(_CONFIG.findall(head)) if is_mediawiki(head) else {}
+        config = page_config(head)
         name = config.get("wgPageName")
         if name and "wgRedirectedFrom" in config:
             aliases.setdefault(name, []).append(path)
@@ -89,6 +106,113 @@ def clean(html: str) -> str:
     for start, end in sorted(_Scan(html).dropped):
         if start < pos:
             continue  # inside a span already cut
+        kept.append(html[pos:start])
+        kept.append(f"<!--{_CUT}-->")
+        pos = end
+    kept.append(html[pos:])
+    return _drop_empty_headings("".join(kept)).replace(f"<!--{_CUT}-->", "")
+
+
+class _Heading:
+    """A heading under watch: its element (with the ``mw-heading`` wrapper, if any) and its section."""
+
+    def __init__(self, start: int, depth: int):
+        self.start, self.end = start, None   # source span of the element to drop; end is set at its end tag
+        self.depth = depth      # open elements around it: the section ends when one of them closes
+        self.level = None
+        self.cut = self.content = False
+
+
+class _EmptyHeadings(HTMLParser):
+    """``spans`` holds the headings whose section holds a cut and nothing else but blanks."""
+
+    def __init__(self, html: str):
+        super().__init__(convert_charrefs=True)
+        self._html = html
+        self._line_starts = [0] + [m.end() for m in re.finditer("\n", html)]
+        self._stack = []        # (tag, _Heading or None)
+        self._open = []         # headings whose section is still open
+        self.spans = []
+        self.feed(html)
+        self.close()
+        self._finish(0)
+
+    def _offset(self) -> int:
+        line, col = self.getpos()
+        return self._line_starts[line - 1] + col
+
+    def _finish(self, level: int):
+        """Close the open headings of ``level`` or deeper (0: all of them)."""
+        for h in [h for h in self._open if h.level >= level]:
+            self._end_section(h)
+
+    def handle_starttag(self, tag, attrs):
+        classes = (dict(attrs).get("class") or "").split()
+        own = None
+        if tag in _HEADINGS:
+            top = self._stack[-1][1] if self._stack else None
+            if top is not None and top.level is None:   # inside its mw-heading wrapper
+                top.level = _HEADINGS[tag]
+            else:
+                own = _Heading(self._offset(), len(self._stack))
+                own.level = _HEADINGS[tag]
+            if own is not None or top is not None:
+                self._finish(_HEADINGS[tag])    # same or higher level: the sections before it end
+                self._open.append(own or top)
+        elif tag == "div" and "mw-heading" in classes:
+            own = _Heading(self._offset(), len(self._stack))
+        if tag not in _VOID:
+            self._stack.append((tag, own))
+        if tag == "img":
+            self._mark_content()
+
+    def handle_startendtag(self, tag, attrs):
+        if tag == "img":
+            self._mark_content()
+
+    def handle_comment(self, data):
+        if data == _CUT:    # a cut inside the heading's own element (its edit link) is not the section's
+            for h in self._open:
+                h.cut = h.cut or h.end is not None
+
+    def handle_data(self, data):
+        if data.strip():
+            self._mark_content()
+
+    def _mark_content(self):
+        # Text inside a heading's own element is the heading, not its section.
+        for h in self._open:
+            if h.end is not None:
+                h.content = True
+
+    def handle_endtag(self, tag):
+        open_tags = [t for t, _ in self._stack]
+        if tag not in open_tags:
+            return
+        at = len(open_tags) - 1 - open_tags[::-1].index(tag)
+        end = self._html.index(">", self._offset()) + 1
+        for _, h in self._stack[at:]:
+            if h is not None and h.end is None:
+                h.end = end
+        del self._stack[at:]
+        self._finish_sections()
+
+    def _finish_sections(self):
+        for h in [h for h in self._open if h.end is not None and len(self._stack) < h.depth]:
+            self._end_section(h)
+
+    def _end_section(self, h: _Heading):
+        self._open.remove(h)
+        if h.cut and not h.content and h.end is not None:
+            self.spans.append((h.start, h.end))
+
+
+def _drop_empty_headings(html: str) -> str:
+    spans = _EmptyHeadings(html).spans
+    if not spans:
+        return html
+    kept, pos = [], 0
+    for start, end in sorted(spans):
         kept.append(html[pos:start])
         pos = end
     kept.append(html[pos:])
@@ -156,6 +280,11 @@ class _Scan(HTMLParser):
                 region = _Region(self._offset(), "box")
             elif "mw-hidden-catlinks" in classes:
                 region = _Region(self._offset(), "categories")
+        if tag == "a" and not self._dropping and ("new" in classes
+                                                  or _RED_HREF.search(attrs.get("href") or "")):
+            start = self._offset()
+            region = _Region(start, "redlink")
+            region.tag_end = start + len(self.get_starttag_text())
         self._stack.append((tag, region))
 
     def handle_data(self, data):
@@ -183,6 +312,12 @@ class _Scan(HTMLParser):
         for i in range(len(self._stack) - 1, at - 1, -1):
             region = self._stack[i][1]
             if region is None:
+                continue
+            if region.kind == "redlink":    # only the tags go; an unclosed anchor has no end tag to cut
+                if not self._dropping:
+                    self.dropped.append((region.start, region.tag_end))
+                    if i == at:
+                        self.dropped.append((start, end))
                 continue
             if region.drop:
                 self._dropping -= 1

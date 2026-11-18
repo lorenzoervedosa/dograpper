@@ -136,6 +136,11 @@ pages carry Cloudflare's injected `jsd` beacon. Use only `cf-mitigated` and the
   - Each redirect is logged as a warning and the `#fragment` is removed from the `Location` (`src/htsmirror.c:144-160`).
   - The target goes through the same acceptance check as any link (`hts_acceptlink`, `src/htsmirror.c:191-215`).
   - An HTML page that moved to a different URL is saved as a stub with a meta refresh to the target, which the parser then follows (`src/htsmirror.c:283-320`).
+  - How the target is requested (`hts_mirror_check_moved`, `src/htsmirror.c:131-325`, read on 2026-11-18):
+    - A target whose extension is a known non-page type (`ishtml() == 0`, line 190), or that saves to the same file (#159, lines 171-172 and 203-216), is recorded as a fresh link whose parent is the moved link's parent (lines 240-261).
+    - Any other target is a link of the stub page (lines 279-324), so the stub, that is the moved URL, is its parent. It is also one hop deeper (`src/htsparse.c:3641-3645`).
+    - The `Referer` is the parent: `back_add` gets `heap(heap(p)->precedent)` (`src/htscore.c:3424-3426`).
+    - Both paths copy the moved link's fetch metadata, and `hts_fetch_through` keeps the worst `Sec-Fetch-Site` of the chain (lines 257-259; the stub's link takes the same path through `parse_fetch_meta`, `src/htsparse.c:809-812`). A start URL's `none` is never changed (`src/htsfetch.c:455-456`), and the order is none < same-origin < same-site < cross-site (`src/htsfetch.h:67-71`).
   - If the start URL redirects to another host, the crawl stops under the default same-host scope (WinHTTrack `html/cmdguide.html` §2).
 - **Retried, within the `-R` budget** (`src/htsmirror.c:398-450`):
   - timeouts, slow transfers, connection errors, non-fatal errors and TLS handshake errors;
