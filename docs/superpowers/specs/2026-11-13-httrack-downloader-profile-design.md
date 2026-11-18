@@ -124,7 +124,9 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - `Accept: text/html,image/png,image/jpeg,image/pjpeg,image/x-xbitmap,image/svg+xml,image/gif;q=0.9,*/*;q=0.1`;
   - `Accept-Language: en, *`;
   - `Connection: keep-alive`;
-  - `Referer` (never https→http).
+  - `Referer` (never https→http), built as HTTrack builds it
+    (`src/htslib.c:1136-1163`): no userinfo, no fragment, host, path and query
+    escaped like the request target. One that does not parse is dropped.
   - `Sec-Fetch-Site/Mode/User/Dest` and `Upgrade-Insecure-Requests` on
     navigations, over HTTPS, exactly when HTTrack's `fetch_meta_sent` would
     send them (`src/htslib.c:873-884`, `1240-1297`). This includes the
