@@ -360,7 +360,9 @@ Precedence is unchanged: defaults < JSON < explicit CLI.
   discover URLs through the same identity, following up to 5 same-host
   redirects with a robots.txt check before every hop; the seeded URLs are
   then fetched by the new engine, which rewrites the links between the saved
-  pages as the crawl below does. When neither layer finds a list, the
+  pages as the crawl below does. Each seed is a start URL: it is requested
+  without `Referer`, and a redirect target as the crawl requests a start
+  URL's (the seed as `Referer` for a page target, `Sec-Fetch-Site: none`). When neither layer finds a list, the
   engine crawls the site from the start URL instead of `wget --mirror`
   (below).
 

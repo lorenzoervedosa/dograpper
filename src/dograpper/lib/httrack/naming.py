@@ -43,6 +43,17 @@ wrl wrz xaf xbm xla xlc xlm xls xlsx xlt xltx xlw xml xof xpm xwd xyz z zip zst
 """.split())
 
 
+def url_extension(url: str) -> str:
+    """Lower-case extension of the last path segment of `url`, dot included ("" if none)."""
+    return os.path.splitext(unquote(urlsplit(url).path).rsplit("/", 1)[-1])[1].lower()
+
+
+def no_page(url: str) -> bool:
+    """htslib.c ishtml() == 0: the URL's extension is a type HTTrack knows and no page."""
+    ext = url_extension(url)
+    return ext in KNOWN_EXTS and ext not in PAGE_EXTS
+
+
 class NameRegistry:
     def __init__(self, output_dir: str):
         self._root = os.path.realpath(output_dir)

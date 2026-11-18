@@ -539,3 +539,46 @@ def test_edited_manifest_never_chooses_where_a_page_is_written(server, tmp_path)
     res = run_update([f"{base}/a"], tmp_path, previous, exts="html,txt")
     assert (tmp_path / "notes.txt").read_bytes() == b"my own notes"
     assert [os.path.basename(f) for f in res.files_downloaded] == ["a.html"]
+
+
+class WireSpy(Fetcher):
+    """Records the headers each GET puts on the wire (robots.txt left out)."""
+
+    def __init__(self, policy):
+        ft = FakeTime()
+        super().__init__(policy, clock=ft.clock, sleep=ft.sleep)
+        self.sent = {}
+
+    def _request(self, key, parts, target, headers):
+        if target != "/robots.txt":
+            self.sent[target] = dict(headers)
+        return super()._request(key, parts, target, headers)
+
+
+def test_seed_redirect_target_is_requested_as_htsmirror_c_requests_it(server, tmp_path):
+    # hts_mirror_check_moved (htsmirror.c:131-325): a page target is a link of the stub
+    # standing for the seed, so the seed is its Referer (back_add gets heap(precedent),
+    # htscore.c:3424-3426), without its login or fragment (htslib.c:1136-1163); a known
+    # non-page target is a fresh link with the seed's parent, the primary link, which sends
+    # no Referer (htsback.c:2332). A start URL's chain keeps Sec-Fetch-Site none.
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    script["/doc"] = (302, {"location": "/f.txt"}, b"")
+    script["/f.txt"] = (200, {"content-type": "text/plain"}, b"t")
+    script["/gone"] = (301, {"location": "/missing"}, b"")
+    policy = build_policy(retries=0)
+    spy = WireSpy(policy)
+    host = base.split("//")[1]
+    res = fetch_url_list([f"http://u:pw@{host}/old#frag", f"{base}/doc", f"{base}/gone"],
+                         str(tmp_path), policy, "html,txt", fetcher=spy)
+    assert sorted(os.path.basename(f) for f in res.files_downloaded) == ["f.txt", "new.html"]
+    new, txt = spy.sent["/new"], spy.sent["/f.txt"]
+    assert new["Referer"] == f"{base}/old"
+    assert (new["Sec-Fetch-Site"], new["Sec-Fetch-Mode"], new["Sec-Fetch-Dest"]) == (
+        "none", "navigate", "document")
+    assert "Referer" not in txt and txt["Sec-Fetch-Site"] == "none"
+    assert "Referer" not in spy.sent["/old"] and "Referer" not in spy.sent["/doc"]
+    # the report names the referrer of the failed request, as htsmirror.c:462-482 logs it
+    assert [e for e in res.report.errors] == [(f"{base}/missing", "HTTP 404", f"{base}/gone")]

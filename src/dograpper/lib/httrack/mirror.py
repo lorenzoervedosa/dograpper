@@ -18,7 +18,7 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from dograpper.lib.manifest import Manifest
 from dograpper.lib.url_filter import UrlFilters
@@ -26,12 +26,12 @@ from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
-from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, previous_files, record_of,
-                    relink, reserve_names, sends)
+from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, moved_request,
+                    previous_files, record_of, relink, reserve_names, sends)
 from .fetcher import Fetcher, same_host
 from .links import css_links, page_links, url_key
-from .naming import KNOWN_EXTS, PAGE_EXTS, NameRegistry
-from .policy import NAVIGATION, SITES, FetchMeta, HttrackPolicy, site_of
+from .naming import NameRegistry, no_page, url_extension
+from .policy import NAVIGATION, FetchMeta, HttrackPolicy
 from .report import RunReport
 
 logger = logging.getLogger(__name__)
@@ -94,38 +94,10 @@ def _start_rule(url: str) -> UrlFilters:
     return UrlFilters([f"+{parts.netloc.rpartition('@')[2]}{directory}*"])
 
 
-def _extension(url: str) -> str:
-    return os.path.splitext(unquote(urlsplit(url).path).rsplit("/", 1)[-1])[1].lower()
-
-
-def _no_page(url: str) -> bool:
-    """htslib.c ishtml() == 0: the URL's extension is a type HTTrack knows and no page."""
-    ext = _extension(url)
-    return ext in KNOWN_EXTS and ext not in PAGE_EXTS
-
-
 def _skipped_by_extension(url: str, exts: set) -> bool:
     """--include-extensions before the request: an extension HTTrack knows as a type that is
     no page, and that the list leaves out, is not fetched (a page may come from any other)."""
-    return bool(exts) and _no_page(url) and _extension(url) not in exts
-
-
-def _moved_request(entry: _Entry, target: str) -> tuple[str | None, FetchMeta]:
-    """Referer and fetch metadata of a redirect target, as htsmirror.c hts_mirror_check_moved
-    sends it. A target with a known non-page extension, or one saved under the same name, is
-    a fresh link with the moved link's parent (htsmirror.c:190-261); any other becomes the
-    link of a stub page standing for the moved URL (279-324), so that URL is its Referer
-    (its precedent, htscore.c:3424-3426). Both keep the moved link's metadata, with the
-    worst Sec-Fetch-Site of the chain (htsfetch.c:452-465); a start URL's "none" stays."""
-    same_name = url_key(entry.url).casefold() == url_key(target).casefold()  # #159
-    referer = entry.referer if _no_page(target) or same_name else entry.url
-    if entry.front or not entry.meta.dest:
-        site = "none" if entry.front else entry.meta.site
-    else:
-        hops = (entry.meta.site or site_of(entry.initiator, entry.url),
-                site_of(entry.initiator, target))
-        site = max(hops, key=SITES.index)
-    return referer, entry.meta._replace(site=site)
+    return bool(exts) and no_page(url) and url_extension(url) not in exts
 
 
 def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extensions: str, *,
@@ -217,7 +189,8 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                 report.errors.append((safe, "too many redirects", via))
                 state["front_failed"] |= entry.front
                 return
-            referer, meta = _moved_request(entry, final)
+            referer, meta = moved_request(entry.url, entry.referer, entry.meta, final,
+                                          front=entry.front, initiator=entry.initiator)
             got = enqueue(final, hop=entry.hop, referer=referer, meta=meta, front=entry.front,
                           redirects=entry.redirects + 1, initiator=entry.initiator,
                           carried=entry.carry)

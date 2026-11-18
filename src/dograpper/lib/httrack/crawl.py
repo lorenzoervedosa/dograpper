@@ -20,8 +20,9 @@ from dograpper.utils.redact import redact_url
 from .escape import request_target
 from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
 from .links import rewrite_links, url_key
-from .naming import NameRegistry
-from .policy import NAVIGATION, FetchMeta, HttrackPolicy, conditional_headers, response_validators
+from .naming import NameRegistry, no_page
+from .policy import (NAVIGATION, SITES, FetchMeta, HttrackPolicy, conditional_headers,
+                     response_validators, site_of)
 from .report import RunReport
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,26 @@ def _count(report: RunReport, status: int | None, error: bool) -> None:
     report.status_counts[key] = report.status_counts.get(key, 0) + 1
 
 
+def moved_request(url: str, referer: str | None, meta: FetchMeta, target: str, *, front: bool,
+                  initiator: str | None) -> tuple[str | None, FetchMeta]:
+    """Referer and fetch metadata of `target`, where `url` (requested with `referer` and
+    `meta`) redirected, as htsmirror.c hts_mirror_check_moved sends it. A target with a
+    known non-page extension, or one saved under the same name, is a fresh link with the
+    moved link's parent (htsmirror.c:190-261); any other becomes the link of a stub page
+    standing for the moved URL (279-324), so that URL is its Referer (its precedent,
+    htscore.c:3424-3426). Both keep the moved link's metadata, with the worst Sec-Fetch-Site
+    of the chain (htsfetch.c:452-465); a start URL's (`front`) "none" stays. `initiator` is
+    the page whose link began the chain."""
+    same_name = url_key(url).casefold() == url_key(target).casefold()  # #159
+    referer = referer if no_page(target) or same_name else url
+    if front or not meta.dest:
+        site = "none" if front else meta.site
+    else:
+        hops = (meta.site or site_of(initiator, url), site_of(initiator, target))
+        site = max(hops, key=SITES.index)
+    return referer, meta._replace(site=site)
+
+
 def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lock,
                redirect_ok: Callable[[str, str], bool] | None, *, kind: str = "navigate",
                referer: str | None = None, meta: FetchMeta = NAVIGATION,
@@ -120,9 +141,10 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                names: NameRegistry | None = None) -> tuple[str, str, FetchResult | None]:
     """GET `url` for every fetch path: /cdn-cgi/ is never requested, robots.txt is checked
     before each hop, and a redirect is followed (at most MAX_REDIRECTS) only when
-    `redirect_ok(url, target)`, called under `lock`, accepts the target. Return ("ok",
-    final URL, result) for a 2xx that is no challenge, else ("scoped" | "refused", URL,
-    None) with the cause recorded in `report` (an error names `referer`). Without
+    `redirect_ok(url, target)`, called under `lock`, accepts the target; `url` is then a
+    start URL, and each target is requested as moved_request() says. Return ("ok", final
+    URL, result) for a 2xx that is no challenge, else ("scoped" | "refused", URL, None)
+    with the cause recorded in `report` (an error names the request's referer). Without
     `redirect_ok` a redirect is not followed: ("moved", target, result).
 
     With `prev`, the file of the previous run this URL leads to, its validators go on the
@@ -179,6 +201,9 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 if hops >= MAX_REDIRECTS:
                     report.errors.append((safe, "too many redirects", via))
                     return "refused", url, None
+                referer, meta = moved_request(url, referer, meta, nxt, front=True,
+                                              initiator=None)
+                via = redact_url(referer) if referer else None
                 url, hops = nxt, hops + 1
                 continue
             if sent and (res.challenged or res.status == 304 or not (
