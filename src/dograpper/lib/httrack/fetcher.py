@@ -269,7 +269,11 @@ class Fetcher:
     # -- public --
 
     def get(self, url: str, *, kind: str, referer: str | None = None,
-            meta: FetchMeta = NAVIGATION) -> FetchResult:
+            meta: FetchMeta = NAVIGATION,
+            validators: tuple[tuple[str, str], ...] = ()) -> FetchResult:
+        """GET `url`. With `validators` (a revalidation, policy.conditional_headers) an
+        answered status is not retried: HTTrack keeps the previous copy instead
+        (htsback.c:4266-4280); the Retry-After gate is still set (spec 5.6)."""
         res = FetchResult(url)
         try:
             parts, key = urlsplit(url), _origin(url)
@@ -278,7 +282,7 @@ class Fetcher:
             res.error = "invalid URL"
             return res
         headers = request_headers(self.policy, host, kind=kind, referer=referer, scheme=key[0],
-                                  meta=meta)
+                                  meta=meta, validators=validators)
         for attempt in range(1, self.policy.retries + 2):
             res.attempts = attempt
             self._acquire(key)
@@ -302,7 +306,7 @@ class Fetcher:
             if status in (429, 503) and ra is not None:
                 self._set_gate(url, ra)
             if (status in RETRY_STATUSES or (status == 503 and ra is not None)) \
-                    and attempt <= self.policy.retries:
+                    and attempt <= self.policy.retries and not validators:
                 continue
             res.location = hdrs.get("location")  # independent of body decoding
             try:

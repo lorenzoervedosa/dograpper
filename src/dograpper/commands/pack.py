@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import exclude_subtree, filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
+from ..utils.error_page import find_error_page_files
 from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, is_html, read_source_text
 from ..utils.word_counter import count_words
 
@@ -353,6 +354,18 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         filtered_paths = [p for p in filtered_paths if p not in challenge_set]
         if not filtered_paths:
             raise click.ClickException("Every input file is a bot-challenge page; nothing to pack.")
+
+    # 6a-1. Saved HTTP error pages (404 Not Found...): same handling as the challenge pages above (#121)
+    error_paths = find_error_page_files(filtered_paths)
+    if error_paths:
+        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
+                           for p in error_paths)
+        click.echo(f"Warning: {len(error_paths)} saved HTTP error page(s) skipped "
+                   f"(the source is missing their real content):\n{listed}", err=True)
+        error_set = set(error_paths)
+        filtered_paths = [p for p in filtered_paths if p not in error_set]
+        if not filtered_paths:
+            raise click.ClickException("Every input file is a saved HTTP error page; nothing to pack.")
 
     # 6a-2. MediaWiki redirect aliases: the content of a page that is packed too, under another name (#88)
     from ..utils.mediawiki import find_redirect_aliases
@@ -749,6 +762,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     click.echo(f"  Files excluded:  {files_excluded}")
     if challenge_paths:
         click.echo(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
+    if error_paths:
+        click.echo(f"  Error pages:     {len(error_paths)} (skipped, counted in Files excluded)")
     if alias_paths:
         click.echo(f"  Redirect aliases: {len(alias_paths)} (skipped, counted in Files excluded)")
     if page_layout:

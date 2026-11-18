@@ -60,16 +60,25 @@ and fixes alone are a PATCH bump.
   fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
-  `--max-retry-after`, `--disable-security-limits`). When llms.txt and the
+  `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`,
+  `--no-extended-parsing`). When llms.txt and the
   sitemap give no URL list, it crawls the site from the start URL as HTTrack
-  does: links from `href`, HTTrack's link attributes, meta refresh and CSS;
+  does: links from `href`, HTTrack's link attributes, meta refresh and CSS,
+  from scripts and event handlers (HTTrack `-j`) and from quoted strings that
+  name a file (HTTrack `-%P`), both on by default as in HTTrack;
   the start host and directory, `--filter` and `--depth` link hops as scope;
   meta robots `nofollow` honored and `/cdn-cgi/` never fetched; redirect
   targets queued as links; a deterministic output whatever the request order;
   `[progress] httrack crawl:` lines. On both paths, links between saved pages
   are rewritten to relative paths (HTTrack `-K0`), so the mirror browses
-  offline and `pack --cross-refs` resolves them. The Playwright fallback fails loud under this
-  profile for now.
+  offline and `pack --cross-refs` resolves them. A run over an earlier one is
+  an update, as HTTrack `-C2`: each saved file is revalidated with
+  `If-None-Match` / `If-Modified-Since` from its manifest record (new manifest
+  fields `status`, `content_type`, `redirected`; `etag` and `last_modified`
+  filled in), a 304 or an error leaves the previous copy byte-identical, and
+  the summary adds `Not modified (304)`, `Kept the previous copy after an
+  error` and `Not reached this run, kept on disk`. The Playwright fallback
+  fails loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
@@ -198,6 +207,13 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack` skips a saved HTTP error page (a `<title>` such as `404 Not Found`
+  and almost no other text, as a mirror stores when a URL answered an error),
+  warns once with the affected files (also in `--dry-run` and `--layout page`),
+  reports `Error pages: N` in the pack summary (a `--dry-run` counts it in
+  `Files excluded`), and fails if every input file is one. A page that
+  documents or mentions the error, or a long page with that title, is kept.
+  ([#121])
 - `pack --dedup` no longer deduplicates a page recognised as an API reference
   (Javadoc), with or without `--api-records`: a member block repeated across
   pages, such as an override, stays on every page, and the summary and
@@ -205,6 +221,14 @@ and fixes alone are a PATCH bump.
 - `<br>` separates its neighbours instead of gluing them (`-debuglog=All-debuglog=Network,Sound`):
   a line break in body text (md and txt), and `; ` inside an md pipe-table cell, so the row stays
   on one line. Word counts are unchanged.
+- Plain-text output (`--format txt`, `jsonl`) separates the cells of a table row with a tab
+  (`debuglog<TAB>-debuglog=All`, not `debuglog-debuglog=All`). The tab is whitespace, so word counts
+  change only where gluing had merged two words. md is unchanged.
+  ([#125](https://github.com/lorenzoervedosa/dograpper/issues/125))
+- md output renders Javadoc 25 summary grids (`div.summary-table`) as pipe tables, one line per
+  row (`| static final double | PI | 3.14159 |`), so a grep hit on a member or constant carries its
+  type and value. Word counts and readiness grades are unchanged.
+  ([#120](https://github.com/lorenzoervedosa/dograpper/issues/120))
 - `pack` renders MediaWiki red links (`a.new`, `redlink=1` or `action=edit`
   targets) as plain text, so no `index.php?...&action=edit&redlink=1`
   destination reaches the output.
@@ -429,5 +453,6 @@ and fixes alone are a PATCH bump.
 [#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
 [#88]: https://github.com/lorenzoervedosa/dograpper/issues/88
 [#110]: https://github.com/lorenzoervedosa/dograpper/issues/110
+[#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
