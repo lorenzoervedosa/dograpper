@@ -83,6 +83,13 @@ and fixes alone are a PATCH bump.
   stem. The page header holds no `chunk_index`, `total_chunks` or
   `context_breadcrumb`. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md),
   [#85])
+- `init --target claude-code`: a config for Claude Code (`layout: page`,
+  `format: md`, `context-header`, `dedup: off`, no chunk-only key) and a
+  `SKILL.md` stub in `--skill-dir` (default `docs-skill`, the directory to
+  pack into) with the skill name, a description to fill in, a link to
+  `INDEX.md` and grep-then-Read usage. An existing `SKILL.md` is never
+  overwritten. The `claude-project` description now says it targets Claude
+  Projects. ([#93])
 
 ### Changed
 
@@ -244,3 +251,4 @@ and fixes alone are a PATCH bump.
 [#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
 [#84]: https://github.com/lorenzoervedosa/dograpper/issues/84
 [#85]: https://github.com/lorenzoervedosa/dograpper/issues/85
+[#93]: https://github.com/lorenzoervedosa/dograpper/issues/93
