@@ -45,28 +45,27 @@ class _Diff:
 # Cross-references
 # ---------------------------------------------------------------------------
 
-def test_write_cross_refs_indexes_links_and_annotates_chunks(tmp_path):
+def test_write_cross_refs_indexes_links_and_annotates_the_linking_page(tmp_path):
     src = tmp_path / "src"
-    out = tmp_path / "out"
+    out = tmp_path / "out"  # not created: this runs before write_chunks
     src.mkdir()
-    out.mkdir()
     (src / "a.html").write_text('<a href="b.html">See B</a>', encoding="utf-8")
     (src / "b.html").write_text("<p>B body</p>", encoding="utf-8")
 
     chunks = [_chunk(1, "a.html"), _chunk(2, "b.html")]
-    (out / "docs_chunk_01.md").write_text("See B\n", encoding="utf-8")
-    (out / "docs_chunk_02.md").write_text("B body\n", encoding="utf-8")
 
-    stats = write_cross_refs(
+    refs = write_cross_refs(
         chunks, [str(src / "a.html"), str(src / "b.html")],
-        str(src), str(out), "docs_chunk_", "md")
+        str(src), str(out), "docs_chunk_")
 
     index = json.loads((out / "cross_refs.json").read_text(encoding="utf-8"))
     assert "docs_chunk_01" in index
-    assert stats.total == 1
-    assert stats.unresolved == 0
-    # The link points at the other chunk, so the source chunk gets a pointer.
-    assert "docs_chunk_02" in (out / "docs_chunk_01.md").read_text(encoding="utf-8")
+    assert refs.total == 1
+    assert refs.unresolved == 0
+    # The link points at the other chunk, so the linking page gets a pointer.
+    assert refs.annotate("a.html", "See B") == "See B [-> docs_chunk_02]"
+    # A page only gets markers for the links it contains.
+    assert refs.annotate("b.html", "See B") == "See B"
 
 
 def test_write_cross_refs_counts_unresolved_targets(tmp_path):
@@ -77,10 +76,9 @@ def test_write_cross_refs_counts_unresolved_targets(tmp_path):
     (src / "a.html").write_text('<a href="gone.html">Missing</a>', encoding="utf-8")
 
     chunks = [_chunk(1, "a.html")]
-    (out / "docs_chunk_01.md").write_text("Missing\n", encoding="utf-8")
 
     stats = write_cross_refs(chunks, [str(src / "a.html")], str(src), str(out),
-                             "docs_chunk_", "md")
+                             "docs_chunk_")
 
     assert stats.unresolved == 1
     assert stats.total == 0
@@ -97,7 +95,7 @@ def test_write_cross_refs_skips_unreadable_sources(tmp_path):
     stats = write_cross_refs(
         [_chunk(1, "a.html")],
         [str(src / "a.html"), str(src / "vanished.html")],
-        str(src), str(out), "docs_chunk_", "md")
+        str(src), str(out), "docs_chunk_")
 
     assert stats.total == 0
     assert (out / "cross_refs.json").exists()

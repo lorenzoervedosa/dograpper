@@ -87,6 +87,12 @@ class TestFindBoundaryIssues:
         assert issues[0].line == 1
         assert issues[0].snippet == "</pre>"
 
+    def test_longer_fence_holding_backticks_is_intact(self):
+        assert find_boundary_issues("````\n```\nnested\n````\n\nText.") == []
+
+    def test_pre_tag_inside_a_closed_fence_is_code(self):
+        assert find_boundary_issues("```html\n<pre>never closed\n```") == []
+
     def test_fence_and_pre_issues_together(self):
         text = "```\ncode\n\n<pre>never closed"
         issues = find_boundary_issues(text)
@@ -187,6 +193,21 @@ class TestScoreChunk:
             max_heading_level=0,
         )
         assert cs.boundary_integrity is False
+
+    def test_empty_content_is_never_graded_a(self):
+        # Everything extracted away (raw is empty too, so noise alone is 0.0):
+        # nothing is ready for an LLM, however clean the metrics look.
+        for raw in (0, 40):
+            cs = score_chunk(
+                chunk_id="docs_chunk_04",
+                text="",
+                raw_words=raw,
+                extracted_words=0,
+                headings_count=3,
+                max_heading_level=2,
+            )
+            assert cs.grade == "C"
+            assert cs.score < 0.5
 
 
 def _make_test_dir(tmpdir, files_dict):

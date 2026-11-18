@@ -1,6 +1,5 @@
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -23,37 +22,6 @@ class FakeTime:
     def sleep(self, s):
         with self.lock:
             self.now += s
-
-
-# Second copy of the local-server fixture in test_httrack_fetcher.py; factor it out on the third.
-@pytest.fixture
-def server():
-    script, seen = {}, []
-
-    class H(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            seen.append(self.path)
-            status, hdrs, body = script.get(self.path, (404, {}, b"nope"))
-            self.send_response(status)
-            for k, v in hdrs.items():
-                self.send_header(k, v)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
-    srv.daemon_threads = True
-    t = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}", script, seen
-    srv.shutdown()
-    srv.server_close()
-    t.join(5)
 
 
 def run(urls, out, exts="html", **kw):
@@ -105,6 +73,22 @@ def test_same_host_redirect_is_followed_and_final_url_named(server, tmp_path):
     script["/new"] = (200, HTML, b"<p>n</p>")
     res = run([f"{base}/old"], tmp_path)
     assert [os.path.basename(f) for f in res.files_downloaded] == ["new.html"]
+
+
+def test_redirect_target_refused_by_filters_is_not_fetched(server, tmp_path):
+    from dograpper.lib.url_filter import UrlFilters
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/Special:Login"}, b"")
+    script["/Special:Login"] = (200, HTML, b"<p>login</p>")
+    filters = UrlFilters(["-*Special:*"])
+    policy = build_policy(retries=0)
+    ft = FakeTime()
+    res = fetch_url_list([f"{base}/old"], str(tmp_path), policy, "html",
+                         fetcher=Fetcher(policy, clock=ft.clock, sleep=ft.sleep), filters=filters)
+    assert res.files_downloaded == [] and not res.front_failed
+    assert "/Special:Login" not in seen
+    assert filters.excluded == {f"{base}/Special:Login"}
 
 
 def test_redirect_with_undecodable_body_is_followed(server, tmp_path):
@@ -195,6 +179,36 @@ def test_seeds_redirecting_to_one_target_write_one_file(server, tmp_path):
     script["/t"] = (200, HTML, b"<p>t</p>")
     res = run([f"{base}/a", f"{base}/b", f"{base}/t"], tmp_path)
     assert [os.path.basename(f) for f in res.files_downloaded] == ["t.html"]
+    assert list(res.urls.values()) == [f"{base}/t"]  # the seed that needed no redirect
+
+
+def test_seeds_redirecting_to_one_file_record_the_smallest_url(server, tmp_path):
+    """Whichever thread writes first, the manifest gets the same URL."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/b"] = (301, {"location": "/t"}, b"")
+    script["/a"] = (301, {"location": "/t"}, b"")
+    script["/t"] = (200, HTML, b"<p>t</p>")
+    res = run([f"{base}/b", f"{base}/a"], tmp_path)
+    assert list(res.urls.values()) == [f"{base}/a"]
+
+
+def test_each_written_file_maps_to_the_url_fetched(server, tmp_path):
+    """#94: the manifest records these instead of rebuilding a URL from the name."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/wiki/Category:En"] = (200, HTML, b"<p>c</p>")
+    script["/w/index.php?title=A"] = (200, HTML, b"<p>q</p>")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    script["/gone"] = (404, HTML, b"<p>x</p>")
+    res = run([f"{base}/wiki/Category:En", f"{base}/w/index.php?title=A", f"{base}/old",
+               f"{base}/gone"], tmp_path)
+    assert sorted(res.urls) == res.files_downloaded
+    by_name = {os.path.basename(f): u for f, u in res.urls.items()}
+    assert by_name.pop("Category_En.html") == f"{base}/wiki/Category:En"
+    assert by_name.pop("new.html") == f"{base}/old"  # named after the target, URL as requested
+    assert list(by_name.values()) == [f"{base}/w/index.php?title=A"]
 
 
 def test_malformed_seed_is_recorded_and_run_continues(server, tmp_path):
@@ -262,3 +276,309 @@ def test_robots_allows_other_encoded_path(server, tmp_path):
     script["/c%20d"] = (200, HTML, b"x")
     res = run([f"{base}/c d"], tmp_path)
     assert "/c%20d" in seen and res.report.robots_blocked == []
+
+
+def test_progress_counts_the_seeds_of_the_list(server, tmp_path, caplog):
+    """[progress] in the fixed-list shape of wget -i: seeds done of the list and the
+    bytes written; a redirect onto a file another seed wrote adds no bytes."""
+    import logging
+    import re
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/big"] = (200, HTML, b"x" * 1_200_000)
+    script["/gone"] = (404, HTML, b"<p>gone</p>")
+    script["/old"] = (301, {"location": "/big"}, b"")
+    with caplog.at_level(logging.INFO, logger="dograpper"):
+        run([f"{base}/big", f"{base}/gone", f"{base}/old"], tmp_path)
+    progress = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[progress]")]
+    assert progress and re.fullmatch(r"\[progress\] httrack: 3/3 URLs \(100%\) · 1\.1 MB · \d+s",
+                                     progress[-1]), progress
+
+
+def test_links_between_seeded_pages_are_rewritten(server, tmp_path):
+    """-K0, as wget -i --convert-links: saved targets become relative paths, others absolute."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/a"] = (200, HTML, b'<a href="b">b</a> <a href="/docs/old">o</a> <a href="/x">x</a>')
+    script["/docs/b"] = (200, HTML, b'<a href="a#top">a</a>')
+    script["/docs/old"] = (301, {"location": "/docs/new/"}, b"")
+    script["/docs/new/"] = (200, HTML, b'<a href="../a">a</a>')
+    script["/docs/t.txt"] = (200, {"content-type": "text/plain"}, b'<a href="b">raw</a>')
+    res = run([f"{base}/docs/a", f"{base}/docs/b", f"{base}/docs/old", f"{base}/docs/t.txt"],
+              tmp_path, exts="html,txt")
+    docs = tmp_path / base.split("//")[1] / "docs"
+    assert (docs / "a.html").read_bytes() == (
+        f'<a href="b.html">b</a> <a href="new/index.html">o</a> <a href="{base}/x">x</a>'.encode())
+    assert (docs / "b.html").read_bytes() == b'<a href="a.html#top">a</a>'
+    # resolved against the URL the page came from after the redirect, not the seed
+    assert (docs / "new" / "index.html").read_bytes() == b'<a href="../a.html">a</a>'
+    assert (docs / "t.txt").read_bytes() == b'<a href="b">raw</a>'  # only HTML is rewritten
+    assert res.report.errors == []
+
+
+# -- update mode: the previous run's manifest records drive conditional revalidation --
+
+from dograpper.lib.manifest import build_manifest  # noqa: E402
+
+LM = "Mon, 01 Jan 2024 00:00:00 GMT"
+
+
+def again(res, base, out):
+    """The manifest a download would save after `res`."""
+    return build_manifest(base + "/", str(out), res.urls, records=res.records)
+
+
+def run_update(urls, out, previous, exts="html", **kw):
+    policy = build_policy(**{"retries": 0, **kw})
+    ft = FakeTime()
+    return fetch_url_list(urls, str(out), policy, exts, previous=previous,
+                          fetcher=Fetcher(policy, clock=ft.clock, sleep=ft.sleep))
+
+
+def validated(etag, body, then=None, log=None):
+    """A page that answers 304 to its ETag, else `then` (default: 200 with `body`)."""
+    def reply(h):
+        if log is not None:
+            log.append({k: h[k] for k in ("If-None-Match", "If-Modified-Since") if k in h})
+        if h.get("If-None-Match") == etag:
+            return then or (304, {"etag": etag}, b"")
+        return (200, {**HTML, "etag": etag, "last-modified": LM}, body)
+    return reply
+
+
+def test_first_run_records_what_a_revalidation_needs(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, {**HTML, "etag": '"a1"', "last-modified": LM}, b"<p>a</p>")
+    script["/d"] = (200, HTML, b"<p>d</p>")  # http.server always sends Date
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, {**HTML, "etag": '"n1"'}, b"<p>n</p>")
+    res = run([f"{base}/a", f"{base}/d", f"{base}/old"], tmp_path)
+    recs = {os.path.basename(p): r for p, r in res.records.items()}
+    assert recs["a.html"] == {"status": 200, "content_type": "text/html", "etag": '"a1"',
+                              "last_modified": LM, "redirected": False}
+    assert recs["d.html"]["etag"] is None and recs["d.html"]["last_modified"].endswith(" GMT")
+    assert recs["new.html"]["redirected"] is True and recs["new.html"]["etag"] == '"n1"'
+
+
+def test_304_keeps_the_previous_copy_byte_identical(server, tmp_path):
+    base, script, _ = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b'<a href="b">b</a>', log=log)
+    script["/b"] = validated('"b1"', b"<p>b</p>")
+    first = run([f"{base}/a", f"{base}/b"], tmp_path)
+    a = tmp_path / base.split("//")[1] / "a.html"
+    before = a.read_bytes()
+    assert before == b'<a href="b.html">b</a>'  # relinked by the first run
+    log.clear()
+    script["/b"] = validated('"b2"', b"<p>b changed</p>")
+    res = run_update([f"{base}/a", f"{base}/b"], tmp_path, again(first, base, tmp_path))
+    assert log == [{"If-None-Match": '"a1"', "If-Modified-Since": LM}]
+    assert a.read_bytes() == before  # neither rewritten nor relinked
+    assert [os.path.basename(f) for f in res.files_downloaded] == ["b.html"]
+    assert [os.path.basename(f) for f in res.kept] == ["a.html"] and res.files_skipped == 1
+    assert res.report.not_modified == 1 and res.report.errors == [] and res.success
+    assert res.records[str(a.resolve())] == first.records[str(a.resolve())]
+    assert res.urls[str(a.resolve())] == f"{base}/a"
+
+
+@pytest.mark.parametrize("reply,reason", [
+    ((404, HTML, b"<p>gone</p>"), "HTTP 404"),
+    ((500, HTML, b"<p>oops</p>"), "HTTP 500"),
+])
+def test_answered_error_on_update_keeps_the_copy_without_retry(server, tmp_path, reply, reason):
+    """htsback.c:4266-4280: masked as a 304, so htsmirror.c never retries it."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>")
+    first = run([f"{base}/a"], tmp_path)
+    script["/a"] = validated('"a1"', b"", then=reply)
+    seen.clear()
+    res = run_update([f"{base}/a"], tmp_path, again(first, base, tmp_path), retries=2)
+    assert seen.count("/a") == 1
+    assert res.report.kept == [(f"{base}/a", reason)] and res.report.errors == []
+    assert open(res.kept[0], "rb").read() == b"<p>a</p>"
+    assert not res.front_failed and res.success and res.files_downloaded == []
+
+
+def test_challenged_revalidation_keeps_the_copy_and_is_still_a_front_failure(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>")
+    first = run([f"{base}/a"], tmp_path)
+    script["/a"] = validated('"a1"', b"", then=(403, {**HTML, "cf-mitigated": "challenge"},
+                                                b"<title>Just a moment...</title>"))
+    res = run_update([f"{base}/a"], tmp_path, again(first, base, tmp_path))
+    assert res.report.challenged == [f"{base}/a"] and res.front_failed
+    assert open(first.files_downloaded[0], "rb").read() == b"<p>a</p>"
+
+
+def test_failed_transfer_on_update_is_an_error_and_keeps_the_copy(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>")
+    first = run([f"{base}/a"], tmp_path)
+    script["/a"] = validated('"a1"', b"", then=(200, {**HTML, "content-encoding": "gzip"},
+                                                b"not gzip"))
+    res = run_update([f"{base}/a"], tmp_path, again(first, base, tmp_path))
+    assert [e[0] for e in res.report.errors] == [f"{base}/a"] and res.front_failed
+    assert open(first.files_downloaded[0], "rb").read() == b"<p>a</p>"
+    assert res.kept == first.files_downloaded and res.records == first.records  # #746, #1421
+
+
+def test_changed_page_is_rewritten_with_its_new_record(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>")
+    first = run([f"{base}/a"], tmp_path)
+    script["/a"] = validated('"a2"', b"<p>a, new</p>")
+    res = run_update([f"{base}/a"], tmp_path, again(first, base, tmp_path))
+    path = res.files_downloaded[0]
+    assert open(path, "rb").read() == b"<p>a, new</p>" and res.records[path]["etag"] == '"a2"'
+    assert res.kept == [] and res.report.not_modified == 0
+
+
+@pytest.mark.parametrize("erase", [os.remove, lambda p: open(p, "wb").close()])
+def test_file_erased_since_is_refetched_unconditionally(server, tmp_path, erase):
+    """htsback.c:2414-2492: a file missing or empty is fetched again, "Previous file not
+    found (erased by user ?), recatching"."""
+    base, script, _ = server
+    log = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a</p>", log=log)
+    first = run([f"{base}/a"], tmp_path)
+    previous = again(first, base, tmp_path)
+    erase(first.files_downloaded[0])
+    log.clear()
+    res = run_update([f"{base}/a"], tmp_path, previous)
+    assert log == [{}] and open(res.files_downloaded[0], "rb").read() == b"<p>a</p>"
+
+
+def test_redirected_seed_revalidates_its_target_only(server, tmp_path):
+    """HTTrack's cache holds the redirect (sent plain) and the target's 200 (sent its
+    validators); the manifest never records the target, so the chain carries them."""
+    base, script, _ = server
+    old, new = [], []
+    script["/robots.txt"] = (404, {}, b"")
+
+    def moved(h):
+        old.append(h.get("If-None-Match"))
+        return (301, {"location": "/new"}, b"")
+    script["/old"] = moved
+    script["/new"] = validated('"n1"', b"<p>n</p>", log=new)
+    first = run([f"{base}/old"], tmp_path)
+    old.clear(), new.clear()
+    res = run_update([f"{base}/old"], tmp_path, again(first, base, tmp_path))
+    assert old == [None] and new == [{"If-None-Match": '"n1"', "If-Modified-Since": LM}]
+    assert [os.path.basename(f) for f in res.kept] == ["new.html"]
+    assert res.records[res.kept[0]]["redirected"] is True
+
+
+def test_format_report_lists_what_an_update_kept():
+    r = RunReport(not_modified=3, kept=[("http://h/gone", "HTTP 404")],
+                  unreached=["http://h/old", "h/loose.html"])
+    short = format_report(r, verbose=False)
+    assert short[1:] == ["Not modified (304): 3", "Kept the previous copy after an error: 1",
+                         "Not reached this run, kept on disk: 2"]
+    full = format_report(r, verbose=True)
+    assert "  http://h/gone: HTTP 404" in full and "  h/loose.html" in full
+    assert format_report(RunReport(), verbose=True) == format_report(RunReport(), False)
+
+
+def test_redirected_record_is_never_sent_to_another_target(server, tmp_path):
+    """A redirect that now leads elsewhere: the new target is fetched in full, never
+    revalidated with the old target's date (it would answer 304 for the wrong page)."""
+    base, script, _ = server
+    log = []
+
+    def since(body):
+        def reply(h):
+            log.append(h.get("If-Modified-Since"))
+            return (304, {}, b"") if h.get("If-Modified-Since") else (
+                200, {**HTML, "last-modified": LM}, body)
+        return reply
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = since(b"<p>new</p>")
+    first = run([f"{base}/old"], tmp_path)
+    script["/old"] = (301, {"location": "/other"}, b"")
+    script["/other"] = since(b"<p>other</p>")
+    log.clear()
+    res = run_update([f"{base}/old"], tmp_path, again(first, base, tmp_path))
+    host = tmp_path / base.split("//")[1]
+    assert log == [None] and res.kept == []
+    assert (host / "other.html").read_bytes() == b"<p>other</p>"
+    assert (host / "new.html").read_bytes() == b"<p>new</p>"  # untouched, not reached
+
+
+def test_seed_with_userinfo_updates_its_own_file(server, tmp_path):
+    """The manifest drops user:password@; the update still finds the file it recorded."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = validated('"a1"', b"<p>a v1</p>")
+    auth = base.replace("http://", "http://u:p@")
+    first = run([f"{auth}/a"], tmp_path)
+    script["/a"] = validated('"a2"', b"<p>a v2</p>")
+    res = run_update([f"{auth}/a"], tmp_path, again(first, base, tmp_path))
+    host = tmp_path / base.split("//")[1]
+    assert sorted(os.listdir(host)) == ["a.html"] and res.files_downloaded == first.files_downloaded
+    assert (host / "a.html").read_bytes() == b"<p>a v2</p>"
+
+
+def test_edited_manifest_never_chooses_where_a_page_is_written(server, tmp_path):
+    from dograpper.lib.manifest import Manifest, ManifestEntry
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, {**HTML, "etag": '"a2"'}, b"<p>page a</p>")
+    (tmp_path / "notes.txt").write_bytes(b"my own notes")
+    entry = dict(size_bytes=1, etag='"a1"', status=200, content_type="text/html")
+    previous = Manifest(base, "", {
+        "x": ManifestEntry(url=f"{base}/a", local_path="notes.txt", **entry),
+        "y": ManifestEntry(url="http://[bad", local_path="notes.txt", **entry)})
+    res = run_update([f"{base}/a"], tmp_path, previous, exts="html,txt")
+    assert (tmp_path / "notes.txt").read_bytes() == b"my own notes"
+    assert [os.path.basename(f) for f in res.files_downloaded] == ["a.html"]
+
+
+class WireSpy(Fetcher):
+    """Records the headers each GET puts on the wire (robots.txt left out)."""
+
+    def __init__(self, policy):
+        ft = FakeTime()
+        super().__init__(policy, clock=ft.clock, sleep=ft.sleep)
+        self.sent = {}
+
+    def _request(self, key, parts, target, headers):
+        if target != "/robots.txt":
+            self.sent[target] = dict(headers)
+        return super()._request(key, parts, target, headers)
+
+
+def test_seed_redirect_target_is_requested_as_htsmirror_c_requests_it(server, tmp_path):
+    # hts_mirror_check_moved (htsmirror.c:131-325): a page target is a link of the stub
+    # standing for the seed, so the seed is its Referer (back_add gets heap(precedent),
+    # htscore.c:3424-3426), without its login or fragment (htslib.c:1136-1163); a known
+    # non-page target is a fresh link with the seed's parent, the primary link, which sends
+    # no Referer (htsback.c:2332). A start URL's chain keeps Sec-Fetch-Site none.
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    script["/doc"] = (302, {"location": "/f.txt"}, b"")
+    script["/f.txt"] = (200, {"content-type": "text/plain"}, b"t")
+    script["/gone"] = (301, {"location": "/missing"}, b"")
+    policy = build_policy(retries=0)
+    spy = WireSpy(policy)
+    host = base.split("//")[1]
+    res = fetch_url_list([f"http://u:pw@{host}/old#frag", f"{base}/doc", f"{base}/gone"],
+                         str(tmp_path), policy, "html,txt", fetcher=spy)
+    assert sorted(os.path.basename(f) for f in res.files_downloaded) == ["f.txt", "new.html"]
+    new, txt = spy.sent["/new"], spy.sent["/f.txt"]
+    assert new["Referer"] == f"{base}/old"
+    assert (new["Sec-Fetch-Site"], new["Sec-Fetch-Mode"], new["Sec-Fetch-Dest"]) == (
+        "none", "navigate", "document")
+    assert "Referer" not in txt and txt["Sec-Fetch-Site"] == "none"
+    assert "Referer" not in spy.sent["/old"] and "Referer" not in spy.sent["/doc"]
+    # the report names the referrer of the failed request, as htsmirror.c:462-482 logs it
+    assert [e for e in res.report.errors] == [(f"{base}/missing", "HTTP 404", f"{base}/gone")]

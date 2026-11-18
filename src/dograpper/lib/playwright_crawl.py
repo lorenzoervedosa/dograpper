@@ -5,10 +5,14 @@ from dograpper.utils import dep_resolver  # noqa: F401 — triggers ensure_playw
 import os
 import logging
 import time
+from html.parser import HTMLParser
 from urllib.parse import urlparse, urljoin
-from dataclasses import dataclass
-from typing import List, Any
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
 from pathlib import Path
+
+from dograpper.lib.url_filter import UrlFilters
+from dograpper.utils.progress import ProgressReporter
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +23,22 @@ class CrawlResult:
     files_downloaded: List[str]
     errors: List[str]
     files_skipped: int = 0
+    # Saved file -> URL requested for it (never where a redirect led).
+    urls: Dict[str, str] = field(default_factory=dict)
+
+
+class _Hrefs(HTMLParser):
+    """``<a href>`` values of a page saved by an earlier run."""
+
+    def __init__(self):
+        super().__init__()
+        self.hrefs: List[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        href = dict(attrs).get("href") if tag == "a" else None
+        if href:
+            self.hrefs.append(href)
+
 
 def run_playwright_crawl(
     url: str,
@@ -28,6 +48,7 @@ def run_playwright_crawl(
     include_extensions: str = "html,md,txt",
     manifest_data: Any = None,
     seed_urls: List[str] | None = None,
+    filters: UrlFilters | None = None,
 ) -> CrawlResult:
     """Crawl SPAs using playwright.
 
@@ -38,6 +59,9 @@ def run_playwright_crawl(
     `seed_urls` (optional) pre-seeds the crawl queue so the download cascade
     can feed in URLs discovered by llms.txt/sitemap layers, skipping the
     link-graph discovery phase entirely when we already know the targets.
+
+    `filters` (optional) drops the links its --filter rules refuse, recording them
+    in `filters.excluded`.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -54,10 +78,29 @@ def run_playwright_crawl(
             if seed != url:
                 to_visit.append((seed, 0))
     files_downloaded = []
+    urls: Dict[str, str] = {}
     errors = []
     files_skipped = 0
     
     extensions = [ext.strip().lower() for ext in include_extensions.split(',') if ext.strip()]
+    # the queue keeps growing, even when seeded: no total, so no percentage going backwards
+    progress = ProgressReporter("playwright")
+
+    def follow(links, current_url, current_depth):
+        for link in links:
+            parsed_link = urlparse(link)
+            if parsed_link.netloc == base_domain or not parsed_link.netloc:
+                absolute_link = urljoin(current_url, link)
+                
+                # Strip fragments
+                absolute_link = urlparse(absolute_link)._replace(fragment="").geturl()
+                
+                # a link past --depth is dropped later anyway: not a filter decision
+                within_depth = depth == 0 or current_depth < depth
+                if absolute_link not in visited and not (
+                        within_depth and filters is not None
+                        and filters.decide(absolute_link) is False):
+                    to_visit.append((absolute_link, current_depth + 1))
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -94,12 +137,18 @@ def run_playwright_crawl(
                             files_skipped += 1
                             files_downloaded.append(expected_full_path)
                             skip_download = True
+                            # its links still lead on, or the crawl would end here
+                            hrefs = _Hrefs()
+                            with open(expected_full_path, encoding='utf-8', errors='replace') as f:
+                                hrefs.feed(f.read())
+                            follow(hrefs.hrefs, current_url, current_depth)
                         break
                         
             if skip_download:
+                progress.update(done=len(files_downloaded), queued=len(to_visit), last_url=current_url)
                 continue
                 
-            logger.info(f"Downloading: {current_url}")
+            logger.debug(f"Downloading: {current_url}")
             
             try:
                 # Bounded hydration: 10s DOM + 5s selector wait + 500ms grace
@@ -132,33 +181,27 @@ def run_playwright_crawl(
                     f.write(content)
                     
                 files_downloaded.append(full_path)
+                urls[full_path] = current_url
                 
                 # Extract links
                 links = page.evaluate('''() => {
                     return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
                 }''')
-                
-                for link in links:
-                    parsed_link = urlparse(link)
-                    if parsed_link.netloc == base_domain or not parsed_link.netloc:
-                        absolute_link = urljoin(current_url, link)
-                        
-                        # Strip fragments
-                        absolute_link = urlparse(absolute_link)._replace(fragment="").geturl()
-                        
-                        if absolute_link not in visited:
-                            to_visit.append((absolute_link, current_depth + 1))
+                follow(links, current_url, current_depth)
                             
             except Exception as e:
                 logger.error(f"Error crawling {current_url}: {e}")
                 errors.append(f"Error crawling {current_url}: {e}")
+            progress.update(done=len(files_downloaded), queued=len(to_visit), last_url=current_url)
                 
         browser.close()
+    progress.finish()
         
     return CrawlResult(
         success=True,
         output_dir=output_dir,
         files_downloaded=files_downloaded,
         errors=errors,
-        files_skipped=files_skipped
+        files_skipped=files_skipped,
+        urls=urls,
     )

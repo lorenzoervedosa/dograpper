@@ -3,7 +3,7 @@ name: Feature request
 about: Sugerir uma melhoria ou nova capacidade
 title: "feat: "
 labels: enhancement
-assignees: lorenzobrasil
+assignees: lorenzoervedosa
 ---
 
 ## Problema / motivação

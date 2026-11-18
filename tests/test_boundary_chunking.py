@@ -2,6 +2,7 @@
 
 import pytest
 from dograpper.lib.chunker import _split_text_by_words, _group_into_blocks
+from dograpper.utils.html_stripper import strip_html
 
 
 class TestGroupIntoBlocks:
@@ -37,6 +38,17 @@ class TestGroupIntoBlocks:
         paragraphs = ["```python\ndef foo():", "mais código", "fim"]
         blocks = _group_into_blocks(paragraphs)
         assert len(blocks) == 1
+
+    def test_longer_fence_not_closed_by_inner_backticks(self):
+        """A four-backtick fence only closes on four or more."""
+        paragraphs = ["````md\n```\ncode", "more\n```", "tail\n````", "Texto."]
+        blocks = _group_into_blocks(paragraphs)
+        assert blocks == ["````md\n```\ncode\n\nmore\n```\n\ntail\n````", "Texto."]
+
+    def test_pre_text_inside_fence_does_not_open_a_pre_block(self):
+        """<pre> inside the code does not pull in the paragraphs after it."""
+        paragraphs = ["```html\n<pre>\n```", "Texto.", "Mais texto."]
+        assert _group_into_blocks(paragraphs) == paragraphs
 
     def test_list_grouped(self):
         """Itens de lista contíguos viram bloco único."""
@@ -148,6 +160,13 @@ class TestBoundaryAwareSplit:
             for c in chunks
         )
         assert code_found, "Bloco de código foi cortado!"
+
+    def test_pre_with_blank_lines_not_split(self):
+        """A <pre> with blank lines stays whole in one sub-chunk."""
+        code = "\n\n".join("    " + " ".join([f"w{i}"] * 20) for i in range(3))
+        text = strip_html(f"<p>Intro.</p><pre>{code}</pre><p>End.</p>")
+        chunks = _split_text_by_words(text, 25)
+        assert any(f"```\n{code}\n```" in c for c, _ in chunks)
 
     def test_list_preserved_across_limit(self):
         """Lista contígua não é cortada."""

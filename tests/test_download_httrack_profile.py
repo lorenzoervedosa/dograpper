@@ -113,7 +113,8 @@ def test_profile_options_tuple_matches_download_and_sync():
 
 
 @pytest.mark.parametrize("flag", ["--no-robots", "--connections=2", "--user-agent=x",
-                                  "--retries=2"])  # explicit, even at its default
+                                  "--retries=2", "--no-parse-scripts",
+                                  "--no-extended-parsing"])  # explicit, even at its default
 def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     res = run(str(tmp_path / "o"), flag)
     assert res.exit_code == 2
@@ -141,6 +142,31 @@ def test_httrack_seeded_fetch_happy_path(ht):
     assert fu.call_args.args[0] == URLS
     assert "Files downloaded: 1" in res.output
     assert "Responses:" in res.output
+
+
+def test_httrack_filter_scopes_discovered_urls_and_reaches_the_fetch(ht):
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", "--filter", "-*/p1",
+              "--filter", "-*/p2", "--filter", "+*/p2")  # any order works off wget
+    assert res.exit_code == 0, res.output
+    assert fu.call_args.args[0] == [u for u in URLS if not u.endswith("/p1")]
+    assert [r[1] for r in fu.call_args.kwargs["filters"].rules] == ["*/p1", "*/p2", "*/p2"]
+    assert "Filtered by --filter: 1" in res.output
+
+
+def test_httrack_manifest_records_the_urls_fetched(ht):
+    out, fu, _ = ht
+
+    def fetched(urls, o, *a, **k):
+        res = _res(o)
+        res.urls = {res.files_downloaded[0]: "http://example.com/p0?lang=en"}
+        return res
+    fu.side_effect = fetched
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: e["url"] for e in manifest["files"].values()} == {
+        "p0.html": "http://example.com/p0?lang=en"}
 
 
 def test_httrack_one_fetcher_shared_by_discovery_and_fetch(ht):
@@ -193,14 +219,103 @@ def test_httrack_fetch_failure_prints_report(ht):
     assert "Responses:" in res.output
 
 
-def test_httrack_no_discovery_fails_loud_recursive_crawl(tmp_path):
-    out = str(tmp_path / "o")
+def _crawled(out, names=("index.html", "a.html"), **kw):
+    files = []
+    for name in names:
+        files.append(os.path.join(out, name))
+        with open(files[-1], "w") as fh:
+            fh.write("<html><body><p>" + "A" * 300 + "</p></body></html>")
+    return HttrackResult(bool(files), files, 0, RunReport(**kw), False,
+                         {f: "http://example.com/" + os.path.basename(f) for f in files})
+
+
+@pytest.fixture
+def crawl(tmp_path):
+    """Nothing discovered (layers 1+2 empty): patch mirror_site; yield (out, mock)."""
+    out = str(tmp_path / "out")
+    os.makedirs(out)
     with patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
          patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
-         patch(f"{P}.warn_if_old_openssl"):
-        res = run(out, "--downloader", "httrack")
+         patch(f"{P}.mirror_site") as ms, patch(f"{P}.warn_if_old_openssl"):
+        ms.side_effect = lambda u, o, *a, **k: _crawled(o)
+        yield out, ms
+
+
+def test_httrack_no_discovery_runs_the_recursive_crawl(crawl):
+    out, ms = crawl
+    res = run(out, "--downloader", "httrack", "-d", "3", "--filter", "-*/private/*")
+    assert res.exit_code == 0, res.output
+    (url, o, policy, exts), kw = ms.call_args
+    assert (url, o, exts, kw["depth"]) == ("http://example.com", out, "html,md,txt", 3)
+    assert kw["fetcher"] is FakeFetcher.instances[0] and kw["fetcher"].policy is policy
+    assert [r[1] for r in kw["filters"].rules] == ["*/private/*"]
+    assert "Files downloaded: 2" in res.output and "Responses:" in res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: e["url"] for e in manifest["files"].values()} == {
+        "index.html": "http://example.com/index.html", "a.html": "http://example.com/a.html"}
+
+
+@pytest.mark.parametrize("challenged,cause", [
+    (["http://example.com/"], "the site challenged the start URL (likely bot protection)"),
+    ([], "the start URL was blocked by robots.txt, redirected out of scope or failed"),
+])
+def test_httrack_crawl_front_failure_exits_1(crawl, challenged, cause):
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: HttrackResult(
+        False, [], 0, RunReport(challenged=list(challenged)), True)
+    res = run(out, "--downloader", "httrack")
     assert res.exit_code == 1
-    assert "recursive crawl is not implemented yet" in res.output
+    assert cause in res.output and "Downloader profiles" in res.output
+    assert "Responses:" in res.output  # report printed before the error
+
+
+def test_httrack_crawl_of_one_page_fails_loud_playwright(crawl):
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: _crawled(o, names=("index.html",))
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 1
+    assert "Playwright fallback is not implemented yet" in res.output
+
+
+def _updated(out, written=(), kept=("index.html", "a.html")):
+    """An update crawl: `kept` left as they were (304), `written` saved again."""
+    res = _crawled(out, names=(*written, *kept))
+    res.files_downloaded = [f for f in res.files_downloaded
+                            if os.path.basename(f) in written]
+    res.kept = sorted(set(res.urls) - set(res.files_downloaded))
+    res.files_skipped, res.success = len(res.kept), True
+    res.records = {f: {"status": 200, "content_type": "text/html", "etag": '"e"',
+                       "last_modified": None, "redirected": False} for f in res.urls}
+    return res
+
+
+def test_httrack_second_run_is_an_update_of_the_first(crawl):
+    """The manifest a run saves is what the next one revalidates (HTTrack -C2)."""
+    out, ms = crawl
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    assert ms.call_args.kwargs["previous"] is None
+    ms.side_effect = lambda u, o, *a, **k: _updated(o)
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output  # two kept pages are no one-page crawl
+    previous = ms.call_args.kwargs["previous"]
+    assert sorted(e.local_path for e in previous.files.values()) == ["a.html", "index.html"]
+    assert "Files downloaded: 0" in res.output and "Files skipped:    2 (cached)" in res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: (e["status"], e["etag"]) for e in manifest["files"].values()} == {
+        "index.html": (200, '"e"'), "a.html": (200, '"e"')}
+
+
+def test_httrack_update_lists_the_files_it_did_not_reach(crawl):
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: _crawled(o, names=("index.html", "a.html", "b.html"))
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    ms.side_effect = lambda u, o, *a, **k: _updated(o, written=("index.html",), kept=("a.html",))
+    res = CliRunner().invoke(cli, ["-v", "download", "http://example.com", "-o", out,
+                                   "--manifest", out + ".manifest.json", "--downloader", "httrack"])
+    assert res.exit_code == 0, res.output
+    assert "Not reached this run, kept on disk: 1" in res.output
+    assert "    http://example.com/b.html" in res.output
+    assert os.path.exists(os.path.join(out, "b.html"))  # never purged
 
 
 def test_httrack_headless_fails_loud_playwright(ht):
@@ -231,6 +346,21 @@ def test_httrack_config_keys_respected_and_cli_wins(ht, tmp_path):
     assert policy.obey_robots is False
 
 
+def test_httrack_script_scans_on_by_default_and_turned_off_by_flags(ht, tmp_path):
+    # HTTrack -j (parsejava = HTSPARSE_DEFAULT) and -%P (parseall) default on
+    # (htslib.c:5406, 5425); --no-parse-scripts is -j4, --no-extended-parsing -%P0 (or -j8)
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output
+    policy = fu.call_args.args[2]
+    assert (policy.parse_scripts, policy.extended_parsing) == (True, True)
+    cfg = _config(tmp_path, downloader="httrack", **{"no-parse-scripts": False})
+    res = run(out, "--no-parse-scripts", "--no-extended-parsing", config=cfg)
+    assert res.exit_code == 0, res.output
+    policy = fu.call_args.args[2]
+    assert (policy.parse_scripts, policy.extended_parsing) == (False, False)  # CLI wins
+
+
 def test_httrack_invalid_config_value_names_option_and_source(ht, tmp_path):
     out, _, _ = ht
     res = run(out, config=_config(tmp_path, downloader="httrack", connections=0))
@@ -253,6 +383,9 @@ def test_httrack_non_numeric_config_value_is_usage_error(ht, tmp_path):
     ("no-robots", "true", "obey_robots", False),
     ("connections", "3", "connections", 3),          # what `--connections 3` receives
     ("max-conn-rate", 2, "max_conn_rate", 2.0),
+    ("no-parse-scripts", True, "parse_scripts", False),
+    ("no-extended-parsing", "true", "extended_parsing", False),
+    ("no-extended-parsing", "false", "extended_parsing", True),
 ])
 def test_httrack_config_value_converted_like_cli(ht, tmp_path, key, value, attr, expected):
     out, fu, _ = ht
@@ -307,6 +440,11 @@ def test_invalid_cli_bound_is_usage_error(tmp_path):
     assert res.exit_code == 2
 
 
+def _no_crawl(*a, **k):
+    """mirror_site stub for discovery tests: the start URL failed."""
+    return HttrackResult(False, [], 0, RunReport(), True)
+
+
 def _fetcher_with(rules, status=200, **result_kw):
     calls = []
 
@@ -337,9 +475,10 @@ def test_discovery_checks_robots_before_fetching_and_uses_robots_kind(tmp_path):
 
     with patch(f"{P}.Fetcher", lambda policy: f), patch(f"{P}.warn_if_old_openssl"), \
          patch("dograpper.commands.download.fetch_llms_txt", side_effect=llms), \
-         patch("dograpper.commands.download.fetch_sitemap", side_effect=sm):
+         patch("dograpper.commands.download.fetch_sitemap", side_effect=sm), \
+         patch(f"{P}.mirror_site", side_effect=_no_crawl) as ms:
         res = run(str(tmp_path / "o"), "--downloader", "httrack")
-    assert res.exit_code == 1  # nothing discovered
+    assert res.exit_code == 1 and ms.called  # nothing discovered: the crawl (stubbed) ran
     assert seen["ok"] == b"x" and seen["blocked"] is None
     assert seen["extra"] == ("http://example.com/sm.xml",)
     assert [u for u, _, _ in calls] == ["http://example.com/llms.txt"]  # no GET for /blocked
@@ -441,9 +580,10 @@ def test_escape_sequence_in_robots_sitemap_line_never_reaches_output(tmp_path):
                          "Sitemap: http://evil.invalid/\x1b[7mINJECTED\x1b[0m.xml\n"
                          "Sitemap: http://example.com/\x1b[2Jsm.xml\n")
     f, calls = _fetcher_with(rules, status=404)
-    with patch(f"{P}.Fetcher", lambda policy: f), patch(f"{P}.warn_if_old_openssl"):
+    with patch(f"{P}.Fetcher", lambda policy: f), patch(f"{P}.warn_if_old_openssl"), \
+         patch(f"{P}.mirror_site", side_effect=_no_crawl) as ms:
         res = run(str(tmp_path / "o"), "--downloader", "httrack")
-    assert res.exit_code == 1  # nothing discovered
+    assert res.exit_code == 1 and ms.called  # nothing discovered: the crawl (stubbed) ran
     assert "rejecting cross-host candidate" in res.output  # the hint was logged...
     assert "\x1b" not in res.output                         # ...neutralized
     assert "http://example.com/\x1b[2Jsm.xml" in [u for u, _, _ in calls]

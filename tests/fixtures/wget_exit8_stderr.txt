@@ -1,0 +1,39 @@
+--2026-11-17 22:05:03--  http://127.0.0.1:8765/index.html
+Connecting to 127.0.0.1:8765... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 81 [text/html]
+Saving to: ‘out/127.0.0.1:8765/index.html’
+
+     0K                                                       100% 8.30M=0s
+
+2026-11-17 22:05:03 (8.30 MB/s) - ‘out/127.0.0.1:8765/index.html’ saved [81/81]
+
+Loading robots.txt; please ignore errors.
+--2026-11-17 22:05:03--  http://127.0.0.1:8765/robots.txt
+Connecting to 127.0.0.1:8765... connected.
+HTTP request sent, awaiting response... 404 File not found
+2026-11-17 22:05:03 ERROR 404: File not found.
+
+--2026-11-17 22:05:03--  http://127.0.0.1:8765/ok.html
+Connecting to 127.0.0.1:8765... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 3 [text/html]
+Saving to: ‘out/127.0.0.1:8765/ok.html’
+
+     0K                                                       100%  614K=0s
+
+2026-11-17 22:05:03 (614 KB/s) - ‘out/127.0.0.1:8765/ok.html’ saved [3/3]
+
+--2026-11-17 22:05:03--  http://127.0.0.1:8765/missing.html
+Connecting to 127.0.0.1:8765... connected.
+HTTP request sent, awaiting response... 404 File not found
+2026-11-17 22:05:03 ERROR 404: File not found.
+
+--2026-11-17 22:05:03--  http://127.0.0.1:8765/gone2.html
+Connecting to 127.0.0.1:8765... connected.
+HTTP request sent, awaiting response... 404 File not found
+2026-11-17 22:05:03 ERROR 404: File not found.
+
+FINISHED --2026-11-17 22:05:03--
+Total wall clock time: 0.02s
+Downloaded: 2 files, 84 in 0s (5.69 MB/s)

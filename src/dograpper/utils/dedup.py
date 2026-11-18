@@ -4,13 +4,22 @@ Two strategies:
 - exact: MD5 hashing of blocks to eliminate 100% identical duplicates.
 - fuzzy: simhash to identify near-identical blocks (similarity > threshold).
 
-Blocks = text segments separated by blank lines (paragraphs).
+Blocks = text segments separated by blank lines (paragraphs); a fenced code
+block is one block, blank lines included.
+
+Dedup is cross-file: a match only removes a block when no keep rule applies
+(see _keep_reason). The link definitions that end an md page (#115) are never
+removed, and a block is compared with each reference read as its destination,
+so the page-local numbers do not change what matches.
 """
 
 import hashlib
 import re
 import logging
 from dataclasses import dataclass
+
+from .code_fence import split_blocks
+from .html_stripper import DEFINITION, REFERENCE, split_definitions
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +28,12 @@ MIN_BLOCK_WORDS = 10
 
 # Default Hamming distance threshold for fuzzy dedup.
 # Simhash 64-bit: 0 = identical, 64 = completely different.
-# Threshold of 3 works well for version-number variations.
 DEFAULT_HAMMING_THRESHOLD = 3
 
 SIMHASH_BITS = 64
+
+# A token holding a digit: version, date, count, id.
+_NUMBER_TOKEN = re.compile(r"\S*\d\S*")
 
 
 @dataclass
@@ -32,6 +43,12 @@ class DedupStats:
     blocks_removed_exact: int = 0
     blocks_removed_fuzzy: int = 0
     words_removed: int = 0
+    # Blocks that matched an earlier block but were kept by a _keep_reason rule.
+    blocks_kept_same_page: int = 0
+    blocks_kept_leading_token: int = 0
+    blocks_kept_numbers: int = 0
+    # Pages the caller left out of dedup entirely; set by the caller, deduplicate() never sees them.
+    pages_exempt: int = 0
 
     @property
     def blocks_removed(self) -> int:
@@ -66,17 +83,18 @@ def deduplicate(
 
     sorted_paths = sorted(texts.keys())
 
-    seen_exact: set = set()          # MD5 hashes
-    seen_fuzzy: list = []            # (simhash, filepath) tuples
+    seen_fuzzy: list = []            # (simhash, filepath, normalized) tuples
+    first_seen_exact: dict = {}      # hash -> filepath
 
     # Track first-seen for logging
-    first_seen_exact: dict = {}      # hash -> filepath
     first_seen_fuzzy: list = []      # (simhash, filepath) tuples
 
     result_texts: dict = {}
 
     for path in sorted_paths:
-        text = texts[path]
+        text, definitions = split_definitions(texts[path])
+        targets = dict(DEFINITION.fullmatch(line).groups()
+                       for line in definitions.split("\n")) if definitions else {}
         blocks = _split_blocks(text)
         kept_blocks: list = []
 
@@ -88,41 +106,41 @@ def deduplicate(
                 kept_blocks.append(block)
                 continue
 
-            normalized = _normalize(block)
+            normalized = _normalize(_resolve_references(block, targets))
+            kept_by = None  # DedupStats counter of the rule that kept a match
 
             # --- Exact dedup ---
-            removed = False
             if mode in ("exact", "both"):
                 block_hash = hashlib.md5(normalized.encode("utf-8")).hexdigest()
 
-                if block_hash in seen_exact:
+                if block_hash not in first_seen_exact:
+                    first_seen_exact[block_hash] = path
+                elif first_seen_exact[block_hash] == path:
+                    kept_by = "blocks_kept_same_page"
+                else:
                     stats.blocks_removed_exact += 1
                     stats.words_removed += word_count
                     logger.debug(
                         f"[dedup] exact: removed block ({word_count} words) "
                         f"from \"{path}\" — first seen in \"{first_seen_exact[block_hash]}\""
                     )
-                    removed = True
-                else:
-                    seen_exact.add(block_hash)
-                    first_seen_exact[block_hash] = path
-
-            if removed:
-                continue
+                    continue
 
             # --- Fuzzy dedup ---
             if mode in ("fuzzy", "both"):
                 block_simhash = _simhash(normalized)
 
-                is_near_dup = False
                 matched_path = None
-                for existing_hash, existing_path in seen_fuzzy:
-                    if _hamming_distance(block_simhash, existing_hash) <= hamming_threshold:
-                        is_near_dup = True
+                for existing_hash, existing_path, existing_text in seen_fuzzy:
+                    if _hamming_distance(block_simhash, existing_hash) > hamming_threshold:
+                        continue
+                    reason = _keep_reason(path, normalized, existing_path, existing_text)
+                    if reason is None:
                         matched_path = existing_path
                         break
+                    kept_by = kept_by or reason
 
-                if is_near_dup:
+                if matched_path is not None:
                     stats.blocks_removed_fuzzy += 1
                     stats.words_removed += word_count
                     logger.debug(
@@ -130,20 +148,53 @@ def deduplicate(
                         f"from \"{path}\" — similar to block in \"{matched_path}\""
                     )
                     continue
-                else:
-                    seen_fuzzy.append((block_simhash, path))
+                seen_fuzzy.append((block_simhash, path, normalized))
 
+            if kept_by:
+                setattr(stats, kept_by, getattr(stats, kept_by) + 1)
+                logger.debug(f"[dedup] {kept_by}: kept block ({word_count} words) in \"{path}\"")
             kept_blocks.append(block)
 
-        result_texts[path] = "\n\n".join(kept_blocks)
+        result_texts[path] = "\n\n".join(kept_blocks + ([definitions] if definitions else []))
 
     return DedupResult(texts=result_texts, stats=stats)
 
 
+def _keep_reason(path: str, text: str, other_path: str, other_text: str):
+    """Return the DedupStats counter of the rule that keeps normalized block
+    ``text`` of ``path`` although it matches ``other_text`` of ``other_path``,
+    or None when it is a duplicate to remove.
+    """
+    if path == other_path:
+        # Repeats inside one page are page content (sibling list entries,
+        # parameters sharing a description), not cross-page boilerplate.
+        return "blocks_kept_same_page"
+    if _leading_token(text) != _leading_token(other_text):
+        # A different key, tag or parameter name: a different entry whose
+        # body happens to look alike (base:hardcover vs base:hollowbook).
+        return "blocks_kept_leading_token"
+    if text != other_text and _NUMBER_TOKEN.sub("#", text) == _NUMBER_TOKEN.sub("#", other_text):
+        # Only numbers differ, so they are the page's own data: a version
+        # banner (42.5.1 vs 42.17.0), a date, a count.
+        return "blocks_kept_numbers"
+    return None
+
+
+def _leading_token(text: str) -> str:
+    """First token holding a letter or digit, skipping list bullets, pipes and
+    a code fence (```lua), so code blocks are keyed by their first code token."""
+    return next((t for t in text.split()
+                 if re.search(r"\w", t) and not t.startswith("```")), "")
+
+
+def _resolve_references(block: str, targets: dict) -> str:
+    """``block`` with each ``[text][n]`` written ``[text](destination)``, as before #115."""
+    return REFERENCE.sub(lambda m: f"]({targets[m[1]]})" if m[1] in targets else m[0], block)
+
+
 def _split_blocks(text: str) -> list:
-    """Split text into blocks separated by blank lines."""
-    raw_blocks = text.split("\n\n")
-    return [b.strip() for b in raw_blocks if b.strip()]
+    """Split text into blocks separated by blank lines, keeping code blocks whole."""
+    return [b.strip() for b in split_blocks(text) if b.strip()]
 
 
 def _normalize(text: str) -> str:

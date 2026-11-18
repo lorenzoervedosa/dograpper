@@ -12,11 +12,11 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from dograpper.lib.httrack.challenge import is_challenge
+from dograpper.utils.challenge import is_challenge
 from dograpper.lib.httrack import fetcher as fetcher_mod, policy as policy_mod
 from dograpper.lib.httrack.crawl import fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher
-from dograpper.lib.httrack.policy import build_policy, request_headers
+from dograpper.lib.httrack.policy import FetchMeta, build_policy, request_headers
 from dograpper.lib.httrack.robots import NO_RULES
 
 
@@ -275,6 +275,10 @@ def test_request_headers_sent_in_order(server):
                                          scheme="http")
     f.get(base + "/p?q=1", kind="navigate")
     assert len(seen) == 2  # persistent connection reused
+    image = FetchMeta("image", "no-cors", False)
+    f.get(base + "/p?q=1", kind="linked", referer=base + "/", meta=image)
+    assert seen[2][1] == request_headers(f.policy, host, kind="linked", referer=base + "/",
+                                         scheme="http", meta=image)
 
 
 def test_is_challenge_is_linear_on_hostile_bodies():
@@ -695,3 +699,21 @@ def test_non_ascii_and_space_seeds_are_fetched(server):
     assert f.get(base + "/docs/café", kind="navigate").body == b"cafe"
     assert f.get(base + "/a b?q=é", kind="navigate").body == b"ab"
     assert [p for p, _ in seen] == ["/docs/caf%c3%a9", "/a%20b?q=%c3%a9"]
+
+
+def test_conditional_request_sends_validators_first_and_is_not_retried(server):
+    """htsback.c:4266-4280 masks an answered error to a revalidation as a 304 before
+    htsmirror.c's retry switch sees it; the Retry-After gate still holds the queue
+    (deviation, spec 5.6: politeness)."""
+    base, script, seen = server
+    script["/a"] = [(503, {"Retry-After": "5"}, b""), (200, {}, b"ok")]
+    script["/b"] = [(200, {}, b"ok")]
+    f, ft = make(retries=2)
+    v = (("If-None-Match", '"v1"'), ("If-Modified-Since", "Mon, 01 Jan 2024 00:00:00 GMT"))
+    r = f.get(base + "/a", kind="navigate", validators=v)
+    assert (r.status, r.attempts) == (503, 1)
+    assert seen[0][1][:2] == list(v)
+    ft.sleeps.clear()
+    f.get(base + "/b", kind="navigate")
+    assert ft.sleeps[0] == pytest.approx(5.0)
+    assert not any(k.startswith("If-") for k, _ in seen[1][1])

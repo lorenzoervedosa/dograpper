@@ -24,11 +24,8 @@ def is_explicit(ctx: click.Context, name: str) -> bool:
     return isinstance(ctx_obj, dict) and name in ctx_obj.get('CLI_EXPLICIT_PARAMS', ())
 
 
-def load_config(config_path: str, command_name: str, cli_params: dict, ctx: click.Context) -> dict:
-    """
-    Load JSON config, merging it with defaults and CLI parameters.
-    Precedence: CLI flag (explicit) > config JSON > code defaults.
-    """
+def read_config_section(config_path: str, command_name: str) -> dict:
+    """The ``command_name`` section of the JSON config; {} when the file is absent."""
     config_data = {}
     
     if os.path.exists(config_path):
@@ -38,7 +35,15 @@ def load_config(config_path: str, command_name: str, cli_params: dict, ctx: clic
         except json.JSONDecodeError as e:
             raise click.ClickException(f"Invalid JSON in config file {config_path}: {e.msg} (line {e.lineno}, column {e.colno})")
             
-    cmd_config = config_data.get(command_name, {})
+    return config_data.get(command_name, {})
+
+
+def load_config(config_path: str, command_name: str, cli_params: dict, ctx: click.Context) -> dict:
+    """
+    Load JSON config, merging it with defaults and CLI parameters.
+    Precedence: CLI flag (explicit) > config JSON > code defaults.
+    """
+    cmd_config = read_config_section(config_path, command_name)
     final_params = {}
 
     # Params forwarded by a wrapper command (sync) via ctx.invoke lose their

@@ -124,7 +124,9 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - `Accept: text/html,image/png,image/jpeg,image/pjpeg,image/x-xbitmap,image/svg+xml,image/gif;q=0.9,*/*;q=0.1`;
   - `Accept-Language: en, *`;
   - `Connection: keep-alive`;
-  - `Referer` (never https→http).
+  - `Referer` (never https→http), built as HTTrack builds it
+    (`src/htslib.c:1136-1163`): no userinfo, no fragment, host, path and query
+    escaped like the request target. One that does not parse is dropped.
   - `Sec-Fetch-Site/Mode/User/Dest` and `Upgrade-Insecure-Requests` on
     navigations, over HTTPS, exactly when HTTrack's `fetch_meta_sent` would
     send them (`src/htslib.c:873-884`, `1240-1297`). This includes the
@@ -251,6 +253,15 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - It is a static scan; nothing is executed.
   - The URLs it finds go through scope, filters and `--include-extensions`
     like any other link, so assets are still dropped.
+  - Turned off as in HTTrack, with `[httrack]` flags (usage errors under
+    `wget`, like §5.7's): `--no-parse-scripts` is `-j4`, which also stops CSS
+    `url()` / `@import` (one scanner in HTTrack); `--no-extended-parsing` is
+    `-%P0`, the same effect as `-j8`. `-j`'s other bits only switch HTTrack's
+    external parser modules, which 3.51 no longer ships (#122).
+  - Contexts (tags, attribute values, `<script>` / `<style>` bodies) are the
+    ones PR 2's HTML5 tokenizer reads; inside each, HTTrack's byte rules
+    apply. The two differ only on markup HTTrack's byte parser reads apart,
+    such as a `>` inside a quoted event handler.
 - **Scope** (*call*, settling the competing definitions in the code today):
   - **Host:** same host only.
   - **Down-only:** the recursive crawl uses the *directory* of the start URL,
@@ -278,6 +289,12 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     `*[param]`, `*[a-z]`, `*[]`;
   - optional (builder may defer to a later PR): `*[<NN]`/`*[>NN]` size rules
     and `-mime:`.
+  - Shipped by #96 for **both** profiles (`lib/url_filter.py`), ahead of PR 2.
+    Under `wget` the rules also scope `wget --mirror` as
+    `--accept-regex`/`--reject-regex`; a rule order those cannot express is a
+    usage error. PR 2's recursive crawl should reuse the same `UrlFilters`.
+  - **Deviation:** a rule never widens the host scope above (HTTrack's
+    `+other.host/*` crosses hosts).
 - **URL normalization** (HTTrack `-%u`): drop the fragment, collapse `//`,
   sort query keys.
 - **Run limits:** a link cap (default 100,000). When it is reached, the run
@@ -285,17 +302,87 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 
 ### 5.6 Storage and incremental runs (DL-11, DL-12, DL-13)
 
-- **Layout:** as in §3.
+- **Layout:** as in §3. An IPv6 literal host keeps its brackets and its colons
+  become `_`, as in HTTrack (`src/htsname.c:1436`, `1579-1600`; `[` and `]` are
+  legal on NTFS, APFS and ext4). A non-default port is appended as for any
+  host: `http://[::1]:8080/a` → `[__1]:8080/a.html`.
 - **Naming:** a query string adds 4 hex digits of its MD5 to the filename
   (`page.html?x=1` → `page4B54.html`). Collisions get a `-2`, `-3` suffix.
-- **Manifest:** written from the engine's own per-URL records (real URL, final
-  URL, status, content-type, ETag, Last-Modified), not derived from disk
-  paths. `ManifestEntry` gains the missing fields in a backward-compatible
-  way: old manifests still load.
-- **Updates:** revalidate with `If-None-Match` / `If-Modified-Since`. A 304
-  keeps the file.
+  Names are compared case-insensitively, as HTTrack's save-name hash does
+  (`src/htshash.c:65-78`, `strcasecmp`), so `/Page` and `/page` never share
+  a file on NTFS or default APFS. **Deviation:** the fold is Unicode
+  (`str.casefold`), not ASCII-only, so `/Été` and `/été` collide too; both
+  filesystems fold them, and an overwrite spoils the corpus.
+- **HTML extension:** an HTML response replaces any extension HTTrack knows
+  (its MIME table, a dynamic or an HTML-family type: `notes.txt` →
+  `notes.html`) and is appended to an unknown one (`article-1.884291` →
+  `article-1.884291.html`), as `src/htsname.c:1200-1215` does.
+  **Deviation (shortcut):** HTTrack keeps a contested extension when the body's
+  magic bytes prove it (`src/htsname.c:289-321`, `src/htssniff.c`): a real PDF
+  at `/doc.pdf` served as `text/html` stays `doc.pdf`. dograpper does not sniff
+  and names it `doc.html`.
+- **Manifest:** written from the engine's own per-file records, not derived
+  from disk paths: the URL requested, the status, `Content-Type`, `ETag` and
+  `Last-Modified` of the response the file was saved from, and whether that URL
+  reached the file through a redirect. ETag and Last-Modified are kept as HTTrack
+  keeps them: under 64 characters, with the response's `Date` standing for a
+  missing `Last-Modified` (`src/htslib.c:1632-1653`). `ManifestEntry` gains
+  `status`, `content_type` and `redirected` in a backward-compatible way: old
+  manifests still load.
+  - **Deviation:** the final URL of a redirect is not recorded, where HTTrack's
+    cache keeps every hop. It can carry a secret, and the manifest is meant to
+    be shared (README "Incremental"); `redirected` says a chain was taken.
+- **Updates (HTTrack `-C2`).** A run whose `-o` already holds a manifest is an
+  update, as HTTrack switches to `-C2` on a folder with a finished mirror
+  (`src/htscoremain.c:1283-1285`; dograpper saves the manifest only at the end
+  of a run). Each file recorded from a 200 with a validator, still on disk and
+  not empty, is revalidated (`src/htsback.c:2557-2607`, `2414-2492`). A record
+  whose file is not named as its URL would be (an edited manifest) is ignored,
+  so the manifest never chooses where a page is written.
+  - the request starts with `If-None-Match` then `If-Modified-Since`, or the
+    one whose validator exists, right after the request line; every other
+    header, `Accept-Encoding` included, is unchanged (`src/htslib.c:1113-1115`);
+  - **304:** the file stays byte-identical and keeps its record; a page's
+    links are followed from it (`src/htsback.c:4437-4494`);
+  - **any other answer but a 2xx or a redirect** (4xx, 5xx, a challenge): the
+    file is kept the same way, the URL is listed as kept after an error, and
+    the answer is not retried (`src/htsback.c:4266-4280`, masked as a 304
+    before `htsmirror.c`'s retry switch); a kept start URL is no front error;
+  - **a failed transfer** (timeout, connection, decoding): retried, reported as
+    an error, and the file and its record are kept, its links not followed
+    (`src/htsback.c:1307-1321`, `src/htscache.c:200-232`);
+  - **a 2xx** replaces the file and its record;
+  - a file erased or emptied since, or one whose record has no validator, is
+    fetched in full.
+  - **Deviations**, each because dograpper keeps no cache beside the mirror
+    (HTTrack's `hts-cache/`) or to protect the corpus:
+    - A `Retry-After` on a revalidation still holds the whole queue
+      (politeness). HTTrack masks the answer as a 304 first and never sets
+      its gate (`src/htsmirror.c:536-540`).
+    - A challenged start URL still ends the run with exit 1 (§5.4), its copy
+      kept and the crawl stopped there. HTTrack masks the challenge's 403 like
+      any error and goes on.
+    - The target of a redirect is not recorded, so the validators of a file
+      reached through one go to the hop whose file name is that file's (the
+      redirecting URL itself is sent plain, as in HTTrack). HTTrack finds the
+      target by the URL its cache recorded; a redirect that now leads to
+      another URL is fetched in full by both.
+    - A kept page's links are read back from the saved copy, whose links to
+      saved files `-K0` made relative: each is mapped back to the URL the
+      previous manifest recorded for that file, any other link read as
+      written. HTTrack parses the original page from its cache. A file whose URL the manifest withholds (a query
+      off the allowlist) is therefore not reached from a kept page, and is
+      never revalidated. The kept page is not relinked either, where HTTrack
+      writes it again from its cache.
+    - A file an update may keep keeps its name: no other URL takes it, and
+      it is never moved. HTTrack computes names again and renames a file
+      whose name changed (`src/htsback.c:2425-2456`); moving one would break
+      the links of the kept pages.
+    - robots.txt is fetched in full on every run. HTTrack caches and
+      revalidates it too (`src/htsback.c:2396-2400`).
 - **No purge (deviation from HTTrack `-X`, user decision):** local files no
-  longer reachable are listed in the report, not deleted.
+  longer reachable are listed in the report ("Not reached this run, kept on
+  disk"), not deleted.
 
 ### 5.7 Opt-in session features (DL-19 and HTTrack §2.10)
 
@@ -321,10 +408,10 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
      `navigator.userAgent`, and uses both for the crawl.
   4. With `--cookies FILE`, the jar is also saved there for reuse.
 - **Fail loud:**
-  - any `httrack`-only flag (`--user-agent`, `--no-robots`, `--filter`,
-    `--cookies`, `--browser-headers`, `--browser-login` and every tunable in
-    §5.3) combined with `--downloader wget` is a usage error (exit 2, click's
-    convention);
+  - any `httrack`-only flag (`--user-agent`, `--no-robots`, `--cookies`,
+    `--browser-headers`, `--browser-login` and every tunable in §5.3) combined
+    with `--downloader wget` is a usage error (exit 2, click's convention).
+    `--filter` left this list with #96, which made it shared;
   - `--browser-login` without Playwright or without a display exits 1 with the
     fix in the message.
 
@@ -340,6 +427,31 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     is challenged, the run exits 1 under the existing "download / crawl"
     failure row.
   - Otherwise it exits 0, even with per-page errors, which the report shows.
+
+## Known gaps (temporary)
+
+These are not deviations. Each is an HTTrack behavior the profile does not have
+yet and will get; none is approved as a difference from HTTrack.
+
+- **Links found in scripts, stylesheets and by `-%P` are not rewritten
+  (`-K0`).** HTTrack rewrites every link it records, those in a script or a
+  stylesheet too (`src/htsparse.c:3385-3393`; `history.txt:151`, #1616); the profile rewrites the link
+  attributes of HTML pages only, so such a link still points at the site.
+  - The crawl follows them (#122); only offline browsing of those links is
+    affected, not what `pack` reads.
+  - Pending a follow-up under #78.
+
+- **HTTrack's other cache modes and update options** are not in PR 3:
+  - `-C0` (no cache) and `-C1`/`--continue` (trust the cache: no request for a
+    cached file, `src/htsback.c:2497-2556`); with a manifest the profile always
+    acts as `-C2`/`--update`;
+  - `-%s` update hacks (off by default, `src/htsback.c:4281-4395`), `-%n`
+    do-not-recatch (off, `src/htsback.c:2466-2480`, `2688-2694`) and `-%d`
+    `--changes` (off, writes `hts-changes.json`);
+  - a saved file's modification time set to its `Last-Modified`
+    (`src/htscore.c:451-452`, `src/htsback.c:2121-2127`); porting it needs a
+    look at the mtime fast path of `pack --delta` (ADR-0008) first.
+  - Pending a follow-up PR under #78. Evidence: discovery note §2.9.
 
 ## 6. Code layout (proposal; the plan may refine)
 
@@ -374,6 +486,8 @@ README and CHANGELOG.
    `wget --mirror` under the profile.
 3. **Incremental.** Manifest records and conditional revalidation, with the
    previous copy kept on failure.
+   - **Status: implemented (wave 5).** Behavior and deviations in §5.6; the
+     opt-in cache options left are under "Known gaps".
 4. **Playwright under the profile.**
    - Navigations go through `page.route` + `route.fetch()`.
    - A response carrying `cf-mitigated` or challenge markup is aborted

@@ -28,14 +28,19 @@ logger = logging.getLogger(__name__)
 )
 @click.argument('chunks_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True)
 @click.option('--top-k', '-k', type=int, default=5, show_default=True,
-              help="Retrieval depth used to compute hit-rate.")
+              help="How many top-ranked chunks count as a hit for a question. Higher values are more lenient. Default: 5.")
 @click.option('--output', '-o', type=click.Path(), default=None,
-              help="Write the JSON report to this path.")
+              help="Also write the report (k, hit-rate, MRR, per-grade breakdown) as JSON to this file. By default it is only printed.")
 @click.option('--prefix', type=str, default="docs_chunk_", show_default=True,
               help="Chunk filename prefix to load.")
 @click.pass_context
 def eval(ctx, chunks_dir, top_k, output, prefix):
-    """Validate packed context empirically via golden Q&A hit-rate."""
+    """Validate packed context empirically via golden Q&A hit-rate.
+
+    Needs a pack made with `--format jsonl --context-header`. Generates one
+    question per chunk from its heading breadcrumb and reports how often BM25
+    retrieval returns the right chunk in the top K. Offline.
+    """
     chunks = load_chunks(chunks_dir, prefix=prefix)
     if not chunks:
         click.echo(

@@ -2,10 +2,14 @@
 
 import json
 import os
+import re
 import tempfile
+from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
+from dograpper.utils import link_extractor
 from dograpper.utils.link_extractor import (
     LinkRef,
     extract_links,
@@ -219,6 +223,30 @@ def test_word_boundary_link_text_still_annotated():
     assert "Install [-> docs_chunk_01]" in result
 
 
+def test_link_text_preceded_by_word_char_not_annotated():
+    """The left boundary holds too: a word that merely ends in the link text
+    is skipped and the next whole-word occurrence is annotated."""
+    text = "ReInstall the tool, then Install it."
+    links = [LinkRef("a.html", "install.html", "", "Install")]
+    file_to_chunk = {"install.html": "docs_chunk_01"}
+
+    result = annotate_cross_refs(text, links, file_to_chunk)
+    assert result == "ReInstall the tool, then Install [-> docs_chunk_01] it."
+
+
+def test_link_text_inside_dotted_identifier_not_annotated():
+    """A marker never lands inside a dotted identifier (#67:
+    "zombie.characters.AttachedItems [-> docs_chunk_01].AttachedItems"); a
+    sentence-final period still ends the match."""
+    fqn = "java.lang.Object zombie.characters.AttachedItems.AttachedItems"
+    text = f"{fqn}\n\nRead AttachedItems."
+    links = [LinkRef("a.html", "AttachedItems.html", "", "AttachedItems")]
+    file_to_chunk = {"AttachedItems.html": "docs_chunk_01"}
+
+    result = annotate_cross_refs(text, links, file_to_chunk)
+    assert result == f"{fqn}\n\nRead AttachedItems [-> docs_chunk_01]."
+
+
 def test_regex_special_chars_in_link_text_escaped():
     """Link text containing regex-special characters is treated literally."""
     text = "See C++ (advanced) for details."
@@ -227,6 +255,30 @@ def test_regex_special_chars_in_link_text_escaped():
 
     result = annotate_cross_refs(text, links, file_to_chunk)
     assert "C++ (advanced) [-> docs_chunk_01]" in result
+
+
+def _annotate_one(text, link_text, target):
+    link = LinkRef(source_path="a.html", target_path=target, anchor="", link_text=link_text)
+    return annotate_cross_refs(text, [link], {target: "c1"})
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("see [Item](Item.html) now", "see [Item](Item.html) [-> c1] now"),
+    ("see [Item](<Item_(x).html>) now", "see [Item](<Item_(x).html>) [-> c1] now"),
+    ("[docs](https://x.org/wiki/Item) and [Item](Item.html)",
+     "[docs](https://x.org/wiki/Item) and [Item](Item.html) [-> c1]"),
+    ("plain Item text", "plain Item [-> c1] text"),
+    # md output's reference links (#115): after the "[n]", never in a definition.
+    ("see [Item][3] now\n\n[3]: Item.html", "see [Item][3] [-> c1] now\n\n[3]: Item.html"),
+    ("see this\n\n[1]: https://x.org/wiki/Item", "see this\n\n[1]: https://x.org/wiki/Item"),
+])
+def test_marker_follows_a_markdown_link_and_never_enters_its_destination(text, expected):
+    assert _annotate_one(text, "Item", "Item.html") == expected
+
+
+def test_marker_never_enters_a_reference_label():
+    assert _annotate_one("see [x][3] and 3 more\n\n[3]: x.html", "3", "Item.html") == (
+        "see [x][3] and 3 [-> c1] more\n\n[3]: x.html")
 
 
 # ---------------------------------------------------------------------------
@@ -333,3 +385,101 @@ def test_cross_refs_summary_line():
         assert result.exit_code == 0
         assert "Cross-refs:" in result.output
         assert "cross_refs.json" in result.output
+
+
+# Issue #67 repro: the page that holds the link is not the first place its
+# text appears in the chunk, and its text also appears in metadata ("Item.html").
+_REPRO_PAGES = [
+    ("Item.html", "<html><body><main><h1>Item</h1><p>The Item class represents "
+                  "an inventory item with a weight and a name field.</p></main></body></html>"),
+    ("z_guide.html", '<html><body><main><h1>Guide</h1><p>To pick something up, call '
+                     'the getter on <a href="Item.html">Item</a> and check the weight '
+                     'first.</p></main></body></html>'),
+]
+
+
+def _pack_repro(d, fmt, *extra):
+    input_dir = os.path.join(d, 'input')
+    os.makedirs(input_dir)
+    _create_html_files(input_dir, _REPRO_PAGES)
+    output_dir = os.path.join(d, 'out')
+    result = CliRunner().invoke(
+        pack, [input_dir, '-o', output_dir, '--format', fmt, '--cross-refs', *extra])
+    assert result.exit_code == 0, result.output
+    with open(os.path.join(output_dir, f'docs_chunk_01.{fmt}'), encoding='utf-8') as f:
+        return f.read()
+
+
+@pytest.mark.parametrize("extra", [(), ("--context-header",)])
+def test_cross_refs_jsonl_annotates_only_the_linking_record(extra):
+    """The marker goes into the content of the record that holds the link,
+    never into id/source or another record (#67)."""
+    with tempfile.TemporaryDirectory() as d:
+        text = _pack_repro(d, 'jsonl', *extra)
+
+    records = [json.loads(line) for line in text.splitlines()]
+    assert [(r["id"], r["source"]) for r in records] == [
+        ("01_Item.html", "Item.html"), ("01_z_guide.html", "z_guide.html")]
+    item, guide = records
+    assert "[-> " not in item["content"]
+    assert "call the getter on Item [-> docs_chunk_01] and check" in guide["content"]
+    assert text.count("[-> ") == 1
+
+
+@pytest.mark.parametrize("fmt", ["md", "txt"])
+@pytest.mark.parametrize("extra", [(), ("--context-header",)])
+def test_cross_refs_text_formats_annotate_only_the_linking_page(fmt, extra):
+    """md/txt: the file index, source separators and context headers stay
+    intact; only the linking page's content gets the marker (#67)."""
+    with tempfile.TemporaryDirectory() as d:
+        text = _pack_repro(d, fmt, *extra)
+
+    assert "- Item.html (15 words)" in text
+    # md writes the link (#87); the marker follows it instead of entering its label.
+    link = {"md": "[Item][1]", "txt": "Item"}[fmt]
+    assert f"call the getter on {link} [-> docs_chunk_01] and check" in text
+    assert text.count("[-> ") == 1
+    if fmt == "md":
+        assert text.endswith("first.\n\n[1]: Item.html")
+
+
+def test_cross_refs_compile_one_pattern_per_distinct_link_text(monkeypatch):
+    """Hundreds of pages sharing link texts compile one pattern per distinct
+    text, not one per link per record (#67: a ~1,900-page corpus did not
+    finish in 10 minutes)."""
+    compiled = []
+
+    def counting_compile(pattern, *args):
+        compiled.append(pattern)
+        return re.compile(pattern, *args)
+
+    monkeypatch.setattr(link_extractor, "re",
+                        SimpleNamespace(compile=counting_compile, escape=re.escape))
+
+    n_pages, n_targets, links_per_page = 300, 20, 5
+    specs = [(f"t{t:02d}.html", f"<html><body><main><p>Target{t:02d} body</p></main></body></html>")
+             for t in range(n_targets)]
+    for i in range(n_pages):
+        targets = [(i + j) % n_targets for j in range(links_per_page)]
+        links = " ".join(f'<a href="t{t:02d}.html">Target{t:02d}</a>' for t in targets)
+        specs.append((f"p{i:03d}.html", f"<html><body><main><p>Page {i} links {links}</p></main></body></html>"))
+
+    with tempfile.TemporaryDirectory() as d:
+        input_dir = os.path.join(d, 'input')
+        os.makedirs(input_dir)
+        _create_html_files(input_dir, specs)
+        output_dir = os.path.join(d, 'out')
+        result = CliRunner().invoke(pack, [input_dir, '-o', output_dir, '--format', 'jsonl',
+                                           '--cross-refs', '--max-words-per-chunk', '200'])
+        assert result.exit_code == 0, result.output
+
+        records = []
+        for name in sorted(os.listdir(output_dir)):
+            if name.endswith('.jsonl'):
+                with open(os.path.join(output_dir, name), encoding='utf-8') as f:
+                    records.extend(json.loads(line) for line in f)
+
+    pages = [r for r in records if r["source"].startswith("p")]
+    assert len(pages) == n_pages
+    assert all(r["content"].count("[-> ") == links_per_page for r in pages)
+    assert len(compiled) <= n_targets

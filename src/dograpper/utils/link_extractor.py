@@ -5,6 +5,7 @@ mapping chunks to their outgoing/incoming references, and optionally
 annotates plain text with chunk pointers.
 """
 
+import functools
 import json
 import logging
 import posixpath
@@ -13,10 +14,16 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import List, Dict
 
+from .html_stripper import DEFINITION
+
 logger = logging.getLogger(__name__)
 
 # Schemes that indicate an external (non-local) link.
 _EXTERNAL_SCHEMES = ("http://", "https://", "mailto:", "javascript:")
+
+# The "](destination)" of a Markdown link, in its two forms: bare (no whitespace,
+# no parentheses) or <...>; or the "][n]" of a reference link, as md output writes (#115).
+_DESTINATION = re.compile(r"\]\((?:<[^>\n]*>|[^\s()]*)\)|\]\[\d+\]")
 
 
 @dataclass
@@ -158,6 +165,23 @@ def build_cross_ref_index(
     return result
 
 
+@functools.lru_cache(maxsize=None)
+def _link_text_pattern(link_text: str) -> re.Pattern:
+    """Compile the match for *link_text* once per run: a large corpus repeats
+    the same link texts across thousands of records, past ``re``'s own cache.
+
+    The text matches only when not adjacent to a word character on either
+    side, nor joined to one by a dot, so a marker never lands inside a word
+    ("Installation") or a dotted identifier ("pkg.Items.Items"); a plain \\b
+    fails here because link text often starts/ends in punctuation, e.g.
+    "C++". The left checks are lookbehinds placed *after* the literal, so the
+    pattern starts with the literal and the regex engine scans for it as a
+    prefix instead of testing every position.
+    """
+    lt = re.escape(link_text)
+    return re.compile(lt + r"(?<!\w" + lt + r")(?<!\w\." + lt + r")(?!\w)(?!\.\w)")
+
+
 def annotate_cross_refs(
     text: str,
     links: List[LinkRef],
@@ -171,9 +195,14 @@ def annotate_cross_refs(
     avoid false positives.  Unresolved links are skipped.
 
     The match is word-boundary-aware: ``link_text`` is only annotated
-    when it is not adjacent to a word character, so short link text
-    (e.g. "Install") does not corrupt an unrelated word that merely
-    contains it as a substring (e.g. "Installation").
+    when it is not adjacent to a word character, nor joined to one by a
+    dot, so short link text (e.g. "Install") does not corrupt an unrelated
+    word that merely contains it as a substring (e.g. "Installation") or
+    a dotted identifier (e.g. "pkg.AttachedItems.AttachedItems").
+
+    In md text a match that labels a link ``[text](url)`` or ``[text][n]``
+    gets the marker after the link, and a match inside a link's destination,
+    its reference or a reference definition line (``[n]: url``) is skipped.
     """
     annotated = set()  # link_text values already processed
 
@@ -186,17 +215,38 @@ def annotate_cross_refs(
         if target_chunk is None:
             continue
 
-        marker = f"{lt} [-> {target_chunk}]"
-        # Replace only the first occurrence, and only when not adjacent to
-        # a word character on either side (a plain \b fails here because
-        # link text often starts/ends in punctuation, e.g. "C++").
-        pattern = re.compile(r"(?<!\w)" + re.escape(lt) + r"(?!\w)")
-        new_text = pattern.sub(lambda m: marker, text, count=1)
-        if new_text != text:
-            text = new_text
+        for m in _link_text_pattern(lt).finditer(text):
+            if _in_definition(text, m.start()):
+                continue
+            end = m.end()
+            destination = _DESTINATION.match(text, end)
+            if destination:
+                end = destination.end()
+            elif _in_destination(text, m.start()):
+                continue
+            text = f"{text[:end]} [-> {target_chunk}]{text[end:]}"
             annotated.add(lt)
+            break
 
     return text
+
+
+def _in_destination(text: str, pos: int) -> bool:
+    """True when ``pos`` falls inside a link destination or reference. Neither
+    spans lines, so the search stops at the line start."""
+    line_start = text.rfind("\n", 0, pos) + 1
+    start = max(text.rfind("](", line_start, pos), text.rfind("][", line_start, pos))
+    if start < 0:
+        return False
+    destination = _DESTINATION.match(text, start)
+    return destination is not None and destination.end() > pos
+
+
+def _in_definition(text: str, pos: int) -> bool:
+    """True when ``pos`` falls on a reference definition line."""
+    end = text.find("\n", pos)
+    return DEFINITION.fullmatch(text, text.rfind("\n", 0, pos) + 1,
+                                len(text) if end < 0 else end) is not None
 
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,35 @@
+import io
 import os
 import json
 import tempfile
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 import click
+import pytest
 
 from dograpper.lib.wget_mirror import run_wget_mirror
 from dograpper.lib.spa_detector import is_spa
 from dograpper.lib.manifest import Manifest, ManifestEntry, load_manifest, save_manifest, merge_manifests
 from dograpper.lib.config_loader import load_config
+
+
+def _wget_proc(stderr="", returncode=0):
+    """A running wget as subprocess.Popen returns it: stderr is read line by line."""
+    proc = MagicMock(returncode=returncode,
+                     stderr=io.StringIO(stderr) if isinstance(stderr, str) else stderr)
+    proc.__enter__.return_value = proc
+    proc.__exit__.return_value = False
+    return proc
+
+
+@contextmanager
+def _fake_wget(stderr="", returncode=0):
+    """wget stand-in: the --version probe passes, then every run streams `stderr` and
+    exits with `returncode`. Yields the Popen mock, which records each command."""
+    with patch('subprocess.run'), \
+            patch('subprocess.Popen', side_effect=lambda *a, **kw: _wget_proc(stderr, returncode)) as popen:
+        yield popen
+
 
 def test_merge_manifests_basic():
     old = Manifest("http://localhost", "2020", {
@@ -47,15 +69,10 @@ def test_merge_manifests_none_old():
     assert "A.md" in merged.files
 
 def test_wget_mirror_command_build():
-    with patch('subprocess.run') as mock_run:
-        # Mock successful wget
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-        
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out', depth=2, delay=1500, include_extensions="html,md")
         
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
         assert os.path.basename(args[0]) == "wget"
         assert "--mirror" in args
         assert "--timestamping" not in args
@@ -67,11 +84,9 @@ def test_wget_mirror_command_build():
         assert "http://example.com" in args
 
 def test_wget_incremental_flag():
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out', incremental=True)
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
 
         assert os.path.basename(args[0]) == "wget"
         assert "--timestamping" in args
@@ -81,22 +96,16 @@ def test_wget_incremental_flag():
         assert "--convert-links" in args
 
 def test_wget_non_incremental():
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out', incremental=False)
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
         
         assert "--mirror" in args
         assert "--timestamping" not in args
 
 def test_wget_urls_uses_input_file_and_flags():
     from dograpper.lib.wget_mirror import BROWSER_UA, run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-
+    with _fake_wget() as mock_popen:
         with tempfile.TemporaryDirectory() as d:
             res = run_wget_urls(
                 ["https://site.io/a", "https://site.io/b"],
@@ -108,7 +117,7 @@ def test_wget_urls_uses_input_file_and_flags():
 
         # Last call must be the actual wget invocation (not the --version probe).
         # Find the call whose argv starts with wget (basename check tolerates full paths).
-        wget_calls = [c for c in mock_run.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget" and "-i" in c[0][0]]
+        wget_calls = [c for c in mock_popen.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget" and "-i" in c[0][0]]
         assert wget_calls, "no wget -i invocation captured"
         args = wget_calls[-1][0][0]
 
@@ -136,32 +145,19 @@ def test_wget_urls_uses_input_file_and_flags():
 
 def test_wget_urls_empty_list_noops():
     from dograpper.lib.wget_mirror import run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
+    with _fake_wget() as mock_popen:
         with tempfile.TemporaryDirectory() as d:
             res = run_wget_urls([], d)
         assert res.success
         assert res.files_downloaded == []
         # No wget call should have been made at all
-        wget_calls = [c for c in mock_run.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget"]
+        wget_calls = [c for c in mock_popen.call_args_list if c[0] and os.path.basename(c[0][0][0]) == "wget"]
         assert not wget_calls
 
 
 def test_wget_urls_partial_success_on_exit_8():
     from dograpper.lib.wget_mirror import run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        def side_effect(*args, **kwargs):
-            result = MagicMock()
-            # first call is --version probe, subsequent are the real run
-            if "--version" in args[0]:
-                result.returncode = 0
-            else:
-                result.returncode = 8
-            result.stdout = ""
-            result.stderr = ""
-            return result
-        mock_run.side_effect = side_effect
-
+    with _fake_wget(returncode=8):
         with tempfile.TemporaryDirectory() as d:
             res = run_wget_urls(["https://site.io/a"], d)
         assert res.success is True
@@ -170,11 +166,9 @@ def test_wget_urls_partial_success_on_exit_8():
 
 def test_wget_mirror_passes_browser_ua():
     from dograpper.lib.wget_mirror import BROWSER_UA
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out')
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
 
         assert f"--user-agent={BROWSER_UA}" in args
         assert any(a.startswith("--header=Accept-Language:") for a in args)
@@ -184,6 +178,104 @@ def test_wget_mirror_ua_includes_chrome():
     from dograpper.lib.wget_mirror import BROWSER_UA
     assert "Chrome/" in BROWSER_UA
     assert "Mozilla/5.0" in BROWSER_UA
+
+
+# --- --filter rules on wget --mirror (#96) ---
+
+SEED = "https://pzwiki.net/w/index.php?title=Category:Lua_events"
+
+
+def _wget_accepts(args, url):
+    """wget's own decision for a child link (recur.c download_child): no-parent, then regexes."""
+    import re
+    from urllib.parse import urlsplit
+    if "--no-parent" in args and not urlsplit(url).path.startswith("/w/"):
+        return False
+    regex = {a.split("=", 1)[0]: a.split("=", 1)[1] for a in args if a.startswith("--") and "-regex=" in a}
+    if "--accept-regex" in regex and not re.search(regex["--accept-regex"], url):
+        return False
+    return not ("--reject-regex" in regex and re.search(regex["--reject-regex"], url))
+
+
+@pytest.mark.parametrize("rules", [
+    [],
+    ["-*Special:*", "-*action=*"],
+    ["+pzwiki.net/wiki/On*"],
+    ["-*", "+pzwiki.net/wiki/On*"],
+    ["-*", "+pzwiki.net/wiki/On*", "-*OnTick*"],
+    ["+*", "-*/wiki/Category:*"],
+    ["+pzwiki.net/wiki/*", "-*", "+*/wiki/OnLoad"],
+    ["-*", "-*/w/*", "+*/wiki/On*"],
+])
+def test_wget_filter_args_decide_like_the_rules(rules):
+    """The --accept-regex/--reject-regex wget gets accept exactly what the rules accept,
+    and what no rule matches stays under --no-parent's scope (the start directory)."""
+    from dograpper.lib.url_filter import UrlFilters
+    from dograpper.lib.wget_mirror import url_filter_args
+    filters = UrlFilters(rules)
+    args = url_filter_args(filters, SEED)
+    assert ("--no-parent" in args) is not any(r.startswith("+") for r in rules)
+    for url in ["https://pzwiki.net/wiki/OnTick", "https://pzwiki.net/wiki/OnLoad",
+                "https://pzwiki.net/wiki/Category:En", "https://pzwiki.net/wiki/Other",
+                "https://pzwiki.net/w/index.php?title=Special:Random",
+                "https://pzwiki.net/w/index.php?title=Category:Lua_events&action=edit",
+                "https://pzwiki.net/w/load.php?modules=site"]:
+        verdict = filters.decide(url)
+        expected = url.startswith("https://pzwiki.net/w/") if verdict is None else verdict
+        assert _wget_accepts(args, url) is expected, url
+
+
+def test_wget_filter_args_refuse_a_plus_rule_after_a_minus_rule():
+    import re
+    from dograpper.lib.url_filter import UrlFilters
+    from dograpper.lib.wget_mirror import url_filter_args
+    with pytest.raises(ValueError, match=re.escape("'+*/wiki/On*' follows '-*Special:*'")):
+        url_filter_args(UrlFilters(["-*Special:*", "+*/wiki/On*"]), SEED)
+
+
+def test_wget_mirror_counts_only_urls_a_rule_refused(tmp_path):
+    """wget's --rejected-log lists every regex refusal; only those a rule decided count."""
+    from dograpper.lib.url_filter import UrlFilters
+    rows = [
+        ("REGEX", "https%3A//pzwiki.net/wiki/Category%3AEn"),       # refused by -*
+        ("REGEX", "https%3A//pzwiki.net/wiki/Category%3AEn"),       # seen twice, counted once
+        ("PARENT", "https%3A//pzwiki.net/wiki/Other"),              # not a filter decision
+        ("REGEX", "https%3A//pzwiki.net/w/index.php?title=Special%3ARandom"),
+    ]
+
+    def fake_popen(cmd, **kw):
+        log = next(a.split("=", 1)[1] for a in cmd if a.startswith("--rejected-log="))
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("REASON\tU_URL\tU_SCHEME\n")
+            f.writelines(f"{reason}\t{url}\tSCHEME_HTTPS\n" for reason, url in rows)
+        return _wget_proc()
+
+    filters = UrlFilters(["-*", "+pzwiki.net/wiki/On*"])
+    with patch("subprocess.run"), patch("subprocess.Popen", side_effect=fake_popen):
+        res = run_wget_mirror(SEED, str(tmp_path), filters=filters)
+    assert res.success
+    assert filters.excluded == {"https://pzwiki.net/wiki/Category:En",
+                                "https://pzwiki.net/w/index.php?title=Special:Random"}
+    assert not list(tmp_path.iterdir())  # the log is not left in the output
+
+
+def test_wget_mirror_removes_the_rejected_log_when_wget_cannot_run(tmp_path, monkeypatch):
+    from dograpper.lib.url_filter import UrlFilters
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+
+    with patch("subprocess.run"), patch("subprocess.Popen", side_effect=OSError("exec failed")):
+        with pytest.raises(OSError):
+            run_wget_mirror(SEED, str(tmp_path / "out"), filters=UrlFilters(["-*Special:*"]))
+    assert not list(tmp_path.glob("*.rejected.tsv"))
+
+
+def test_wget_mirror_without_rules_adds_no_rejected_log():
+    from dograpper.lib.url_filter import UrlFilters
+    with _fake_wget() as mock_popen:
+        run_wget_mirror('http://example.com', './out', filters=UrlFilters())
+        args = mock_popen.call_args[0][0]
+    assert "--no-parent" in args
+    assert not any(a.startswith(("--rejected-log", "--accept-regex", "--reject-regex")) for a in args)
 
 
 # --- Pretty-URL handling (issue: --accept dropped extensionless URLs) ---
@@ -229,13 +321,9 @@ def test_content_filter_args_empty_is_noop():
 def test_wget_mirror_default_extensions_reject_not_accept():
     """Regression: a default mirror must reject binaries (denylist) so that
     pretty URLs like .../README and .../01-Test_Name are followed."""
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-
+    with _fake_wget() as mock_popen:
         run_wget_mirror('http://example.com', './out')  # default include_extensions
-        args = mock_run.call_args[0][0]
+        args = mock_popen.call_args[0][0]
 
         assert not any(a.startswith("--accept=") for a in args)
         assert any(a.startswith("--reject=") and "png" in a for a in args)
@@ -243,16 +331,12 @@ def test_wget_mirror_default_extensions_reject_not_accept():
 
 def test_wget_urls_default_extensions_reject_not_accept():
     from dograpper.lib.wget_mirror import run_wget_urls
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = ""
-        mock_run.return_value.stderr = ""
-
+    with _fake_wget() as mock_popen:
         with tempfile.TemporaryDirectory() as d:
             run_wget_urls(["https://site.io/a"], d)  # default include_extensions
 
         wget_calls = [
-            c for c in mock_run.call_args_list
+            c for c in mock_popen.call_args_list
             if c[0] and os.path.basename(c[0][0][0]) == "wget" and "-i" in c[0][0]
         ]
         assert wget_calls
@@ -404,6 +488,33 @@ def test_playwright_skips_cached():
         del sys.modules['playwright']
         del sys.modules['playwright.sync_api']
 
+def test_playwright_follows_the_links_of_a_cached_page():
+    """A page skipped as cached still leads to the pages it links to; otherwise
+    an incremental crawl would stop at its first cached page."""
+    import sys
+    mock_sync_api = MagicMock()
+    mock_p = mock_sync_api.sync_playwright.return_value.__enter__.return_value
+    mock_page = mock_p.chromium.launch.return_value.new_context.return_value.new_page.return_value
+    mock_page.content.return_value = "<html><body>next</body></html>"
+    mock_page.evaluate.return_value = []
+    sys.modules['playwright'] = MagicMock()
+    sys.modules['playwright.sync_api'] = mock_sync_api
+    try:
+        m = Manifest("http://target.com", "", {
+            "index.html": ManifestEntry("http://target.com", 100)})
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "index.html"), "w") as f:
+                f.write('<html><body><a href="/next#top">n</a>'
+                        '<a href="http://other.com/x">o</a></body></html>')
+            from dograpper.lib.playwright_crawl import run_playwright_crawl
+            res = run_playwright_crawl("http://target.com", d, manifest_data=m)
+            assert [c.args[0] for c in mock_page.goto.call_args_list] == ["http://target.com/next"]
+            assert res.files_skipped == 1
+    finally:
+        del sys.modules['playwright']
+        del sys.modules['playwright.sync_api']
+
+
 def test_playwright_bounded_hydration_uses_selector_wait():
     """Verify bounded-hydration ordering: goto → wait_for_selector('a[href]') → 500ms grace."""
     import sys
@@ -495,6 +606,35 @@ def test_playwright_crawl_consumes_seed_urls():
         del sys.modules['playwright.sync_api']
 
 
+def test_playwright_crawl_skips_links_the_filters_refuse():
+    import sys
+    from unittest.mock import MagicMock
+    from dograpper.lib.url_filter import UrlFilters
+
+    mock_sync_api = MagicMock()
+    mock_p = mock_sync_api.sync_playwright.return_value.__enter__.return_value
+    mock_page = mock_p.chromium.launch.return_value.new_context.return_value.new_page.return_value
+    mock_page.content.return_value = "<html></html>"
+    mock_page.evaluate.side_effect = [
+        ["http://target.com/wiki/OnTick", "http://target.com/wiki/Category:En#top"],
+        ["http://target.com/wiki/Deeper"],  # beyond --depth: not a filter decision
+    ]
+
+    sys.modules['playwright'] = MagicMock()
+    sys.modules['playwright.sync_api'] = mock_sync_api
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            from dograpper.lib.playwright_crawl import run_playwright_crawl
+            filters = UrlFilters(["-*", "+*/wiki/On*"])
+            run_playwright_crawl("http://target.com/w/start", d, depth=1, filters=filters)
+            visited_urls = [c[0][0] for c in mock_page.goto.call_args_list]
+            assert visited_urls == ["http://target.com/w/start", "http://target.com/wiki/OnTick"]
+            assert filters.excluded == {"http://target.com/wiki/Category:En"}
+    finally:
+        del sys.modules['playwright']
+        del sys.modules['playwright.sync_api']
+
+
 def test_playwright_redownloads_missing():
     import sys
     from unittest.mock import MagicMock
@@ -529,8 +669,43 @@ def test_playwright_redownloads_missing():
         del sys.modules['playwright']
         del sys.modules['playwright.sync_api']
 
+def test_playwright_reports_the_url_of_each_saved_page():
+    """The saved name drops the query; the URL recorded is the one requested,
+    never where a redirect led (#94)."""
+    import sys
+
+    final = {"http://target.com/w/index.php?title=A": "http://target.com/w/index.php?title=A",
+             "http://target.com/old": "http://target.com/new"}
+    mock_sync_api = MagicMock()
+    mock_p = mock_sync_api.sync_playwright.return_value.__enter__.return_value
+    mock_page = mock_p.chromium.launch.return_value.new_context.return_value.new_page.return_value
+    mock_page.content.return_value = "<html><body>content</body></html>"
+    mock_page.evaluate.return_value = []
+
+    def goto(url, **kwargs):
+        mock_page.url = final[url]
+    mock_page.goto.side_effect = goto
+
+    sys.modules['playwright'] = MagicMock()
+    sys.modules['playwright.sync_api'] = mock_sync_api
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            from dograpper.lib.playwright_crawl import run_playwright_crawl
+            res = run_playwright_crawl("http://target.com/w/index.php?title=A", d,
+                                       seed_urls=["http://target.com/old"])
+            assert res.urls == {
+                os.path.join(d, "target.com", "w/index.php.html"):
+                    "http://target.com/w/index.php?title=A",
+                os.path.join(d, "target.com", "old.html"): "http://target.com/old",
+            }
+    finally:
+        del sys.modules['playwright']
+        del sys.modules['playwright.sync_api']
+
+
 from click.testing import CliRunner
 from dograpper.commands.download import download
+from dograpper.cli import cli
 
 def test_download_wget_success():
     runner = CliRunner()
@@ -626,6 +801,111 @@ def test_download_incremental_second_run():
                 args2 = mock_wget.call_args[1]
                 assert args2.get('incremental', False) is True
 
+def test_download_manifest_inside_output_does_not_list_itself():
+    from dograpper.lib.wget_mirror import WgetResult
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        paths = [os.path.join(d, "h.example", f"p{i}.html") for i in range(2)]
+        os.makedirs(os.path.dirname(paths[0]))
+        for p in paths:
+            with open(p, "w") as f:
+                f.write("1")
+        manifest_path = os.path.join(d, "state.json")
+        with patch('dograpper.commands.download.run_wget_mirror',
+                   return_value=WgetResult(True, d, paths, [], 0)), \
+                patch('dograpper.commands.download.is_spa', return_value=False):
+            for _ in range(2):
+                res = runner.invoke(download, ['http://h.example', '-o', d,
+                                               '--manifest', manifest_path])
+                assert res.exit_code == 0, res.output
+        assert sorted(e.local_path for e in load_manifest(manifest_path).files.values()) == [
+            "h.example/p0.html", "h.example/p1.html"]
+
+# --- where the manifest lives (#95) ---
+
+def _download_from(cwd, *args, config=None):
+    """`download` run from ``cwd`` with wget --mirror mocked over two pages in ``cwd/../dl``."""
+    from dograpper.lib.wget_mirror import WgetResult
+    dl = os.path.join(os.path.dirname(cwd), "dl")
+    paths = [os.path.join(dl, "h.example", f"p{i}.html") for i in range(2)]
+    os.makedirs(os.path.dirname(paths[0]), exist_ok=True)
+    for p in paths:
+        if not os.path.exists(p):
+            with open(p, "w") as f:
+                f.write("1")
+    pre = ["--config", config] if config else []
+    old = os.getcwd()
+    os.chdir(cwd)
+    try:
+        # paths as run_wget_mirror lists them: under -o as given
+        listed = [os.path.relpath(p, cwd) for p in paths]
+        with patch('dograpper.commands.download.run_wget_mirror',
+                   return_value=WgetResult(True, "../dl", listed, [], 0)) as wget, \
+                patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+                patch('dograpper.commands.download.is_spa', return_value=False):
+            res = CliRunner().invoke(cli, [*pre, 'download', 'http://h.example', '-o', '../dl', *args])
+    finally:
+        os.chdir(old)
+    assert res.exit_code == 0, res.output
+    return res, wget
+
+
+def test_download_default_manifest_lives_in_output_not_cwd(tmp_path):
+    (tmp_path / "cwd").mkdir()
+    res, _ = _download_from(str(tmp_path / "cwd"))
+    assert os.listdir(tmp_path / "cwd") == []
+    assert (tmp_path / "dl" / ".dograpper-manifest.json").is_file()
+    assert "Manifest:         ../dl/.dograpper-manifest.json" in res.output
+
+
+def test_download_rerun_from_another_cwd_is_incremental(tmp_path):
+    for d in ("one", "two"):
+        (tmp_path / d).mkdir()
+    _download_from(str(tmp_path / "one"))
+    res, wget = _download_from(str(tmp_path / "two"))
+    assert wget.call_args.kwargs["incremental"] is True
+    assert "Files skipped:    2 (cached)" in res.output
+
+
+def test_download_relative_manifest_resolves_against_output_absolute_as_is(tmp_path):
+    (tmp_path / "cwd").mkdir()
+    _download_from(str(tmp_path / "cwd"), "--manifest", "state.json")
+    assert (tmp_path / "dl" / "state.json").is_file()
+    absolute = tmp_path / "elsewhere.json"
+    _download_from(str(tmp_path / "cwd"), "--manifest", str(absolute))
+    assert absolute.is_file()
+    assert os.listdir(tmp_path / "cwd") == []
+
+
+def test_download_config_manifest_resolves_against_output_and_cli_wins(tmp_path):
+    (tmp_path / "cwd").mkdir()
+    config = tmp_path / "c.json"
+    config.write_text(json.dumps({"download": {"manifest": "cfg.json"}}))
+    _download_from(str(tmp_path / "cwd"), config=str(config))
+    assert (tmp_path / "dl" / "cfg.json").is_file()
+    _download_from(str(tmp_path / "cwd"), "--manifest", "cli.json", config=str(config))
+    assert (tmp_path / "dl" / "cli.json").is_file()
+
+
+def test_download_ignores_a_manifest_at_the_old_cwd_default_with_a_note(tmp_path):
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    old = cwd / ".dograpper-manifest.json"
+    old.write_text(json.dumps({"base_url": "http://h.example", "last_run": "", "files": {
+        "p0.html": {"url": "http://h.example/p0", "size_bytes": 1,
+                    "local_path": "h.example/p0.html"}}}))
+    before = old.read_text()
+    res, wget = _download_from(str(cwd))
+    assert wget.call_args.kwargs["incremental"] is False  # not read
+    assert ("Note: ignoring .dograpper-manifest.json in the current directory (the old "
+            "default location); the manifest is now kept in -o: "
+            "../dl/.dograpper-manifest.json") in res.stderr
+    assert old.read_text() == before
+    assert (tmp_path / "dl" / ".dograpper-manifest.json").is_file()
+    res, _ = _download_from(str(cwd))  # once the new one exists, no note
+    assert "Note:" not in res.stderr
+
+
 def test_download_wget_not_installed():
     runner = CliRunner()
     from dograpper.lib.wget_mirror import run_wget_mirror
@@ -636,3 +916,446 @@ def test_download_wget_not_installed():
             res = runner.invoke(download, ['http://example.com', '-o', d])
             assert res.exit_code != 0
             assert "wget is required" in res.output
+
+
+# --- failed URLs on wget exit 8 (issue #97) ---
+
+WGET_STDERR_FIXTURE = os.path.join(
+    os.path.dirname(__file__), "fixtures", "wget_exit8_stderr.txt")
+
+
+def _wget_stderr():
+    with open(WGET_STDERR_FIXTURE, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_parse_failed_urls_extracts_url_and_status_skipping_robots():
+    from dograpper.lib.wget_mirror import parse_wget_log
+    failed, _ = parse_wget_log(_wget_stderr())
+    assert [(f.url, f.status) for f in failed] == [
+        ("http://127.0.0.1:8765/missing.html", 404),
+        ("http://127.0.0.1:8765/gone2.html", 404),
+    ]
+
+
+def test_parse_failed_urls_ignores_success_only_output():
+    from dograpper.lib.wget_mirror import parse_wget_log
+    assert parse_wget_log("--2026-11-17 22:05:03--  http://h/ok\n200 OK\n")[0] == []
+
+
+def _run_exit_8(fn, first_arg):
+    with _fake_wget(_wget_stderr(), returncode=8), \
+            tempfile.TemporaryDirectory() as d:
+        return fn(first_arg, d)
+
+
+def test_both_wget_paths_record_failures_on_exit_8():
+    from dograpper.lib.wget_mirror import run_wget_mirror, run_wget_urls
+    for fn, arg in ((run_wget_mirror, "http://127.0.0.1:8765/"),
+                    (run_wget_urls, ["http://127.0.0.1:8765/"])):
+        res = _run_exit_8(fn, arg)
+        assert res.success is True
+        assert [f.status for f in res.failed] == [404, 404]
+
+
+# --- URL of each saved file, from wget's log (issue #94) ---
+#
+# Real wget 1.21.4 stderr (LANGUAGE=C, C.UTF-8 locale) against a local server:
+# --mirror on a first run, and a second `-i` run where a 304 keeps notes.txt.
+
+def _fixture(name):
+    with open(os.path.join(os.path.dirname(__file__), "fixtures", name), encoding="utf-8") as f:
+        return f.read()
+
+
+H = "http://127.0.0.1:8766"
+O = "out/127.0.0.1:8766"
+
+
+def test_parse_wget_log_pairs_each_saved_file_with_the_url_fetched():
+    from dograpper.lib.wget_mirror import parse_wget_log
+    failed, saved = parse_wget_log(_fixture("wget_mirror_stderr.txt"))
+    assert saved == {
+        f"{O}/index.html": f"{H}/",
+        f"{O}/wiki/Category:En.html": f"{H}/wiki/Category:En",  # .html added by -E
+        f"{O}/w/index.php?title=Category:Lua&pagefrom=On&Off.html":
+            f"{H}/w/index.php?title=Category:Lua&pagefrom=On%26Off",
+        f"{O}/old.html": f"{H}/old",  # the URL requested, not the redirect target
+        f"{O}/a b.html": f"{H}/a%20b.html",
+        f"{O}/notes.txt": f"{H}/notes.txt",
+        f"{O}/dir/index.html": f"{H}/dir/",
+        f"{O}/caf\u00e9.html": f"{H}/caf%C3%A9",
+        f"{O}/it's.html": f"{H}/it's",
+    }
+    assert [(f.url, f.status) for f in failed] == [(f"{H}/missing.html", 404)]
+
+
+def test_parse_wget_log_keeps_files_wget_found_up_to_date():
+    from dograpper.lib.wget_mirror import parse_wget_log
+    _, saved = parse_wget_log(_fixture("wget_urls_stderr.txt"))
+    assert saved == {
+        f"{O}/wiki/Category:En.html": f"{H}/wiki/Category:En",
+        f"{O}/w/index.php?title=Category:Lua&pagefrom=On&Off.html":
+            f"{H}/w/index.php?title=Category:Lua&pagefrom=On%26Off",
+        f"{O}/old.html": f"{H}/old",
+        f"{O}/notes.txt": f"{H}/notes.txt",  # "not modified on server"
+    }
+
+
+def test_parse_wget_log_undoes_quoting_escapes():
+    """Lines from wget 1.21.4: a non-UTF-8 locale quotes with ' and escapes
+    bytes as \\ooo; a UTF-8 one escapes only \\ and the closing quote."""
+    from dograpper.lib.wget_mirror import parse_wget_log
+    log = "\n".join([
+        f"--2026-11-17 22:46:04--  {H}/caf%C3%A9",
+        "Saving to: 'out3/127.0.0.1:8766/caf\\303\\251.html'",
+        f"--2026-11-17 22:46:04--  {H}/it's",
+        "Saving to: 'out3/127.0.0.1:8766/it\\'s.html'",
+        f"--2026-11-17 22:50:43--  {H}/a%5Cb",
+        "Saving to: \u2018out4/127.0.0.1:8766/a\\\\b.html\u2019",
+        f"--2026-11-17 22:50:43--  {H}/x%E2%80%99y",
+        "Saving to: \u2018out4/127.0.0.1:8766/x\\\u2019y.html\u2019",
+        f"--2026-11-17 22:53:07--  {H}/notes.txt",
+        "Server file no newer than local file \u2018out/127.0.0.1:8766/notes.txt\u2019"
+        " -- not retrieving.",
+    ])
+    assert parse_wget_log(log)[1] == {
+        "out3/127.0.0.1:8766/caf\u00e9.html": f"{H}/caf%C3%A9",
+        "out3/127.0.0.1:8766/it's.html": f"{H}/it's",
+        "out4/127.0.0.1:8766/a\\b.html": f"{H}/a%5Cb",
+        "out4/127.0.0.1:8766/x\u2019y.html": f"{H}/x%E2%80%99y",
+        "out/127.0.0.1:8766/notes.txt": f"{H}/notes.txt",
+    }
+
+
+def test_both_wget_paths_report_saved_urls():
+    from dograpper.lib.wget_mirror import parse_wget_log, run_wget_mirror, run_wget_urls
+    stderr = _fixture("wget_mirror_stderr.txt")
+    for fn, arg in ((run_wget_mirror, H + "/"), (run_wget_urls, [H + "/"])):
+        with _fake_wget(stderr), tempfile.TemporaryDirectory() as d:
+            assert fn(arg, d).urls == parse_wget_log(stderr)[1]
+
+
+# Real wget 1.21.4 --mirror stderr (LANGUAGE=C) against a local server that dropped
+# the first request for /gone, /flaky and /new: wget retried each one on a request
+# line "--<date>--  (try: 2)  <url>"; /gone then got a 404, /flaky a 200, and /new,
+# where /old redirects, a 200 saved as old.html (exit 8).
+
+def test_parse_wget_log_reads_the_url_of_a_retry_line():
+    from dograpper.lib.wget_mirror import parse_wget_log
+    failed, saved = parse_wget_log(_fixture("wget_retry_stderr.txt"))
+    assert saved == {f"{O}/index.html": f"{H}/", f"{O}/flaky.html": f"{H}/flaky",
+                     f"{O}/old.html": f"{H}/old"}  # a retry goes on with the chain it is in
+    assert [(f.url, f.status) for f in failed] == [(f"{H}/gone", 404)]
+
+
+def test_a_page_fetched_on_a_retry_keeps_its_url(tmp_path, monkeypatch):
+    """In the manifest, in the Failed: list and in the [progress] last: field."""
+    stderr = _fixture("wget_retry_stderr.txt")
+    assert _wget_progress(run_wget_mirror, H + "/", stderr)[-1][1].endswith(f"last: {H}/old")
+
+    monkeypatch.chdir(tmp_path)  # wget printed paths relative to its working directory
+    for name in ("index.html", "flaky.html", "old.html"):
+        page = tmp_path / O / name
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text("<html><body><p>x</p></body></html>")
+    with _fake_wget(stderr, returncode=8), \
+            patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        res = CliRunner().invoke(download, [H + "/", '-o', 'out'])
+    assert res.exit_code == 0, res.output
+    assert f"  {H}/gone: 404" in res.output and "(try:" not in res.output
+    files = load_manifest(str(tmp_path / "out" / ".dograpper-manifest.json")).files
+    assert {k: e.url for k, e in files.items()} == {
+        "index.html": f"{H}/", "flaky.html": f"{H}/flaky", "old.html": f"{H}/old"}
+
+
+def test_both_wget_paths_read_stderr_while_stdout_is_discarded():
+    """wget's stderr is read line by line while it runs; its stdout (empty here) goes
+    to DEVNULL, so no second pipe can fill up and stall wget."""
+    import subprocess
+    from dograpper.lib.wget_mirror import run_wget_urls
+    for fn, arg in ((run_wget_mirror, H + "/"), (run_wget_urls, [H + "/"])):
+        with _fake_wget() as mock_popen, tempfile.TemporaryDirectory() as d:
+            fn(arg, d)
+        kw = mock_popen.call_args.kwargs
+        assert kw["stdout"] is subprocess.DEVNULL and kw["stderr"] is subprocess.PIPE
+        assert kw["text"] is True and kw["errors"] == "replace"
+        assert kw["env"]["LANGUAGE"] == "C"
+
+
+def test_redirect_to_a_signed_url_never_reaches_the_manifest_or_the_pack(tmp_path):
+    """A server can redirect to a URL carrying a secret (a presigned S3 link);
+    only the URL dograpper requested is recorded, so none reaches a pack. A
+    requested URL whose query carries a credential is not recorded either."""
+    from dograpper.commands.pack import pack
+    out = tmp_path / "m"
+    page, index = out / "h.example" / "doc.html", out / "h.example" / "index.html"
+    page.parent.mkdir(parents=True)
+    page.write_text("<html><body><h1>Doc</h1><p>alpha beta gamma</p></body></html>")
+    index.write_text("<html><body><h1>Home</h1><p>delta epsilon zeta</p></body></html>")
+    signed = "https://bucket.s3.example/doc?X-Amz-Signature=secret&token=secret"
+    stderr = "\n".join([
+        "--2026-11-17 22:52:54--  https://h.example/",
+        "HTTP request sent, awaiting response... 200 OK",
+        f"Saving to: \u2018{index}\u2019",
+        "--2026-11-17 22:52:54--  https://h.example/doc?title=Doc&token=typed",
+        "HTTP request sent, awaiting response... 302 Found",
+        f"Location: {signed} [following]",
+        f"--2026-11-17 22:52:54--  {signed}",
+        "HTTP request sent, awaiting response... 200 OK",
+        f"Saving to: \u2018{page}\u2019",
+    ])
+    manifest = tmp_path / "manifest.json"
+    with _fake_wget(stderr), \
+            patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        res = CliRunner().invoke(download, ['https://h.example/', '-o', str(out),
+                                            '--manifest', str(manifest)])
+    assert res.exit_code == 0, res.output
+    assert "secret" not in manifest.read_text() and "typed" not in manifest.read_text()
+    files = load_manifest(str(manifest)).files
+    assert files["doc.html"].url is None
+    assert files["index.html"].url == "https://h.example/"
+
+    chunks = tmp_path / "chunks"
+    res = CliRunner().invoke(pack, [str(out), '-o', str(chunks), '--format', 'jsonl',
+                                    '--context-header', '--manifest', str(manifest)])
+    assert res.exit_code == 0, res.output
+    records = [json.loads(line) for f in chunks.glob("*.jsonl")
+               for line in f.read_text().splitlines()]
+    assert {r["source"]: r.get("url") for r in records} == {
+        "h.example/index.html": "https://h.example/", "h.example/doc.html": None}
+    assert not [f for f in chunks.iterdir()
+                if "secret" in f.read_text() or "typed" in f.read_text()]
+
+
+def test_format_failures_caps_at_five_unless_verbose():
+    from dograpper.lib.wget_mirror import WgetFailure, format_failures
+    failed = [WgetFailure(f"http://h/p{i}", 404) for i in range(8)]
+    lines = format_failures(failed, verbose=False)
+    assert lines[0] == "Failed: 8 URLs (first 5 shown)"
+    assert sum("http://h/p" in l for l in lines) == 5
+    assert "http://h/p5" not in "\n".join(lines)
+    full = format_failures(failed, verbose=True)
+    assert full[0] == "Failed: 8 URLs"
+    assert sum("http://h/p" in l for l in full) == 8
+    assert format_failures([], verbose=False) == []
+
+
+def test_format_failures_redacts_userinfo():
+    from dograpper.lib.wget_mirror import WgetFailure, format_failures
+    lines = format_failures([WgetFailure("http://u:secret@h/p", 500)], verbose=False)
+    assert "secret" not in "\n".join(lines)
+
+
+def test_format_failures_masks_credential_like_params():
+    from dograpper.lib.wget_mirror import WgetFailure, format_failures
+    lines = format_failures([WgetFailure("http://h/p?title=T&apiKey=k1", 403)], verbose=False)
+    assert lines[1] == "  http://h/p?title=T&apiKey=REDACTED: 403"
+
+
+def test_download_prints_failed_urls_summary():
+    from dograpper.lib.wget_mirror import WgetFailure, WgetResult
+    failed = [WgetFailure(f"http://x.io/p{i}", 404) for i in range(7)]
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d, \
+            patch('dograpper.commands.download.run_wget_mirror') as mock_wget, \
+            patch('dograpper.commands.download._discover_urls', return_value=([], None)), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        paths = [os.path.join(d, f"{n}.html") for n in "ab"]
+        for p in paths:
+            open(p, "w").write("c")
+        mock_wget.return_value = WgetResult(True, d, paths, [], 0, failed)
+        manifest_path = os.path.join(d, ".m.json")
+        res = runner.invoke(download, ['http://x.io', '-o', d, '--manifest', manifest_path])
+        assert res.exit_code == 0
+        assert "Failed: 7 URLs (first 5 shown)" in res.output
+        assert "http://x.io/p4: 404" in res.output
+        assert "http://x.io/p5" not in res.output
+        res = runner.invoke(cli, ['--verbose', 'download', 'http://x.io', '-o', d, '--manifest', manifest_path])
+        assert res.exit_code == 0
+        assert "Failed: 7 URLs" in res.output and "first 5" not in res.output
+        assert "http://x.io/p6: 404" in res.output
+
+
+def test_download_exits_nonzero_when_manifest_is_unwritable(tmp_path):
+    """#113: a lost manifest loses the incremental download, so it must not exit 0."""
+    from click.testing import CliRunner
+    from dograpper.cli import cli
+    from dograpper.lib.wget_mirror import WgetResult
+
+    out = tmp_path / "docs"
+    page = out / "h.example" / "a.html"
+    page.parent.mkdir(parents=True)
+    page.write_text("<html><body><h1>A</h1></body></html>")
+    (out / ".dograpper-manifest.json").mkdir()
+    other = out / "h.example" / "b.html"
+    other.write_text("<html><body><h1>B</h1></body></html>")
+    with patch('dograpper.commands.download.run_wget_mirror',
+               return_value=WgetResult(True, str(out), [str(page), str(other)], [], 0, [], {})), \
+            patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        result = CliRunner().invoke(cli, ['download', 'https://h.example/', '-o', str(out)])
+
+    assert result.exit_code == 1, result.output
+    assert str(out / ".dograpper-manifest.json") in result.output
+
+
+# --- [progress] lines while pages are fetched (issue #98) ---
+
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def _timed(stderr, clock):
+    """wget's stderr as a stream whose every line arrives one second after the last."""
+    for line in io.StringIO(stderr):
+        clock.t += 1
+        yield line
+
+
+def _wget_progress(fn, arg, stderr):
+    """(time, line) of each [progress] line `fn` prints on a fake wget and a fake clock."""
+    from functools import partial
+    from dograpper.utils.progress import ProgressReporter
+    clock, lines = _Clock(), []
+    reporter = partial(ProgressReporter, clock=clock, emit=lambda l: lines.append((clock.t, l)))
+    with patch('dograpper.lib.wget_mirror.ProgressReporter', reporter), \
+            _fake_wget(_timed(stderr, clock)), tempfile.TemporaryDirectory() as d:
+        fn(arg, d)
+    return lines
+
+
+def _assert_throttled(lines):
+    """At most one line per 5 s, only on change, plus the final one when the step ends."""
+    times = [t for t, _ in lines]
+    assert all(b - a >= 5 for a, b in zip(times, times[1:-1])), times
+    texts = [l for _, l in lines]
+    assert all(a != b for a, b in zip(texts, texts[1:])), texts
+
+
+def _listed_log(n, size=100_000):
+    """wget -i stderr, in wget 1.21.4's line formats, for `n` listed pages of `size` bytes."""
+    out = []
+    for i in range(n):
+        out += [f"--2026-11-17 22:52:54--  {H}/p{i}",
+                "HTTP request sent, awaiting response... 200 OK",
+                f"Saving to: ‘{O}/p{i}.html’", "",
+                f"2026-11-17 22:52:54 (29.6 MB/s) - ‘{O}/p{i}.html’ saved [{size}/{size}]", ""]
+    return "\n".join(out) + "\n"
+
+
+def test_wget_i_progress_counts_urls_of_the_list_not_files():
+    """robots.txt and the redirect target /new are requested too, and four files are
+    saved: the count is the five URLs of the list, as wget prints them."""
+    import re
+    from dograpper.lib.wget_mirror import run_wget_urls
+    listed = [f"{H}/wiki/Category:En", f"{H}/w/index.php?title=Category:Lua&pagefrom=On%26Off",
+              f"{H}/old#top", f"{H}/notes.txt", f"{H}/missing.html"]
+    lines = _wget_progress(run_wget_urls, listed, _fixture("wget_urls_stderr.txt"))
+    _assert_throttled(lines)
+    shape = re.compile(r"\[progress\] wget -i: (\d)/5 URLs \(\d+%\) · 0\.0 MB · \d+s$")
+    done = [int(shape.match(l).group(1)) for _, l in lines]
+    assert done == sorted(done) and len(done) > 2
+    assert lines[-1][1] == "[progress] wget -i: 5/5 URLs (100%) · 0.0 MB · 46s"
+
+
+def test_wget_i_progress_shows_eta_only_after_ten_urls():
+    import re
+    from dograpper.lib.wget_mirror import run_wget_urls
+    lines = _wget_progress(run_wget_urls, [f"{H}/p{i}" for i in range(12)], _listed_log(12))
+    _assert_throttled(lines)
+    for _, line in lines:
+        done = int(re.match(r"\[progress\] wget -i: (\d+)/12 URLs", line).group(1))
+        assert ("ETA" in line) is (10 <= done < 12), line
+    assert any("ETA" in l for _, l in lines)
+    assert lines[-1][1] == "[progress] wget -i: 12/12 URLs (100%) · 1.1 MB · 1m12s"
+
+
+def test_wget_mirror_progress_shows_files_size_and_the_last_url():
+    import re
+    from dograpper.lib.wget_mirror import WgetLog
+    stderr = _fixture("wget_mirror_stderr.txt")
+    lines = _wget_progress(run_wget_mirror, H + "/", stderr)
+    _assert_throttled(lines)
+    shape = re.compile(r"\[progress\] wget --mirror: \d files · 0\.0 MB · (\d+m)?\d+s · "
+                       r"last: http://127\.0\.0\.1:8766/\S*$")
+    assert all(shape.match(l) for _, l in lines), lines
+    assert lines[-1][1] == ("[progress] wget --mirror: 9 files · 0.0 MB · 1m40s · "
+                            "last: http://127.0.0.1:8766/it's")
+    log = WgetLog()
+    for line in stderr.splitlines():
+        log.feed(line)
+    assert log.size == 754  # wget's own tally: "Downloaded: 9 files, 754 in 0s"
+
+
+def test_wget_mirror_progress_names_the_url_requested_redacted():
+    """A redirect target can carry a signed token: the last URL is the one requested,
+    with its credential-like parameters masked."""
+    stderr = "\n".join([
+        "--2026-11-17 22:52:54--  https://u:pw@h.example/doc?title=Doc&token=typed",
+        "HTTP request sent, awaiting response... 302 Found",
+        "Location: https://bucket.s3.example/doc?X-Amz-Signature=secret [following]",
+        "--2026-11-17 22:52:54--  https://bucket.s3.example/doc?X-Amz-Signature=secret",
+        "HTTP request sent, awaiting response... 200 OK",
+        "Saving to: ‘out/h.example/doc.html’",
+    ]) + "\n"
+    lines = _wget_progress(run_wget_mirror, "https://h.example/", stderr)
+    assert lines[-1][1].endswith("last: https://h.example/doc?title=Doc&token=REDACTED")
+    assert not any("secret" in l or "pw" in l or "typed" in l for _, l in lines)
+
+
+def test_download_progress_lines_are_info_so_quiet_hides_them(tmp_path):
+    import logging
+    out = tmp_path / "m"
+    for name in ("a.html", "b.html"):
+        (out / "127.0.0.1:8766").mkdir(parents=True, exist_ok=True)
+        (out / "127.0.0.1:8766" / name).write_text("<html><body><p>x</p></body></html>")
+    stderr = _fixture("wget_mirror_stderr.txt")
+    logger = logging.getLogger("dograpper")
+    level = logger.level
+    try:
+        for flags, shown in (([], True), (['--quiet'], False)):
+            with _fake_wget(stderr), \
+                    patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+                    patch('dograpper.commands.download.is_spa', return_value=False):
+                res = CliRunner().invoke(cli, [*flags, 'download', H + "/", '-o', str(out)])
+            assert res.exit_code == 0, res.output
+            assert "Download complete:" in res.output
+            assert ("INFO: [progress] wget --mirror: 9 files · 0.0 MB · " in res.output) is shown, res.output
+    finally:
+        logger.setLevel(level)  # --quiet leaves ERROR, which would hide later tests' log records
+
+
+def test_playwright_progress_counts_files_and_the_queue(caplog):
+    import logging
+    import re
+    import sys
+
+    mock_sync_api = MagicMock()
+    mock_p = mock_sync_api.sync_playwright.return_value.__enter__.return_value
+    mock_page = mock_p.chromium.launch.return_value.new_context.return_value.new_page.return_value
+    mock_page.content.return_value = "<html></html>"
+    mock_page.evaluate.side_effect = [["http://target.com/api", "http://target.com/guide?token=t0"], [], []]
+
+    sys.modules['playwright'] = MagicMock()
+    sys.modules['playwright.sync_api'] = mock_sync_api
+    try:
+        with tempfile.TemporaryDirectory() as d, caplog.at_level(logging.DEBUG, logger="dograpper"):
+            from dograpper.lib.playwright_crawl import run_playwright_crawl
+            run_playwright_crawl("http://target.com/", d)
+    finally:
+        del sys.modules['playwright']
+        del sys.modules['playwright.sync_api']
+    fetched = [r for r in caplog.records if r.getMessage().startswith("Downloading: ")]
+    assert len(fetched) == 3 and all(r.levelno == logging.DEBUG for r in fetched)
+    progress = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[progress]")]
+    assert all(r.levelno == logging.INFO for r in caplog.records if r.getMessage().startswith("[progress]"))
+    assert re.fullmatch(r"\[progress\] playwright: 3 files · \d+s · queued 0 · "
+                        r"last: http://target\.com/guide\?token=REDACTED", progress[-1])
+    assert not any("t0" in l for l in progress)

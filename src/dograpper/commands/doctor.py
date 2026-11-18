@@ -24,7 +24,7 @@ from dograpper.utils.dep_resolver import (
 logger = logging.getLogger(__name__)
 
 BUSYBOX_WGET_URL = (
-    "https://github.com/lorenzobrasil/dograpper/releases/download/"
+    "https://github.com/lorenzoervedosa/dograpper/releases/download/"
     "v0.0.0-tooling/busybox-wget-x86_64"
 )
 # SHA256 of the v0.0.0-tooling busybox-wget-x86_64 asset.
@@ -173,9 +173,9 @@ def _install_chromium() -> None:
 
 @click.command("doctor")
 @click.option("--install", "do_install", is_flag=True, default=False,
-              help="Download and install missing dependencies (wget, chromium).")
+              help="Download and install the missing dependencies into DOGRAPPER_HOME instead of only reporting them.")
 @click.option("--force", is_flag=True, default=False,
-              help="Re-install dependencies even if already present.")
+              help="With --install, reinstall dependencies that are already present.")
 @click.option("--check-system-libs", "check_system_libs", is_flag=True, default=False,
               help="Check system libraries required by chromium and suggest install command.")
 def doctor(do_install: bool, force: bool, check_system_libs: bool) -> None:

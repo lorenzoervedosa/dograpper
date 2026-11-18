@@ -5,13 +5,12 @@ clean text output, tracking heading positions in the stripped text
 for hierarchical context injection into chunks.
 """
 
-import re
-import html as html_mod
+import os
 from html.parser import HTMLParser
 from dataclasses import dataclass
 from typing import List, Dict
 
-from .html_stripper import BLOCK_TAGS
+from .html_stripper import BLOCK_TAGS, PreCapture, render_markdown, render_text
 
 
 @dataclass
@@ -47,6 +46,7 @@ class _HeadingExtractorParser(HTMLParser):
         self._heading_level: int = 0
         self._heading_parts: list = []
         self._current_offset: int = 0
+        self._pre = PreCapture()
 
     def handle_starttag(self, tag, attrs):
         if tag in SKIP_TAGS:
@@ -54,6 +54,7 @@ class _HeadingExtractorParser(HTMLParser):
             return
         if self._skip_depth > 0:
             return
+        self._pre.starttag(tag, attrs)
         if tag in HEADING_TAGS:
             self._in_heading = True
             self._heading_level = int(tag[1])
@@ -74,7 +75,10 @@ class _HeadingExtractorParser(HTMLParser):
                     char_offset=self._current_offset,
                 ))
             self._in_heading = False
-        if tag in BLOCK_TAGS:
+        code = self._pre.endtag(tag)
+        if code:
+            self._output.append(code)
+        if tag in BLOCK_TAGS and not self._pre.depth:
             self._output.append("\n\n")
             self._current_offset += 2
 
@@ -83,29 +87,33 @@ class _HeadingExtractorParser(HTMLParser):
             return
         if self._in_heading:
             self._heading_parts.append(data)
-        self._output.append(data)
+        if self._pre.depth:
+            self._pre.data(data)
+        else:
+            self._output.append(data)
         self._current_offset += len(data)
 
     def get_result(self):
-        text = "".join(self._output)
-        text = html_mod.unescape(text)
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        blocks = text.split('\n\n')
-        blocks = [re.sub(r'\s+', ' ', b).strip() for b in blocks]
-        text = '\n\n'.join(b for b in blocks if b)
-        return text.strip(), self._headings
+        return render_text(self._output + self._pre.close()), self._headings
 
 
-def extract_with_headings(html: str, source_path: str = "") -> ExtractedDocument:
+def extract_with_headings(html: str, source_path: str = "", markdown: bool = False) -> ExtractedDocument:
     """Extract clean text and headings from an HTML document.
 
     Args:
         html: Raw HTML (may be pre-filtered by content_extractor).
         source_path: Relative path of the source file.
+        markdown: Text as ``strip_html(html, markdown=True)``, with a link to
+            ``source_path`` as a same-page link; each heading's offset is then
+            the exact start of its ``#`` line.
 
     Returns:
         ExtractedDocument with text, headings, and source_path.
     """
+    if markdown:
+        text, found = render_markdown(html, os.path.basename(source_path))
+        return ExtractedDocument(text=text, headings=[Heading(*h) for h in found],
+                                 source_path=source_path)
     parser = _HeadingExtractorParser()
     parser.feed(html)
     text, headings = parser.get_result()
@@ -147,8 +155,14 @@ def format_context_header(
     word_count: int = 0,
     url: str = "",
     readiness: dict = None,
+    title: str = "",
+    metadata: dict = None,
 ) -> str:
     """Format a dograpper-context-v1 header for injection into chunks.
+
+    ``title`` is written only by the page layout (ADR-0010), as the first field.
+    ``metadata`` holds the flat page fields a generator adapter read
+    (``version``, ``version_status`` for MediaWiki, #88); they follow ``url``.
 
     Returns formatted header string ending with \\n\\n, or empty string
     if no context is available.
@@ -157,10 +171,14 @@ def format_context_header(
 
     payload = {}
 
+    if title:
+        payload["title"] = title
     if source_path:
         payload["source"] = source_path
     if url:
         payload["url"] = url
+    if metadata:
+        payload.update(metadata)
     if total_chunks > 1:
         payload["chunk_index"] = chunk_index
         payload["total_chunks"] = total_chunks
@@ -176,5 +194,7 @@ def format_context_header(
     if not payload or payload == {"schema_version": "v1"}:
         return ""
 
-    json_str = json.dumps(payload, indent=2, ensure_ascii=False)
+    # json.dumps leaves ">" alone, so a value holding "-->" would close the comment;
+    # ">" only ever occurs inside JSON strings here, where > decodes back to it.
+    json_str = json.dumps(payload, indent=2, ensure_ascii=False).replace(">", "\\u003e")
     return f"<!-- dograpper-context-v1\n{json_str}\n-->\n\n"

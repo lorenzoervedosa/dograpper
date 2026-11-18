@@ -11,10 +11,11 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit
 
-from ...utils.redact import redact_url
-from .challenge import is_challenge
+from ...utils.challenge import is_challenge
+from ...utils.redact import drop_userinfo, redact_url
 from .escape import request_target
-from .policy import ZSTD_MAX_WINDOW, HttrackPolicy, decoder_module, make_ssl_context, request_headers
+from .policy import (NAVIGATION, ZSTD_MAX_WINDOW, FetchMeta, HttrackPolicy, decoder_module,
+                     make_ssl_context, request_headers)
 from .robots import NO_RULES, RobotsRules, parse_robots
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,7 @@ def same_host(a: str, b: str) -> bool:
 def _wire_host(parts) -> str:
     """Host header value: netloc without userinfo, a non-ASCII name IDNA-encoded
     (UnicodeError, a ValueError, when IDNA cannot encode it)."""
-    host = parts.netloc.rpartition("@")[2]
+    host = drop_userinfo(parts).netloc
     if host.isascii():
         return host
     name, sep, port = host.partition(":")  # a non-ASCII host is never an IPv6 literal
@@ -267,7 +268,12 @@ class Fetcher:
 
     # -- public --
 
-    def get(self, url: str, *, kind: str, referer: str | None = None) -> FetchResult:
+    def get(self, url: str, *, kind: str, referer: str | None = None,
+            meta: FetchMeta = NAVIGATION,
+            validators: tuple[tuple[str, str], ...] = ()) -> FetchResult:
+        """GET `url`. With `validators` (a revalidation, policy.conditional_headers) an
+        answered status is not retried: HTTrack keeps the previous copy instead
+        (htsback.c:4266-4280); the Retry-After gate is still set (spec 5.6)."""
         res = FetchResult(url)
         try:
             parts, key = urlsplit(url), _origin(url)
@@ -275,7 +281,8 @@ class Fetcher:
         except ValueError:
             res.error = "invalid URL"
             return res
-        headers = request_headers(self.policy, host, kind=kind, referer=referer, scheme=key[0])
+        headers = request_headers(self.policy, host, kind=kind, referer=referer, scheme=key[0],
+                                  meta=meta, validators=validators)
         for attempt in range(1, self.policy.retries + 2):
             res.attempts = attempt
             self._acquire(key)
@@ -299,7 +306,7 @@ class Fetcher:
             if status in (429, 503) and ra is not None:
                 self._set_gate(url, ra)
             if (status in RETRY_STATUSES or (status == 503 and ra is not None)) \
-                    and attempt <= self.policy.retries:
+                    and attempt <= self.policy.retries and not validators:
                 continue
             res.location = hdrs.get("location")  # independent of body decoding
             try:

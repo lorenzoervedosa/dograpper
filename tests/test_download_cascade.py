@@ -9,18 +9,23 @@ Scenarios (v2 plan § I test plan):
   6. all layers fail gracefully (headless with 0 URLs → direct playwright)
 """
 
+import json
 import os
+import shutil
 import tempfile
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
+from dograpper.cli import cli
 from dograpper.commands.download import (
     MIN_URLS_TO_CONSIDER_DISCOVERED,
     download,
 )
 from dograpper.lib.playwright_crawl import CrawlResult
 from dograpper.lib.wget_mirror import WgetResult
+from dograpper.utils.dep_resolver import resolve_wget
 
 
 def _make_outdir(d, files):
@@ -284,3 +289,189 @@ def test_cascade_emits_observability_log_lines(caplog):
     assert "[cascade] layer-1 llms.txt: probing" in text
     assert "[cascade] layer-2 sitemap.xml: probing" in text
     assert "[cascade] layer-3 wget --mirror" in text
+
+
+# --- --filter (#96) ---
+
+def _filter_run(d, *args, config=None, llms=()):
+    """`download` through the top-level cli, layers mocked; return (result, wget -i, wget --mirror)."""
+    pre = ["--config", str(config)] if config else []
+    files = _make_outdir(d, ["example.com/docs/p0.html"])
+    with patch("dograpper.commands.download.fetch_llms_txt", return_value=list(llms)), \
+         patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
+         patch("dograpper.commands.download.run_wget_urls") as mock_wget_urls, \
+         patch("dograpper.commands.download.run_wget_mirror") as mock_wget_mirror, \
+         patch("dograpper.commands.download.is_spa", return_value=False):
+        mock_wget_urls.return_value = WgetResult(True, d, files, [], 0)
+        mock_wget_mirror.return_value = WgetResult(True, d, files * 2, [], 0)
+        res = CliRunner().invoke(cli, [*pre, "download", "http://example.com/docs/", "-o", d,
+                                       "--manifest", d + ".manifest.json", *args])
+    return res, mock_wget_urls, mock_wget_mirror
+
+
+LLMS = [f"http://example.com/docs/p{i}" for i in range(4)] + ["http://example.com/docs/old/x"]
+
+
+def test_filter_scopes_discovered_urls_and_counts_them():
+    with tempfile.TemporaryDirectory() as d:
+        res, wget_urls, _ = _filter_run(d, "--filter", "-*/old/*", "--filter", "-*/p3",
+                                        llms=LLMS)
+    assert res.exit_code == 0, res.output
+    assert wget_urls.call_args[0][0] == LLMS[:3]
+    assert "Filtered by --filter: 2" in res.output
+
+
+def test_no_filter_prints_no_filter_line():
+    with tempfile.TemporaryDirectory() as d:
+        res, _, _ = _filter_run(d, llms=LLMS)
+    assert res.exit_code == 0, res.output
+    assert "Filtered by --filter" not in res.output
+
+
+def test_filter_config_key_and_cli_precedence(tmp_path):
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"download": {"filter": ["-*/old/*"]}}))
+    d = str(tmp_path / "o")
+    os.makedirs(d)
+    res, wget_urls, _ = _filter_run(d, config=cfg, llms=LLMS)
+    assert res.exit_code == 0, res.output
+    assert wget_urls.call_args[0][0] == LLMS[:4]           # JSON beats the default
+    res, wget_urls, _ = _filter_run(d, "--filter", "-*/p0", config=cfg, llms=LLMS)
+    assert res.exit_code == 0, res.output
+    assert wget_urls.call_args[0][0] == LLMS[1:]            # CLI replaces the JSON list
+
+
+@pytest.mark.parametrize("source, value, message", [
+    ("cli", "-*[<10]", "size rules"),
+    ("config", ["*.gif"], "must start with + or -"),
+    ("config", "-*", "must be a list of rules"),
+])
+def test_filter_bad_value_is_usage_error(tmp_path, source, value, message):
+    d = str(tmp_path / "o")
+    os.makedirs(d)
+    if source == "cli":
+        res, wget_urls, _ = _filter_run(d, "--filter", value, llms=LLMS)
+    else:
+        cfg = tmp_path / "c.json"
+        cfg.write_text(json.dumps({"download": {"filter": value}}))
+        res, wget_urls, _ = _filter_run(d, config=cfg, llms=LLMS)
+    assert res.exit_code == 2, res.output
+    assert message in res.output
+    assert ("(from .dograpper.json)" in res.output) is (source == "config")
+    wget_urls.assert_not_called()
+
+
+def test_filter_order_wget_cannot_express_fails_before_any_fetch():
+    with tempfile.TemporaryDirectory() as d, \
+         patch("dograpper.commands.download.fetch_llms_txt") as llms:
+        res = CliRunner().invoke(download, ["http://example.com", "-o", d,
+                                            "--manifest", d + ".m.json",
+                                            "--filter", "-*Special:*", "--filter", "+*/wiki/*"])
+    assert res.exit_code == 2, res.output
+    assert "'+*/wiki/*' follows '-*Special:*'" in res.output
+    llms.assert_not_called()
+
+
+def test_filter_reaches_wget_mirror():
+    with tempfile.TemporaryDirectory() as d:
+        res, _, wget_mirror = _filter_run(d, "--filter", "-*/old/*")
+    assert res.exit_code == 0, res.output
+    assert [r[1] for r in wget_mirror.call_args.kwargs["filters"].rules] == ["*/old/*"]
+    assert "Filtered by --filter: 0" in res.output
+
+
+CATEGORY = "/w/index.php?title=Category:Lua_events"
+TEXT = "<p>" + "Event documentation text. " * 20 + "</p>"
+
+
+@pytest.mark.skipif(shutil.which(resolve_wget()) is None, reason="wget not installed")
+def test_filter_mediawiki_category_members_with_real_wget(server, tmp_path):
+    """#96: a category page under /w/ whose members live under /wiki/On*. With
+    "-*" and "+*/wiki/On*" wget saves the seed and the members, nothing else."""
+    base, script, seen = server
+    html = {"content-type": "text/html"}
+    links = ["/wiki/OnTick", "/wiki/OnLoad", "/wiki/Category:En", "/w/index.php?title=Special:Random"]
+    script[CATEGORY] = (200, html, (
+        '<html><head><link rel="stylesheet" href="/w/load.php?modules=site"></head><body>'
+        + TEXT + "".join(f'<a href="{u}">{u}</a>' for u in links) + "</body></html>").encode())
+    for u in links:
+        script[u] = (200, html, f'<html><body>{TEXT}<a href="{u}/deeper">x</a></body></html>'.encode())
+    script["/w/load.php?modules=site"] = (200, {"content-type": "text/css"}, b"body{}")
+    out = tmp_path / "m"
+    res = CliRunner().invoke(cli, ["download", base + CATEGORY, "-o", str(out), "-d", "1",
+                                   "--manifest", str(tmp_path / "m.json"),
+                                   "--filter", "-*", "--filter", "+*/wiki/On*"])
+    assert res.exit_code == 0, res.output
+    host = base.split("//", 1)[1]
+    saved = sorted(str(p.relative_to(out / host)) for p in (out / host).rglob("*") if p.is_file())
+    assert saved == ["w/index.php?title=Category:Lua_events.html",
+                     "wiki/OnLoad.html", "wiki/OnTick.html"]
+    assert {p for p in seen if p.startswith(("/w/", "/wiki/"))} == {
+        CATEGORY, "/wiki/OnTick", "/wiki/OnLoad"}  # refused links were never requested
+    assert "Filtered by --filter: 3" in res.output
+
+
+# --- manifest url comes from the layer that wrote each file (#94) ---
+
+def _manifest_urls(d):
+    from dograpper.lib.manifest import read_manifest
+    m = read_manifest(os.path.join(d, "m.json"))
+    return {e.local_path: e.url for e in m.files.values()}
+
+
+def test_manifest_records_urls_from_wget_mirror_and_playwright():
+    """--mirror, then the shallow-mirror Playwright pass over the same tree:
+    a file Playwright rewrote takes its URL, the others keep wget's."""
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        a, b = _make_outdir(d, ["example.com/wiki/A.html", "example.com/q.html"])
+        with patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
+             patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
+             patch("dograpper.commands.download.run_wget_mirror") as mock_wget_mirror, \
+             patch("dograpper.commands.download.run_playwright_crawl") as mock_pw, \
+             patch("dograpper.commands.download.is_spa", return_value=True):
+            mock_wget_mirror.return_value = WgetResult(
+                True, d, [a, b], [], 0, [],
+                {a: "http://example.com/wiki/A", b: "http://example.com/q?page=2"})
+            mock_pw.return_value = CrawlResult(True, d, [a], [], 0,
+                                               {a: "http://example.com/wiki/A2"})
+            res = runner.invoke(download, ["http://example.com", "-o", d,
+                                           "--manifest", os.path.join(d, "m.json")])
+            assert res.exit_code == 0, res.output
+            assert _manifest_urls(d) == {
+                "example.com/wiki/A.html": "http://example.com/wiki/A2",
+                "example.com/q.html": "http://example.com/q?page=2",
+            }
+
+
+def test_manifest_records_urls_from_wget_i():
+    runner = CliRunner()
+    discovered = [f"http://example.com/p{i}" for i in range(3)]
+    with tempfile.TemporaryDirectory() as d:
+        files = _make_outdir(d, [f"example.com/p{i}.html" for i in range(3)])
+        with patch("dograpper.commands.download.fetch_llms_txt", return_value=discovered), \
+             patch("dograpper.commands.download.run_wget_urls") as mock_wget_urls, \
+             patch("dograpper.commands.download.is_spa", return_value=False):
+            mock_wget_urls.return_value = WgetResult(True, d, files, [], 0, [],
+                                                     dict(zip(files, discovered)))
+            res = runner.invoke(download, ["http://example.com", "-o", d,
+                                           "--manifest", os.path.join(d, "m.json")])
+            assert res.exit_code == 0, res.output
+            assert _manifest_urls(d) == {
+                f"example.com/p{i}.html": f"http://example.com/p{i}" for i in range(3)}
+
+
+def test_manifest_records_urls_from_headless_playwright():
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d:
+        (a,) = _make_outdir(d, ["example.com/w/index.php.html"])
+        with patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
+             patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
+             patch("dograpper.commands.download.run_playwright_crawl") as mock_pw:
+            mock_pw.return_value = CrawlResult(True, d, [a], [], 0,
+                                               {a: "http://example.com/w/index.php?title=A"})
+            res = runner.invoke(download, ["http://example.com", "-o", d, "--headless",
+                                           "--manifest", os.path.join(d, "m.json")])
+            assert res.exit_code == 0, res.output
+            assert _manifest_urls(d) == {
+                "example.com/w/index.php.html": "http://example.com/w/index.php?title=A"}

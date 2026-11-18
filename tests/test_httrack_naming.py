@@ -22,6 +22,15 @@ def test_host_dir_port_only_when_non_default(tmp_path):
     assert reg.assign("http://example.com:8080/a.html", None) == os.path.join(root, "example.com:8080", "a.html")
 
 
+def test_ipv6_literal_host_dir_keeps_brackets(tmp_path):
+    # HTTrack keeps the brackets and turns the address's colons into "_" (htsname.c);
+    # a non-default port follows the same host:port rule as any other host
+    reg, root = _reg(tmp_path)
+    assert reg.assign("http://[::1]:8080/a", "text/html") == os.path.join(root, "[__1]:8080", "a.html")
+    assert reg.assign("http://[2001:DB8::1]/a", None) == os.path.join(root, "[2001_db8__1]", "a")
+    assert reg.assign("https://[::1]:443/b", None) == os.path.join(root, "[__1]", "b")
+
+
 def test_html_extension_adjusted(tmp_path):
     reg, root = _reg(tmp_path)
     d = os.path.join(root, "e.com")
@@ -43,6 +52,16 @@ def test_html_replaces_dynamic_and_html_family_extensions_like_httrack(tmp_path)
     # an unknown token is part of the name: appended to, not replaced
     assert reg.assign("http://e.com/article-1.884291", "text/html") == os.path.join(d, "article-1.884291.html")
     assert reg.assign("http://e.com/x.php", "application/pdf") == os.path.join(d, "x.php")
+
+
+def test_html_replaces_any_extension_httrack_knows(tmp_path):
+    # htsname.c cuts an extension of HTTrack's MIME table (is_knowntype) before adding .html;
+    # its tests/01_engine-savename.test pins /x.pdf and /x.gif served as text/html -> x.html
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "h.test")
+    for name in ("notes.txt", "a.pdf", "b.GIF", "c.json", "d.md", "e.webp", "f.svg"):
+        assert reg.assign(f"https://h.test/{name}", "text/html") == os.path.join(d, name.split(".")[0] + ".html")
+    assert reg.assign("https://h.test/plain.txt", "text/plain") == os.path.join(d, "plain.txt")
 
 
 def test_forbidden_characters_become_underscores(tmp_path):
@@ -76,6 +95,22 @@ def test_collision_suffix_and_stability(tmp_path):
     assert reg.assign("http://e.com/a./b", None) != a
 
 
+def test_names_differing_only_in_case_collide(tmp_path):
+    # htshash.c key_sav_equals compares save names with strcasecmp: on NTFS or default APFS
+    # the later URL would otherwise overwrite the earlier file
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "h.test")
+    assert reg.assign("https://h.test/Page", "text/html") == os.path.join(d, "Page.html")
+    assert reg.assign("https://h.test/page", "text/html") == os.path.join(d, "page-2.html")
+    assert reg.assign("https://h.test/PAGE", "text/html") == os.path.join(d, "PAGE-3.html")
+    assert reg.assign("https://h.test/page", "text/html") == os.path.join(d, "page-2.html")
+    assert reg.assign("https://h.test/Dir/x", None) == os.path.join(d, "Dir", "x")
+    assert reg.assign("https://h.test/dir/X", None) == os.path.join(d, "dir", "X-2")
+    # non-ASCII letters fold too, where HTTrack's ASCII strcasecmp would miss them (deviation)
+    assert reg.assign("https://h.test/%C3%89t%C3%A9", None) == os.path.join(d, "Été")
+    assert reg.assign("https://h.test/%C3%A9t%C3%A9", None) == os.path.join(d, "été-2")
+
+
 def test_traversal_rejected(tmp_path):
     reg, root = _reg(tmp_path)
     for u in ("http://e.com/../x", "http://e.com/%2e%2e/x", "http://e.com/a\\..\\..\\b",
@@ -103,3 +138,20 @@ def test_thread_safe_unique_paths(tmp_path):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert len(set(out)) == 40
+
+
+def test_reserved_names_of_an_update_go_back_to_their_urls_only(tmp_path):
+    """A file kept by an update (304) is not rewritten, so no URL may take its name unless
+    it asks for it (the URL the previous run saved it from), in any queue order."""
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "e.com")
+    page2, t = os.path.join(d, "page-2.html"), os.path.join(d, "t.html")
+    reg.reserve(page2)
+    reg.reserve(t)
+    assert reg.name_of("http://e.com/t", "text/html") == t  # claims nothing
+    assert reg.assign("http://e.com/t", "text/html") == os.path.join(d, "t-2.html")
+    assert reg.assign("http://e.com/Page", "text/html") == os.path.join(d, "Page.html")
+    assert reg.assign("http://e.com/page#x", "text/html", prefer=page2) == page2
+    assert reg.assign("http://e.com/page", "text/html") == page2  # same URL, same name
+    assert reg.assign("http://e.com/new", "text/html", prefer=t) == t
+    assert reg.assign("http://e.com/other", "text/html", prefer=t) == os.path.join(d, "other.html")

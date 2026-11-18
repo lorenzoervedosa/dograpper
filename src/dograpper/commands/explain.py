@@ -47,7 +47,7 @@ def _echo_breadcrumb(breadcrumb):
 @click.argument('chunks_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True)
 @click.argument('chunk_id', type=str, required=False, default=None)
 @click.option('--prefix', type=str, default="docs_chunk_", show_default=True,
-              help="Chunk filename prefix to inspect.")
+              help="Only look at chunk files whose name starts with this prefix. Default: docs_chunk_, the pack default.")
 @click.option('--full', is_flag=True, default=False,
               help="Print full section contents instead of a preview.")
 @click.pass_context

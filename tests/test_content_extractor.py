@@ -1,7 +1,10 @@
 """Tests for the intelligent content extractor."""
 
+import json
 import os
 import tempfile
+
+import pytest
 from click.testing import CliRunner
 
 from dograpper.utils.content_extractor import extract_content, _matches_class
@@ -564,3 +567,200 @@ def test_matches_class_no_false_positive_on_unrelated():
     """_matches_class does not match unrelated strings."""
     assert _matches_class("pagination", {"nav"}) is False
     assert _matches_class("main-body", {"sidebar"}) is False
+
+
+# ---------------------------------------------------------------------------
+# Escaped markup must survive re-serialization (issue #66)
+# ---------------------------------------------------------------------------
+
+ESCAPED_PAGE = (
+    "<html><body><main><h1>Generics</h1>\n"
+    "<p>Some prose so the page has enough text to be extracted normally here.</p>\n"
+    "<pre>public static &lt;T&gt; List&lt;T&gt; wrap(T item)</pre>\n"
+    '<pre>&lt;div class="note"&gt;hello&lt;/div&gt;</pre>\n'
+    "</main></body></html>"
+)
+
+
+def test_escaped_angle_brackets_survive_semantic_extraction():
+    text = strip_html(extract_content(ESCAPED_PAGE))
+    assert "public static <T> List<T> wrap(T item)" in text
+    assert '<div class="note">hello</div>' in text
+
+
+def test_escaped_angle_brackets_survive_density_extraction():
+    html = (
+        "<html><body><div><p>"
+        + "Plenty of prose to win the density scoring here. " * 10
+        + "</p><pre>List&lt;T&gt; &amp; Map&lt;K, V&gt;</pre></div></body></html>"
+    )
+    assert "List<T> & Map<K, V>" in strip_html(extract_content(html))
+
+
+def test_escaped_angle_brackets_survive_blacklist_removal():
+    html = (
+        "<html><body><main><nav>menu</nav>"
+        "<p>Enough prose here to be kept as the main content block.</p>"
+        "<pre>&lt;C&gt;</pre></main></body></html>"
+    )
+    text = strip_html(extract_content(html))
+    assert "<C>" in text
+    assert "menu" not in text
+
+
+def test_attribute_values_are_escaped_on_rebuild():
+    html = (
+        '<html><body><main><a title="a &quot;b&quot; &amp; c" href="/x?a=1&amp;b=2">'
+        "link</a></main></body></html>"
+    )
+    out = extract_content(html)
+    assert 'title="a &quot;b&quot; &amp; c"' in out
+    assert 'href="/x?a=1&amp;b=2"' in out
+
+
+def test_default_pack_matches_no_extract_for_escaped_brackets(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "page.html").write_text(ESCAPED_PAGE)
+    outputs = {}
+    for name, extra in (("default", []), ("raw", ["--no-extract"])):
+        out = tmp_path / name
+        result = CliRunner().invoke(cli, ["pack", str(docs), "-o", str(out), *extra])
+        assert result.exit_code == 0
+        outputs[name] = next(out.glob("*.md")).read_text()
+    for text in outputs.values():
+        assert "public static <T> List<T> wrap(T item)" in text
+        assert '<div class="note">hello</div>' in text
+
+
+# ---------------------------------------------------------------------------
+# <pre> blocks keep their lines and language (issue #86)
+# ---------------------------------------------------------------------------
+
+LUA_CODE = "local function onTick()\n    if x then\n        print(x)\n    end\nend"
+LUA_PAGE = (
+    "<html><body><main><h1>Events</h1>\n"
+    "<p>Some prose so the page has enough text to be extracted normally here.</p>\n"
+    '<div class="mw-highlight mw-highlight-lang-lua mw-content-ltr"><pre>'
+    + LUA_CODE + "\n</pre></div></main></body></html>"
+)
+LUA_FENCED = "```lua\n" + LUA_CODE + "\n```"
+
+
+@pytest.mark.parametrize("extract", [True, False], ids=["extract", "no-extract"])
+def test_pre_is_fenced_verbatim_with_its_language(extract):
+    html = extract_content(LUA_PAGE) if extract else LUA_PAGE
+    assert LUA_FENCED in strip_html(html)
+
+
+@pytest.mark.parametrize("markup", [
+    '<pre class="language-python">{}</pre>',
+    '<pre><code class="language-python">{}</code></pre>',
+    '<pre class="lang-python">{}</pre>',
+    '<div class="highlight lang-python"><pre>{}</pre></div>',
+])
+def test_pre_language_comes_from_pre_code_or_wrapping_div(markup):
+    code = "def f():\n\treturn 1"
+    assert strip_html(markup.format(code)) == "```python\n" + code + "\n```"
+
+
+def test_pre_language_prefers_pre_over_code_over_div():
+    html = ('<div class="lang-c"><pre class="lang-lua"><code class="language-js">x\ny'
+            '</code></pre></div><div class="lang-c"><pre><code class="language-js">x\ny'
+            '</code></pre></div>')
+    assert strip_html(html) == "```lua\nx\ny\n```\n\n```js\nx\ny\n```"
+
+
+SPHINX_BLOCK = (
+    '<div class="highlight-python notranslate"><div class="highlight"><pre><span></span>'
+    '<span class="k">def</span> <span class="nf">f</span><span class="p">():</span>\n'
+    '    <span class="k">return</span> <span class="mi">1</span>\n</pre></div>\n</div>'
+)
+
+
+def test_pre_language_from_sphinx_highlight_div():
+    page = ('<html><body><div class="body" role="main"><h1>API</h1>'
+            '<p>Some prose so the page has enough text to be extracted normally here.</p>'
+            + SPHINX_BLOCK + "</div></body></html>")
+    assert "```python\ndef f():\n    return 1\n```" in strip_html(extract_content(page))
+
+
+def test_pre_language_from_nearest_div_that_declares_one():
+    html = ('<div class="lang-lua"><div class="wrapper"><pre>x\ny</pre></div></div>'
+            '<div class="lang-lua"><div class="lang-c"><pre>x\ny</pre></div></div>')
+    assert strip_html(html) == "```lua\nx\ny\n```\n\n```c\nx\ny\n```"
+
+
+@pytest.mark.parametrize("cls", [
+    "highlight-default notranslate", "highlight-none", "language-none", "highlight", "mw-highlight",
+])
+def test_pre_language_placeholder_or_bare_highlight_class_gives_a_bare_fence(cls):
+    assert strip_html(f'<div class="{cls}"><div class="highlight"><pre>x\ny</pre></div></div>') == (
+        "```\nx\ny\n```")
+
+
+def test_pre_without_a_language_gets_a_bare_fence():
+    assert strip_html("<p>Run:</p><pre>\n  make\n  make install\n</pre>") == (
+        "Run:\n\n```\n  make\n  make install\n```")
+
+
+def test_pre_language_class_with_unsafe_characters_is_ignored():
+    assert strip_html('<pre class="lang-a`b">x\ny</pre>') == "```\nx\ny\n```"
+
+
+def test_pre_keeps_blank_lines_in_one_block():
+    assert strip_html("<pre>a\n\n\n  b</pre><p>after</p>") == "```\na\n\n\n  b\n```\n\nafter"
+
+
+def test_pre_fence_outlasts_backticks_in_the_code():
+    assert strip_html("<pre>```\nnested\n```</pre>") == "````\n```\nnested\n```\n````"
+
+
+def test_pre_entities_survive_extraction():
+    html = ("<html><body><main><nav>menu</nav><p>Enough prose here to be kept as the main "
+            "content block.</p><pre>List&lt;T&gt; wrap(\n    T item) &amp;&amp; &amp;lt;</pre>"
+            "</main></body></html>")
+    assert "```\nList<T> wrap(\n    T item) && &lt;\n```" in strip_html(extract_content(html))
+
+
+def test_unclosed_pre_keeps_the_text_that_follows():
+    html = "<main><p>Intro.</p><pre>a\n  b</main>"
+    assert strip_html(extract_content(html)) == "Intro.\n\n```\na\n  b\n```"
+
+
+def test_empty_pre_writes_no_fence():
+    assert strip_html("<p>a</p><pre>\n  \n</pre><p>b</p>") == "a\n\nb"
+
+
+def _pack_page(tmp_path, html, fmt, extra=()):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "page.html").write_text(html)
+    out = tmp_path / "out"
+    result = CliRunner().invoke(
+        cli, ["pack", str(docs), "-o", str(out), "--no-index", "--format", fmt, *extra])
+    assert result.exit_code == 0, result.output
+    written = next(out.glob(f"*.{fmt}")).read_text()
+    if fmt == "jsonl":
+        return [json.loads(line) for line in written.splitlines()]
+    return written
+
+
+@pytest.mark.parametrize("extra", [(), ("--context-header",), ("--no-extract",)])
+def test_pack_md_fences_pre_with_its_language(tmp_path, extra):
+    assert LUA_FENCED in _pack_page(tmp_path, LUA_PAGE, "md", extra)
+
+
+@pytest.mark.parametrize("extra", [(), ("--context-header",)])
+def test_pack_txt_keeps_pre_lines_without_a_fence(tmp_path, extra):
+    written = _pack_page(tmp_path, LUA_PAGE, "txt", extra)
+    assert LUA_CODE in written
+    assert "```" not in written
+
+
+@pytest.mark.parametrize("extra", [(), ("--context-header",)])
+def test_pack_jsonl_keeps_pre_lines_without_a_fence(tmp_path, extra):
+    record, = _pack_page(tmp_path, LUA_PAGE, "jsonl", extra)
+    assert LUA_CODE in record["content"]
+    assert "```" not in record["content"]
+    assert record["words"] == len(record["content"].split())

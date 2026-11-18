@@ -2,7 +2,7 @@
 
 import os
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pathspec
 
@@ -26,6 +26,59 @@ def is_binary_path(path: str) -> bool:
     """Return True if ``path`` has a known binary/non-text extension."""
     _, ext = os.path.splitext(path)
     return ext.lower() in BINARY_EXTENSIONS
+
+
+# dograpper's own state files: never mirror content in a manifest either (#95).
+DOGRAPPER_STATE_NAMES = frozenset({
+    ".dograpper-manifest.json", "delta_manifest.json", "pack_state.json",
+})
+# Files that are never documentation, whatever extension filter is active:
+# crawler leftovers and dograpper's own state/sidecars (they can land inside
+# the input directory, see issue #91).
+NON_DOC_NAMES = DOGRAPPER_STATE_NAMES | {"robots.txt"}
+
+
+def exclude_subtree(paths: List[str], subtree: str) -> Tuple[List[str], int]:
+    """Drop the files under ``subtree`` (real paths, so symlinks compare equal).
+
+    ``pack`` uses it to keep its own output directory out of its input (#112).
+    Returns the kept paths and how many were dropped.
+    """
+    root = os.path.realpath(subtree)
+    kept = [p for p in paths
+            if os.path.commonpath([os.path.realpath(p), root]) != root]
+    return kept, len(paths) - len(kept)
+
+
+def normalize_extensions(value) -> str:
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(x).strip().lstrip('.') for x in value if str(x).strip())
+    return str(value)
+
+
+def split_by_extension(paths: List[str], extensions: str) -> Tuple[List[str], Dict[str, int]]:
+    """Keep files whose extension is in the comma-separated ``extensions``.
+
+    Files in ``NON_DOC_NAMES`` are dropped regardless. Returns the kept paths
+    and a ``{label: count}`` map of what was skipped (extension, or the file
+    name for named exclusions; ``(none)`` for extensionless files).
+    """
+    allowed = {"." + e.strip().lower().lstrip(".") for e in extensions.split(",") if e.strip()}
+    kept: List[str] = []
+    skipped: Dict[str, int] = {}
+    for path in paths:
+        name = os.path.basename(path)
+        ext = os.path.splitext(name)[1].lower()
+        if name.lower() in NON_DOC_NAMES:
+            label = name.lower()
+        elif ext in allowed:
+            kept.append(path)
+            continue
+        else:
+            label = ext or "(none)"
+        skipped[label] = skipped.get(label, 0) + 1
+        logger.debug(f"Excluded (not documentation): {path}")
+    return kept, skipped
 
 
 def filter_files(file_paths: List[str], ignore_file: Optional[str], ignore_patterns: List[str], base_dir: str, skip_binary: bool = True) -> List[str]:

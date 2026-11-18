@@ -6,8 +6,12 @@ import ipaddress
 import logging
 import ssl
 from dataclasses import dataclass
+from typing import NamedTuple
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from urllib.parse import urlsplit
+
+from ...utils.redact import drop_userinfo
+from .escape import escape_unsafe, request_target
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +33,24 @@ ZSTD_MAX_WINDOW = 8 * 1024 * 1024  # RFC 9659 lets a client refuse larger window
 MAX_RETRY_AFTER_CAP = 3600  # never lifted, even by disable_security_limits
 
 
+class FetchMeta(NamedTuple):
+    """What a browser declares for a request (htsfetch.c hts_fetch_meta): Sec-Fetch-Dest
+    (hts_fetch_dest_name; "" when HTTrack cannot classify the link, which then gets no
+    fetch metadata), Sec-Fetch-Mode, Sec-Fetch-User for a user navigation, and the
+    Sec-Fetch-Site a redirect chain fixed (None: from the Referer)."""
+    dest: str = "document"
+    mode: str = "navigate"
+    user: bool = True
+    site: str | None = None
+
+
+# htsfetch.h hts_fetch_site, from best to worst: hts_fetch_through keeps the worst hop
+SITES = ("none", "same-origin", "same-site", "cross-site")
+
+
+NAVIGATION = FetchMeta()  # a start URL, as if typed in, or a followed <a href>
+
+
 @dataclass(frozen=True)
 class HttrackPolicy:
     user_agent: str
@@ -41,6 +63,8 @@ class HttrackPolicy:
     max_retry_after: int
     delay_ms: int
     obey_robots: bool
+    parse_scripts: bool     # HTTrack -j: scan scripts and stylesheets for links
+    extended_parsing: bool  # HTTrack -%P: guess links in strings and other attributes
 
 
 def _clamp(name, value, cap, disabled):
@@ -55,7 +79,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  max_conn_rate: float = 5.0, max_bandwidth: int = 100_000,
                  timeout: float = 120.0, retries: int = 2, max_links: int = 100_000,
                  max_retry_after: int = 60, delay_ms: int = 0, obey_robots: bool = True,
-                 disable_security_limits: bool = False) -> HttrackPolicy:
+                 disable_security_limits: bool = False, parse_scripts: bool = True,
+                 extended_parsing: bool = True) -> HttrackPolicy:
     # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
     for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
                         ("max_bandwidth", max_bandwidth), ("timeout", timeout),
@@ -82,6 +107,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         max_retry_after=max_retry_after,
         delay_ms=delay_ms,
         obey_robots=obey_robots,
+        parse_scripts=parse_scripts,
+        extended_parsing=extended_parsing,
     )
 
 
@@ -151,6 +178,30 @@ def _site_key(host: str) -> str:
     return ".".join(labels[-2:]) + host[len(name):]
 
 
+def _referer_value(page: str | None) -> str | None:
+    """Referer for a request from `page`, built as htslib.c:1136-1163 builds it: scheme, the
+    escaped host past any user:password, then the escaped path and query (no fragment).
+    None when `page` is empty, does not parse or cannot be escaped: it is dropped, never
+    raised."""
+    if not page:
+        return None
+    try:
+        p = drop_userinfo(urlsplit(page))
+        return f"{p.scheme}://{escape_unsafe(p.netloc)}{request_target(p)}"
+    except ValueError:  # "https://[bad/"; a lone surrogate UTF-8 cannot encode
+        return None
+
+
+def _port(parts) -> int:
+    """htsfetch.c origin_of: the explicit port, else the scheme default, which is also what a
+    port out of range (1-65535) or not a number gets; never a ValueError."""
+    default = 443 if parts.scheme == "https" else 80
+    try:
+        return parts.port or default
+    except ValueError:
+        return default
+
+
 def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
     """Sec-Fetch-Site of a request from page `referer` (R16, htsfetch.c hts_fetch_site_of)."""
     if not referer:
@@ -159,33 +210,68 @@ def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
     if (a.scheme == "https") != (b.scheme == "https"):
         return "cross-site"
     if a.hostname == b.hostname:
-        default = 443 if b.scheme == "https" else 80
-        return "same-origin" if (a.port or default) == (b.port or default) else "same-site"
+        return "same-origin" if _port(a) == _port(b) else "same-site"
     return "same-site" if _site_key(a.hostname or "") == _site_key(b.hostname or "") \
         else "cross-site"
 
 
+def site_of(page: str | None, url: str) -> str:
+    """Sec-Fetch-Site of a request for `url` made from `page` (htsfetch.c hts_fetch_site_of)."""
+    parts = drop_userinfo(urlsplit(url))
+    return _fetch_site(_referer_value(page), parts.scheme, parts.netloc)
+
+
+VALIDATOR_MAX = 64  # htslib.c treathead_opt keeps an ETag or a date only under 64 characters
+
+
+def response_validators(headers: dict[str, str]) -> tuple[str | None, str | None]:
+    """(ETag, Last-Modified) of a response as HTTrack records them for its update mode
+    (htslib.c:1632-1653): each only under 64 characters, and the Date standing for a
+    missing or oversized Last-Modified. `headers` has lowercased names."""
+    def kept(name: str) -> str | None:
+        value = (headers.get(name) or "").strip()
+        return value if value and len(value) < VALIDATOR_MAX else None
+    return kept("etag"), kept("last-modified") or kept("date")
+
+
+def conditional_headers(etag, last_modified) -> tuple[tuple[str, str], ...]:
+    """Revalidation headers for a file recorded with these validators (htsback.c:2575-2601):
+    If-None-Match and If-Modified-Since, or the one whose validator exists. A value that is
+    not printable ASCII under 64 characters (an edited manifest) is never sent."""
+    def ok(value) -> bool:
+        return (isinstance(value, str) and 0 < len(value) < VALIDATOR_MAX and value.isascii()
+                and value.isprintable())
+    return tuple((name, value) for name, value in (("If-None-Match", etag),
+                                                  ("If-Modified-Since", last_modified))
+                 if ok(value))
+
+
 def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str | None,
-                    scheme: str) -> list[tuple[str, str]]:
-    """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked."""
+                    scheme: str, meta: FetchMeta = NAVIGATION,
+                    validators: tuple[tuple[str, str], ...] = ()) -> list[tuple[str, str]]:
+    """Headers in HTTrack's exact order (htslib.c). kind: robots | navigate | linked;
+    `meta` is the link's fetch metadata (robots requests send none); `validators`
+    (conditional_headers) go first, where http_sendhead writes its xsend lines."""
     if kind not in ("robots", "navigate", "linked"):
         raise ValueError(f"unknown request kind: {kind!r}")
     secure = scheme == "https"
-    # htslib.c fetch_meta_sent: navigations only, to a trustworthy origin, with a browser UA
-    meta = (kind != "robots" and _trustworthy(scheme, host)
+    # htslib.c fetch_meta_sent: a classified link, to a trustworthy origin, with a browser UA
+    sent = (kind != "robots" and bool(meta.dest) and _trustworthy(scheme, host)
             and policy.user_agent.startswith("Mozilla/5.0 "))
-    h: list[tuple[str, str]] = []
+    referer = _referer_value(referer)
+    h: list[tuple[str, str]] = list(validators)
     if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
         h.append(("Referer", referer))  # never an https referer to an http URL
     h += [("Connection", "keep-alive"), ("Host", host)]
-    if meta and secure:
+    if sent and secure and meta.mode == "navigate":  # hts_fetch_is_navigation
         h.append(("Upgrade-Insecure-Requests", "1"))
     h += [("User-Agent", policy.user_agent), ("Accept", ACCEPT)]
-    if meta:
-        h += [("Sec-Fetch-Site", _fetch_site(referer, scheme, host)),
-              ("Sec-Fetch-Mode", "navigate"),
-              ("Sec-Fetch-User", "?1"),
-              ("Sec-Fetch-Dest", "document")]
+    if sent:
+        h += [("Sec-Fetch-Site", meta.site or _fetch_site(referer, scheme, host)),
+              ("Sec-Fetch-Mode", meta.mode)]
+        if meta.user:
+            h.append(("Sec-Fetch-User", "?1"))
+        h.append(("Sec-Fetch-Dest", meta.dest))
     h += [("Accept-Language", ACCEPT_LANGUAGE), ("Accept-Encoding", accept_encoding(secure))]
     return h
 

@@ -1,10 +1,11 @@
-"""`download --downloader httrack`: profile options, discovery fetch and the seeded run.
+"""`download --downloader httrack`: profile options, discovery fetch, seeded fetch or crawl.
 
 download.py keeps the click options and the dispatch; this module owns the mode.
 """
 
 import logging
-from typing import Callable, List, Tuple
+import os
+from typing import Callable, Dict, List, Tuple
 from urllib.parse import urljoin, urlsplit
 
 import click
@@ -13,9 +14,12 @@ from ..lib.config_loader import is_explicit
 from ..lib.httrack.crawl import MAX_REDIRECTS, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
+from ..lib.httrack.mirror import mirror_site
 from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import format_report
+from ..lib.manifest import Manifest
 from ..lib.spa_detector import is_spa
+from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
 
 logger = logging.getLogger(__name__)
@@ -27,7 +31,10 @@ _PLAYWRIGHT_MSG = ("httrack profile: Playwright fallback is not implemented yet 
 # The [httrack] options of `download` (single list; sync forwards these plus --downloader).
 PROFILE_OPTIONS = ('user_agent', 'no_robots', 'connections', 'max_conn_rate', 'max_bandwidth',
                    'timeout', 'retries', 'max_links', 'max_retry_after',
-                   'disable_security_limits')
+                   'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing')
+# --no-X flags: the policy holds the positive switch
+_NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
+            'no_extended_parsing': 'extended_parsing'}
 
 
 def _flag(name: str) -> str:
@@ -57,8 +64,7 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
         for param in params:
             if param.name not in from_config or values[param.name] != param.default:
                 raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack")
-    policy_kw = {k: v for k, v in values.items() if k not in ('no_robots',)}
-    policy_kw['obey_robots'] = not values['no_robots']
+    policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     return policy_kw, from_config
 
 
@@ -121,10 +127,25 @@ def discovery_fetch(fetcher) -> Callable[[str], bytes | None]:
     return fetch
 
 
+def _unreached(previous: Manifest, output: str, reached) -> List[str]:
+    """The files of `previous` still on disk that this run neither saved nor kept: HTTrack
+    purges them (-X); the profile only lists them (spec 5.6). URL when recorded, else path."""
+    root, seen = os.path.realpath(output), {os.path.realpath(f) for f in reached}
+    out = []
+    for key, e in previous.files.items():
+        path = resolve_under(root, e.local_path or key)
+        if path and path not in seen and os.path.isfile(path):
+            out.append(redact_url(e.url) if e.url else e.local_path or key)
+    return sorted(out)
+
+
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
-                policy_kw, from_config, discover) -> Tuple[int, int, List[str]]:
-    """Seeded fetch only. `discover` is download's layers 1+2 (`_discover_urls`).
-    Returns (downloaded, skipped, report lines)."""
+                policy_kw, from_config, discover, filters, previous: Manifest | None = None
+                ) -> Tuple[int, int, List[str], Dict[str, str], Dict[str, dict]]:
+    """Seeded fetch when `discover` (download's layers 1+2, `_discover_urls`) finds a URL
+    list, else the recursive crawl from `url`; `filters` (--filter) scopes both. With the
+    `previous` run's manifest the run is an update (HTTrack -C2): its files are revalidated.
+    Returns (downloaded, kept unchanged, report lines, file -> URL fetched, file -> record)."""
     warn_if_old_openssl()
     if headless:
         raise click.ClickException(_PLAYWRIGHT_MSG)
@@ -132,24 +153,39 @@ def run_httrack(url, output, depth, delay, include_extensions, headless, verbose
     fetcher = Fetcher(policy)
     parts = urlsplit(url)
     sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
-    discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints)
-    if not discovered:
-        raise click.ClickException(
-            "httrack profile: recursive crawl is not implemented yet (planned); "
-            "use --downloader wget")
-    logger.info(f"[cascade] httrack: fetching {len(discovered)} URLs from {winning_layer}")
-    res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher)
+    discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints,
+                                         filters)
+    if discovered:
+        logger.info(f"[cascade] httrack: fetching {len(discovered)} URLs from {winning_layer}")
+        res = fetch_url_list(discovered, output, policy, include_extensions, fetcher=fetcher,
+                             filters=filters, previous=previous)
+    else:
+        logger.info("[cascade] layer-3 httrack crawl: link-graph fallback")
+        res = mirror_site(url, output, policy, include_extensions, depth=depth,
+                          fetcher=fetcher, filters=filters, previous=previous)
+    if previous is not None:
+        res.report.unreached = _unreached(previous, output, [*res.files_downloaded, *res.kept])
     if res.front_failed or not res.success:
         for line in format_report(res.report, verbose):
             click.echo(f"  {line}", err=True)
     if res.front_failed:
-        cause = ("the site refused or challenged every seed URL (likely bot protection)"
-                 if res.report.challenged else
-                 "every seed URL was blocked by robots.txt or failed (see the report above)")
+        if discovered:
+            cause = ("the site refused or challenged every seed URL (likely bot protection)"
+                     if res.report.challenged else
+                     "every seed URL was blocked by robots.txt or failed (see the report above)")
+        else:
+            cause = ("the site challenged the start URL (likely bot protection)"
+                     if res.report.challenged else
+                     "the start URL was blocked by robots.txt, redirected out of scope or "
+                     "failed (see the report above)")
         raise click.ClickException(
             f"httrack profile: {cause}. See the README section \"Downloader profiles\".")
     if not res.success:
         raise click.ClickException("httrack fetch failed.")
-    if is_spa(output):
+    # the wget cascade's Playwright triggers: an SPA shell, or a crawl that found one page
+    html_count = sum(f.lower().endswith((".html", ".htm"))
+                     for f in (*res.files_downloaded, *res.kept))
+    if is_spa(output) or (not discovered and html_count <= 1):
         raise click.ClickException(_PLAYWRIGHT_MSG)
-    return len(res.files_downloaded), 0, format_report(res.report, verbose)
+    return (len(res.files_downloaded), res.files_skipped, format_report(res.report, verbose),
+            res.urls, res.records)

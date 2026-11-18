@@ -1,0 +1,57 @@
+--2026-11-17 22:52:54--  http://127.0.0.1:8766/wiki/Category:En
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 55 [text/html]
+Saving to: ‘out/127.0.0.1:8766/wiki/Category:En.html’
+
+     0K                                                       100% 29.6M=0s
+
+2026-11-17 22:52:54 (29.6 MB/s) - ‘out/127.0.0.1:8766/wiki/Category:En.html’ saved [55/55]
+
+--2026-11-17 22:52:54--  http://127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On%26Off
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 87 [text/html]
+Saving to: ‘out/127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On&Off.html’
+
+     0K                                                       100% 52.7M=0s
+
+2026-11-17 22:52:54 (52.7 MB/s) - ‘out/127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On&Off.html’ saved [87/87]
+
+--2026-11-17 22:52:54--  http://127.0.0.1:8766/old
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 301 Moved Permanently
+Location: /new [following]
+--2026-11-17 22:52:54--  http://127.0.0.1:8766/new
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 42 [text/html]
+Saving to: ‘out/127.0.0.1:8766/old.html’
+
+     0K                                                       100% 23.2M=0s
+
+2026-11-17 22:52:54 (23.2 MB/s) - ‘out/127.0.0.1:8766/old.html’ saved [42/42]
+
+Loading robots.txt; please ignore errors.
+--2026-11-17 22:52:54--  http://127.0.0.1:8766/robots.txt
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 404 Not Found
+2026-11-17 22:52:54 ERROR 404: Not Found.
+
+--2026-11-17 22:52:54--  http://127.0.0.1:8766/notes.txt
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 304 Not Modified
+File ‘out/127.0.0.1:8766/notes.txt’ not modified on server. Omitting download.
+
+--2026-11-17 22:52:54--  http://127.0.0.1:8766/missing.html
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 404 Not Found
+2026-11-17 22:52:54 ERROR 404: Not Found.
+
+FINISHED --2026-11-17 22:52:54--
+Total wall clock time: 0.005s
+Downloaded: 3 files, 184 in 0s (34.6 MB/s)
+Converting links in out/127.0.0.1:8766/wiki/Category:En.html... nothing to do.
+Converting links in out/127.0.0.1:8766/old.html... nothing to do.
+Converting links in out/127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On&Off.html... nothing to do.
+Converted links in 3 files in 0 seconds.

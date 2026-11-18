@@ -8,9 +8,8 @@ branding:
   color: "orange"
 
 # Assumes ubuntu runners: python3, wget, jq and the gh CLI are preinstalled.
-# The docs mirror (input-dir), the chunks dir (llm-readiness.json included)
-# and the repo-root .dograpper-manifest.json (download writes it relative to
-# the working directory, NOT inside chunks-dir) must be versioned in the
+# The docs mirror (input-dir, which holds download's .dograpper-manifest.json)
+# and the chunks dir (llm-readiness.json included) must be versioned in the
 # user's repo — that is what carries state across stateless CI runners.
 #
 # The refresh is always a FULL pack, never `pack --delta`: a delta pack
@@ -164,7 +163,9 @@ runs:
           echo ""
           echo "### Source file drift (git)"
           echo ""
-          CHANGES="$(git status --porcelain -- "${INPUT_DIR}")"
+          # download rewrites its manifest on every run; it is not a source file
+          CHANGES="$(git status --porcelain -- "${INPUT_DIR}" \
+            ":(exclude)${INPUT_DIR}/.dograpper-manifest.json")"
           if [ -z "${CHANGES}" ]; then
             echo "_No source file changes._"
           else

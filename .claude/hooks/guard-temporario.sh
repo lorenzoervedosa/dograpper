@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Guardrail PreToolUse: bloqueia escrita/edição dentro de ./temporario/
-# Alinhado à regra crítica 8 do CLAUDE.md ("ignorar tudo em ./temporario/").
+# Alinhado ao contrato 8 do CLAUDE.md ("ignorar tudo em ./temporario/").
 # Recebe o payload da tool em JSON via stdin; bloqueia com exit 2.
 set -euo pipefail
 
@@ -15,7 +15,7 @@ except Exception:
 
 case "$path" in
   */temporario/*|temporario/*)
-    echo 'Bloqueado: ./temporario/ é ignorado pelo projeto (CLAUDE.md, regra crítica 8).' >&2
+    echo 'Bloqueado: ./temporario/ é ignorado pelo projeto (CLAUDE.md, contrato 8).' >&2
     exit 2
     ;;
 esac

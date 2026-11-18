@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 # sync's own option names forwarded to each stage. Used to detect which of
 # them the user set explicitly, so precedence survives ctx.invoke (see
 # lib/config_loader.py and issue #32).
-# Downloader-profile options are NOT redefined here: the click Option objects
-# of `download` are attached to sync below (single source of truth).
-_DOWNLOADER_OPTIONS = ('downloader',) + PROFILE_OPTIONS
+# --filter and the downloader-profile options are NOT redefined here: the click
+# Option objects of `download` are attached to sync below (single source of truth).
+_DOWNLOADER_OPTIONS = ('filter', 'downloader') + PROFILE_OPTIONS
 _DOWNLOAD_PASSTHROUGH = ('depth', 'headless', 'delay',
                          'include_extensions') + _DOWNLOADER_OPTIONS
 _PACK_PASSTHROUGH = ('max_words_per_chunk', 'max_chunks', 'strategy', 'format',
-                     'bundle', 'context_header', 'cross_refs', 'score',
+                     'layout', 'bundle', 'context_header', 'cross_refs', 'score',
                      'dedup', 'show_tokens', 'for_queries')
 
 
@@ -39,23 +39,31 @@ def _explicit_params(ctx: click.Context, names) -> set:
 @click.argument('url', type=str, required=True)
 # --- Download pass-through ---
 @click.option('--output', '-o', required=True, type=click.Path(),
-              help="Base directory (download writes here, pack reads from here)")
+              help="Directory the site is mirrored into; pack then reads it from here. Created if missing.")
 @click.option('--depth', '-d', type=int, default=0, show_default=True,
-              help="Maximum link depth (0 = unlimited)")
+              help="Maximum number of links to follow from the start URL. 0 (default) follows links without a depth limit.")
 @click.option('--headless', is_flag=True, default=False,
-              help="Skip wget and crawl directly with Playwright (SPAs)")
+              help="Skip wget and crawl directly with Playwright, which runs the page JavaScript. Use for single-page apps whose HTML is empty without it.")
 @click.option('--delay', type=int, default=0, show_default=True,
-              help="Interval between requests in ms")
+              help="Pause between requests, in milliseconds. 0 (default) adds no pause.")
 @click.option('--include-extensions', type=str, default="html,md,txt", show_default=True,
-              help="Allowed extensions, comma-separated")
+              help="Comma-separated file extensions to keep from the mirror; other files are discarded. Default: html,md,txt.")
 # --- Pack pass-through ---
 @click.option('--chunks-dir', type=str, default=None,
-              help="Chunks output directory (default: <output>/chunks)")
-@click.option('--max-words-per-chunk', type=int, default=500000, show_default=True)
-@click.option('--max-chunks', type=int, default=50, show_default=True)
-@click.option('--strategy', type=click.Choice(['size', 'semantic']), default='size', show_default=True)
-@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True)
-@click.option('--bundle', type=click.Choice(['notebooklm', 'rag-standard']), default=None)
+              help="Directory the chunks are written to. Default: a chunks/ folder inside --output.")
+@click.option('--max-words-per-chunk', type=int, default=500000, show_default=True,
+              help="Maximum words in one chunk file (see pack --max-words-per-chunk).")
+@click.option('--max-chunks', type=int, default=50, show_default=True,
+              help="Maximum number of chunk files (see pack --max-chunks).")
+@click.option('--strategy', type=click.Choice(['size', 'semantic']), default='size', show_default=True,
+              help="size: pack by word count. semantic: group by directory first (see pack --strategy).")
+@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True,
+              help="Chunk output format (see pack --format). 'xml' is deprecated.")
+@click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
+              help="chunk: numbered chunk files. page: one file per page plus INDEX.md "
+                   "(see pack --layout)")
+@click.option('--bundle', type=click.Choice(['notebooklm', 'rag-standard']), default=None,
+              help="Packaging preset (see pack --bundle). No preset by default.")
 @click.option('--context-header', is_flag=True, default=False,
               help="Inject a dograpper-context-v1 header in each chunk file")
 @click.option('--cross-refs', is_flag=True, default=False,
@@ -63,7 +71,8 @@ def _explicit_params(ctx: click.Context, names) -> set:
 @click.option('--score', is_flag=True, default=False,
               help="Compute LLM Readiness Score per chunk (llm-readiness.json)")
 @click.option('--dedup', type=click.Choice(['off', 'exact', 'fuzzy', 'both'], case_sensitive=False),
-              default='off', show_default=True)
+              default='off', show_default=True,
+              help="Cross-file block deduplication: off, exact, fuzzy or both (see pack --dedup).")
 @click.option('--show-tokens', is_flag=True, default=False,
               help="Show per-chunk and total token count")
 @click.option('--for-queries', type=click.Path(), default=None,
@@ -71,7 +80,7 @@ def _explicit_params(ctx: click.Context, names) -> set:
 @click.pass_context
 def sync(ctx, url, output, depth, headless, delay, include_extensions,
          chunks_dir, max_words_per_chunk, max_chunks, strategy, format,
-         bundle, context_header, cross_refs, score, dedup, show_tokens,
+         layout, bundle, context_header, cross_refs, score, dedup, show_tokens,
          for_queries, **downloader_kw):
     """Incremental download + pack delta in a single command.
 
@@ -80,7 +89,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
       dograpper pack <output> -o <chunks-dir> --delta [pack flags]
 
     Forwarded pack flags: max-words-per-chunk, max-chunks, strategy,
-    format, bundle, context-header, cross-refs, score, dedup,
+    format, layout, bundle, context-header, cross-refs, score, dedup,
     show-tokens. Calibration-only flags (e.g. pack's --report and
     --dry-run) are deliberately not exposed here.
     """
@@ -118,6 +127,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
             max_chunks=max_chunks,
             strategy=strategy,
             format=format,
+            layout=layout,
             bundle=bundle,
             context_header=context_header,
             cross_refs=cross_refs,

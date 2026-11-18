@@ -48,20 +48,251 @@ and fixes alone are a PATCH bump.
 
 ### Added
 
+- `dograpper docs`: serves a self-contained, offline reference page for every
+  command and option on `127.0.0.1` (`--port`, default 8000; `--no-browser`),
+  generated from the installed CLI. Command descriptions and option help
+  strings were rewritten to say what each flag does. ([#110])
+- `pack` detects bot-challenge interstitial pages (Cloudflare "Just a
+  moment..." title) in its input, warns once with the affected files, keeps
+  them out of the chunks and reports `Challenge pages: N` in the summary; it
+  fails if every input file is one. ([#69])
 - `download --downloader httrack` (and the same flags on `sync`): a pure-Python
   fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
   `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`,
-  `--max-retry-after`, `--disable-security-limits`). Recursive crawl and the
-  Playwright fallback fail loud under this profile for now.
+  `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`,
+  `--no-extended-parsing`). When llms.txt and the
+  sitemap give no URL list, it crawls the site from the start URL as HTTrack
+  does: links from `href`, HTTrack's link attributes, meta refresh and CSS,
+  from scripts and event handlers (HTTrack `-j`) and from quoted strings that
+  name a file (HTTrack `-%P`), both on by default as in HTTrack;
+  the start host and directory, `--filter` and `--depth` link hops as scope;
+  meta robots `nofollow` honored and `/cdn-cgi/` never fetched; redirect
+  targets queued as links; a deterministic output whatever the request order;
+  `[progress] httrack crawl:` lines. On both paths, links between saved pages
+  are rewritten to relative paths (HTTrack `-K0`), so the mirror browses
+  offline and `pack --cross-refs` resolves them. A run over an earlier one is
+  an update, as HTTrack `-C2`: each saved file is revalidated with
+  `If-None-Match` / `If-Modified-Since` from its manifest record (new manifest
+  fields `status`, `content_type`, `redirected`; `etag` and `last_modified`
+  filled in), a 304 or an error leaves the previous copy byte-identical, and
+  the summary adds `Not modified (304)`, `Kept the previous copy after an
+  error` and `Not reached this run, kept on disk`. The Playwright fallback
+  fails loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
+- `download` (wget paths) lists the URLs behind a wget exit code 8 in the
+  summary as `Failed: N URLs (first 5 shown)` with each URL and HTTP status;
+  `--verbose` lists them all ([#97](https://github.com/lorenzoervedosa/dograpper/issues/97)).
+- `pack --layout page` (config key `layout`, forwarded by `sync`) writes one
+  file per page under `pages/`, mirroring `INPUT_DIR` with the `--format`
+  extension (`Modding/vi.html` -> `pages/Modding/vi.md`), plus an `INDEX.md`
+  with one line per page: `- [title](<path>), N words, URL`. Names are
+  portable (HTTrack's forbidden characters, Windows reserved names and a
+  trailing dot or space get `_`; case-only collisions get `-2`, `-3`...).
+  Every run rebuilds `pages/` and swaps it in, with no word cap, chunk cap or
+  size warning, and never touches other files in the output directory.
+  `--context-header` writes one header per page; `--cross-refs` markers,
+  `cross_refs.json`, `llm-readiness.json` and `delta_manifest.json` name pages
+  by path. Chunk-only settings, `--bundle`, `--for-queries`, `--format jsonl`
+  and `--dedup` other than `off` exit 2; a `pages/` without `INDEX.md` exits
+  1. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md), [#84])
+- `pack --layout page --context-header` writes exactly one
+  `dograpper-context-v1` header per page file, at line 1, with a new
+  optional `title` field first: the `<title>` minus the site suffix shared by
+  more than half of the pages, else the raw page's first `h1`, else the file
+  stem. The page header holds no `chunk_index`, `total_chunks` or
+  `context_breadcrumb`. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md),
+  [#85])
+- `init --target claude-code`: a config for Claude Code (`layout: page`,
+  `format: md`, `context-header`, `dedup: off`, no chunk-only key) and a
+  `SKILL.md` stub in `--skill-dir` (default `docs-skill`, the directory to
+  pack into) with the skill name, a description to fill in, a link to
+  `INDEX.md` and grep-then-Read usage. An existing `SKILL.md` is never
+  overwritten. The `claude-project` description now says it targets Claude
+  Projects. ([#93])
+- `download --filter RULE` (repeatable, config key `filter`, forwarded by
+  `sync`): HTTrack scan rules (`+pattern` accepts, `-pattern` refuses, the last
+  match wins) applied to every discovered link before it is fetched, under both
+  downloaders: the llms.txt/sitemap lists, `wget --mirror` (as
+  `--accept-regex`/`--reject-regex`), Playwright, and the httrack crawl and
+  redirect targets.
+  A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
+  filtered. Refused URLs are counted as `Filtered by --filter: N` in the
+  summary ([#96](https://github.com/lorenzoervedosa/dograpper/issues/96)).
+- `pack --api-records` (config key `api_records`, `--format jsonl` only)
+  writes each javadoc 25 type page as one container record (qualified name and
+  kind, inheritance, signature, description, declared member names,
+  "inherited from" lists; no summary tables) plus one member record per
+  member (qualified name, full signature with type parameters, doc comment,
+  notes), with ids `NN_path` and `NN_path#anchor`, `breadcrumb`
+  `[container, member]`, `url` ending with the member anchor, and new optional
+  JSONL fields `symbol`, `kind`, `symbol_kind`, `container` and `generator`.
+  Split pages skip extraction and `--dedup`; every other page keeps one
+  record, is listed in a warning with the reason and is counted in the
+  summary's `API records:` line. With `--format md`/`txt`, `--bundle
+  notebooklm` or `--layout page` it exits 2.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#76](https://github.com/lorenzoervedosa/dograpper/issues/76))
+- `pack --api-records` also splits Sphinx autodoc pages (Python domain,
+  Sphinx 9.1/9.2, recognised by their object markup since Sphinx writes no
+  generator meta): the page's module becomes a container record (page text
+  outside the objects, names of the top-level objects), each class and
+  exception a container record, and each function, method, property,
+  attribute and data a member record with its qualified name
+  (`packaging.version.parse`), every signature with its annotations and its
+  docstring, anchored at the object's HTML id. `symbol_kind` gains `module`,
+  `exception`, `function`, `property`, `attribute` and `data`; `generator` is
+  `sphinx`. A page with a `:no-index:` object or unmeasured markup keeps one
+  record and is listed in the warning.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
+- `pack` cleans MediaWiki pages (detected by their `<meta name="generator">`)
+  before extraction: navigation boxes (`navbox`), section edit links
+  (`mw-editsection`) and maintenance boxes (stub, outdated, "help update"
+  boxes with their `Edit (Create account)` links) leave the text; note boxes
+  stay. The version banner leaves the text too: the context header (both
+  layouts) and the JSONL records gain the optional page metadata fields
+  `version` and `version_status` (`current`, `outdated`, `older-build`),
+  read from the banner, else from the first hidden `Version X` category. A
+  redirect alias (a page saved through a redirect, with its target's
+  content) is skipped when its target page is packed too, listed on stderr
+  and counted as `Redirect aliases: N` in the summary. Pages from any other
+  generator are extracted exactly as before. ([schema](docs/schema-v1.md),
+  [#88])
+- `download` (and so `sync`) prints `[progress]` lines while pages are
+  fetched: at most one every 5 s per fetch step, only on change, plus a final
+  one. A fixed URL list (`wget -i`, the httrack profile's seeded list) shows
+  `37/120 URLs (31%) · 2.1 MB · 1m12s`, with an ETA once 10 URLs are done;
+  `wget --mirror` shows files, size, elapsed time and the last URL, and
+  Playwright files, elapsed time, queue size and the last URL. They are INFO
+  lines, so `--quiet` hides them. The Playwright crawl's per-page
+  `Downloading: <url>` line moves to `--verbose`. ([#98])
+
+### Changed
+
+- `pack` now packs documentation formats only by default (`.html`, `.htm`,
+  `.md`, `.txt`). `.js`, `.css`, `.json` and other text files are skipped and
+  listed by extension in one summary line; `robots.txt`,
+  `.dograpper-manifest.json`, `delta_manifest.json` and `pack_state.json` are
+  always skipped. `--include-extensions` (config key `include-extensions`)
+  brings other extensions back. Corpora that relied on packing e.g. `.json`
+  or extensionless files must now opt in. ([#91])
+- `pack --context-header` fills `url` for pages without a manifest entry from
+  the marker in the page head: HTTrack's `Mirrored from <url>` footer or a
+  browser's `saved from url=(N)<url>`. The value is validated (http/https,
+  length, characters, host) and the manifest still wins. The pack summary gains
+  a `Source URLs` line counting URLs by source and listing files left without
+  one, including rejected or conflicting markers. ([#90])
+- `download --manifest` resolves a relative path against `-o`, so the default
+  `.dograpper-manifest.json` now lives in the output directory instead of the
+  current one: a re-run from another directory stays incremental and two
+  mirrors no longer share a manifest. A manifest left at the old location is
+  not read; `download` prints a one-line note naming the new path.
+  `pack --manifest` resolves against `INPUT_DIR`; by default `pack` looks in
+  `INPUT_DIR` and, inside a mirror, up to its root (the parent of the host
+  directory, at most 8 levels up), naming a manifest found above `INPUT_DIR`
+  in a note. The GitHub Action's manifest moves into `input-dir` and is left
+  out of the source-file drift list; a repo-root one from earlier runs is no
+  longer read. ([#95])
+- `pack --format md` (the default) writes each HTML page's structure as
+  Markdown: `#`–`######` headings, `[text](target)` links with the `href` as
+  the page wrote it, `-` / `N.` list items with nesting, and pipe tables with
+  one line per row. A link to the same page, or with a scheme other than
+  `http`, `https` or `mailto`, keeps only its text; a list item holding a
+  block is written as its blocks. Counts leave the markup out (context
+  headers, `INDEX.md`, `llm-readiness.json`), and `--max-words-per-chunk`
+  measures each page's plain text, as for `txt`. `--dedup` compares a table
+  or a list as one block. `txt` and `jsonl` output is unchanged. ([#87])
 
 ### Fixed
 
+- `pack` skips a saved HTTP error page (a `<title>` such as `404 Not Found`
+  and almost no other text, as a mirror stores when a URL answered an error),
+  warns once with the affected files (also in `--dry-run` and `--layout page`),
+  reports `Error pages: N` in the pack summary (a `--dry-run` counts it in
+  `Files excluded`), and fails if every input file is one. A page that
+  documents or mentions the error, or a long page with that title, is kept.
+  ([#121])
+- `pack --dedup` no longer deduplicates a page recognised as an API reference
+  (Javadoc), with or without `--api-records`: a member block repeated across
+  pages, such as an override, stays on every page, and the summary and
+  `--dry-run` report `Pages exempted: N (API reference)`. ([#68])
+- `<br>` separates its neighbours instead of gluing them (`-debuglog=All-debuglog=Network,Sound`):
+  a line break in body text (md and txt), and `; ` inside an md pipe-table cell, so the row stays
+  on one line. Word counts are unchanged.
+- Plain-text output (`--format txt`, `jsonl`) separates the cells of a table row with a tab
+  (`debuglog<TAB>-debuglog=All`, not `debuglog-debuglog=All`). The tab is whitespace, so word counts
+  change only where gluing had merged two words. md is unchanged.
+  ([#125](https://github.com/lorenzoervedosa/dograpper/issues/125))
+- md output renders Javadoc 25 summary grids (`div.summary-table`) as pipe tables, one line per
+  row (`| static final double | PI | 3.14159 |`), so a grep hit on a member or constant carries its
+  type and value. Word counts and readiness grades are unchanged.
+  ([#120](https://github.com/lorenzoervedosa/dograpper/issues/120))
+- `pack` renders MediaWiki red links (`a.new`, `redlink=1` or `action=edit`
+  targets) as plain text, so no `index.php?...&action=edit&redlink=1`
+  destination reaches the output.
+  ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
+- `pack` drops the heading a MediaWiki page is left with once a navbox or
+  maintenance box is removed from its section (the empty `## Navigation` that
+  ended most wiki pages). A heading whose section still has content stays.
+  ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
+- `pack --layout page --format md` points a link to a packed page at that
+  page's file, relative to the linking file (`[1]: <../inventory/ItemContainer.md>`),
+  instead of the source `.html` name, which the pack does not hold; a link to
+  a redirect alias that `pack` skipped points at its target's file. Links to
+  anything else keep their target.
+  ([#118](https://github.com/lorenzoervedosa/dograpper/issues/118))
+- `pack --format md` writes links as reference links: `[text][n]` in the line
+  and one `[n]: target` line per distinct target at the end of each page,
+  numbered by first use, instead of `[text](target)`, so a line is as long as
+  its visible text and every line of a page-layout pack fits one `Read`. In
+  the chunk layout each page section ends with its own definitions, and each
+  section a `--context-header` split makes ends with those of the links it
+  holds. Word counts, `txt` and `jsonl` are unchanged; `--cross-refs` markers
+  follow the `[n]` and never enter a definition; `--dedup` never removes a
+  definition and compares links by target.
+  ([#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
+- `pack --format md` writes a link inside code (`<code>`, `<pre>`, a Javadoc
+  `div.member-signature`) as its text, so a signature reads as the source
+  shows it and greps as a phrase (`rg 'ItemContainer getInventory'`); links in
+  prose are still written as links.
+  ([#117](https://github.com/lorenzoervedosa/dograpper/issues/117))
+- `download` and `pack --delta` exit 1 with the path in the message when the
+  manifest (`.dograpper-manifest.json`) or `pack_state.json` cannot be written,
+  instead of logging an error and exiting 0; both files are now written
+  atomically, so an interrupted run keeps the previous one.
+  ([#113](https://github.com/lorenzoervedosa/dograpper/issues/113))
+- `pack` never reads its own output: when `-o` lies inside `INPUT_DIR` (the
+  default for `sync`, `<output>/chunks`), that subtree is left out of the input
+  and reported once as `Excluded own output directory: N file(s) under ...`,
+  so a second run no longer re-packs the first one's chunks and the delta gate
+  reports "no files changed". `-o` equal to `INPUT_DIR` is a usage error
+  (exit 2). ([#112](https://github.com/lorenzoervedosa/dograpper/issues/112))
+- `pack` zero-pads chunk file names, JSONL ids, `Chunk N of M` headers and sidecar
+  chunk ids to one width per run (`max(2, digits of the chunk count)`), so
+  100 or more chunks sort numerically; packs under 100 chunks keep their names
+  ([#92](https://github.com/lorenzoervedosa/dograpper/issues/92)).
+- `pack --score` no longer grades a chunk with empty extracted content as `A`;
+  it is graded `C` with score 0. ([#69])
+- `download` manifest entries record `url` as the URL dograpper requested for
+  each file (never a redirect target, which may carry a signed token; without
+  userinfo; none at all when its query has a parameter other than a
+  navigation name such as `title`, `oldid`, `page` or `lang`) instead of
+  appending the saved path to the seed URL, which doubled a seed's path
+  segment (`.../PZ-API-Docs/PZ-API-Docs/index.html`), glued paths onto a page
+  seed and kept the `.html` that `--adjust-extension` added. Query pages such
+  as `index.php?title=...` get their real URL. A file no run recorded gets
+  `"url": null`, and `pack --context-header` leaves `url` out for such
+  sources. ([#94])
+- `download` no longer lists its own manifest, `delta_manifest.json` or
+  `pack_state.json` among the mirror's files when they sit inside `-o`, and
+  `pack --delta` leaves them out of `pack_state.json`. ([#95])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
+- `download` llms.txt discovery no longer crashes on a truncated or corrupt
+  gzip body; the candidate is logged and skipped. ([#77])
 - `pack --cross-refs` no longer corrupts words where a link's text is a
   substring of an unrelated word in the chunk (e.g. link text "Install"
   inside the word "Installation"). `annotate_cross_refs` now matches on
@@ -72,12 +303,71 @@ and fixes alone are a PATCH bump.
   size matches but mtime disagrees, instead of trusting mtime alone; the
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
+- `pack` no longer drops HTML-escaped angle brackets (`&lt;T&gt;`, escaped
+  markup in code blocks) during content extraction; default output now keeps
+  `List<T>` and `<div>` examples, matching `--no-extract`. ([#66])
+- `pack --dedup` no longer deletes a page's own content. A block is never
+  removed against another block of the same page, in any mode, and `fuzzy`
+  keeps a near-duplicate that starts with a different token (a key, tag or
+  parameter name) or differs only in numbers (a version banner, a date). The
+  summary and the `--dry-run` report gain a `Matches kept` line counting the
+  blocks each rule kept. A block identical on several pages, an identical
+  version banner included, is still kept only on the first. ([#89])
+- `pack --dedup` no longer deletes the version banner of a MediaWiki page
+  because an earlier page carries the same one (as text, 137 banners became
+  29 under `exact` on a 167-page wiki): the version is now page metadata in
+  the context header, out of the text dedup reads, so with `--context-header`
+  every page keeps its `version`. ([#88], [#89])
+- `pack --cross-refs` annotates each page's own content, for the links that
+  page holds, as the chunk is written, instead of the first occurrence of the
+  link text anywhere in the written chunk file. Markers no longer rewrite
+  JSONL `id`/`source` values, md/txt file indexes or context headers, land in
+  another page that merely mentions the link text, or split a dotted
+  identifier (`pkg.AttachedItems [-> docs_chunk_01].AttachedItems`), and
+  large corpora no longer stall (each link text's pattern is compiled once
+  per run). ([#67])
+- `pack --context-header --manifest PATH` exits 1 with a clear message when
+  PATH is missing or cannot be loaded, instead of silently packing without
+  URLs. A broken file at the default manifest path is reported as a note and
+  skipped. ([#90])
+- `pack --context-header` resolves manifest URLs when `INPUT_DIR` is a
+  subdirectory of the download output, instead of matching nothing. Files are
+  matched on their path in the mirror, so a page in a subdirectory no longer
+  takes the URL of a same-named page at the site root; a file that matches
+  several entries gets no `url` and is listed in the summary. ([#90])
+- `pack --context-header` writes `>` in header values as the JSON escape
+  `\u003e`, so a heading or source path holding `-->` no longer closes the
+  `dograpper-context-v1` comment early; JSON parsers read the same value.
+  ([ADR-0010](docs/adr/0010-per-page-pack-layout.md))
+- `pack` keeps the line breaks and indentation of HTML `<pre>` blocks in
+  `md`, `txt` and `jsonl` instead of flattening each one to a single line.
+  `md` writes them as fenced code blocks tagged with the language named by a
+  `mw-highlight-lang-*`, `language-*`, `lang-*` or Sphinx `highlight-*` class
+  (` ```lua `); `txt`
+  and `jsonl` carry the code without the fence. `--dedup` and chunking no
+  longer split a code block at a blank line, and `--score` counts a fenced
+  block as intact even when its code holds backticks or a `<pre>` sample.
+  ([#86])
+- `download`'s Playwright layer follows the links of a page it skips as
+  cached on an incremental run, instead of ending the crawl there. ([#94])
+- `pack --cross-refs` writes its marker after a Markdown link whose text it
+  matched (`[Item](Item.html) [-> docs_chunk_02]`) instead of inside the
+  brackets, and never inside a link's target, where it broke the link. ([#87])
+- `pack --layout page --format txt` writes `<pre>` code without its fence
+  lines, as txt chunks do, and leaves them out of the page's `INDEX.md` and
+  header word counts. ([#86])
 
 ### Security
 
 - URLs that `download` logs during llms.txt and sitemap discovery drop
   credentials and escape control characters, so a hostile sitemap or
   robots.txt cannot inject terminal escape sequences.
+- `download` never writes a credential from a URL's query into the manifest,
+  and so into a pack: a URL is recorded only when every query parameter is a
+  navigation name (`title`, `oldid`, `page`, `lang`, `q`, ... see README),
+  otherwise `"url": null`. Logs and failure reports show the value of
+  credential-like parameters (`token`, `secret`, `key`, `sig`, `jwt`,
+  `X-Amz-*`, ...) as `REDACTED`. ([#94])
 
 ## [0.4.0] - 2026-08-15
 
@@ -147,3 +437,22 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#66]: https://github.com/lorenzoervedosa/dograpper/issues/66
+[#77]: https://github.com/lorenzoervedosa/dograpper/issues/77
+[#91]: https://github.com/lorenzoervedosa/dograpper/issues/91
+[#69]: https://github.com/lorenzoervedosa/dograpper/issues/69
+[#89]: https://github.com/lorenzoervedosa/dograpper/issues/89
+[#67]: https://github.com/lorenzoervedosa/dograpper/issues/67
+[#94]: https://github.com/lorenzoervedosa/dograpper/issues/94
+[#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
+[#84]: https://github.com/lorenzoervedosa/dograpper/issues/84
+[#85]: https://github.com/lorenzoervedosa/dograpper/issues/85
+[#93]: https://github.com/lorenzoervedosa/dograpper/issues/93
+[#86]: https://github.com/lorenzoervedosa/dograpper/issues/86
+[#95]: https://github.com/lorenzoervedosa/dograpper/issues/95
+[#87]: https://github.com/lorenzoervedosa/dograpper/issues/87
+[#88]: https://github.com/lorenzoervedosa/dograpper/issues/88
+[#110]: https://github.com/lorenzoervedosa/dograpper/issues/110
+[#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
+[#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
+[#98]: https://github.com/lorenzoervedosa/dograpper/issues/98

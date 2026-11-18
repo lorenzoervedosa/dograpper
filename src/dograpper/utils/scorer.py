@@ -2,7 +2,9 @@
 
 import re
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
+
+from .code_fence import sub_closed_fences
 
 
 @dataclass
@@ -52,16 +54,20 @@ def find_boundary_issues(text: str) -> List[BoundaryIssue]:
     - Unbalanced ``` fences (odd count) -> one issue at the last fence
     - Unbalanced <pre>...</pre> tags -> one issue at the first unmatched
       opener (or first surplus closer when closers exceed openers)
+
+    A closed fenced block is intact whatever its code holds (backticks,
+    a <pre> in an HTML sample), so it is blanked out before counting.
     """
     issues = []
+    scan = sub_closed_fences(text, lambda block: re.sub(r"[^\n]", " ", block))
 
-    fences = list(re.finditer(r'```', text))
+    fences = list(re.finditer(r'```', scan))
     if len(fences) % 2 != 0:
         line, snippet = _line_at(text, fences[-1].start())
         issues.append(BoundaryIssue(kind="code_fence", line=line, snippet=snippet))
 
-    opens = [(m.start(), 'open') for m in re.finditer(r'<pre[\s>]', text, re.IGNORECASE)]
-    closes = [(m.start(), 'close') for m in re.finditer(r'</pre>', text, re.IGNORECASE)]
+    opens = [(m.start(), 'open') for m in re.finditer(r'<pre[\s>]', scan, re.IGNORECASE)]
+    closes = [(m.start(), 'close') for m in re.finditer(r'</pre>', scan, re.IGNORECASE)]
     if len(opens) != len(closes):
         # Pair tags in document order to locate the offender
         stack = []
@@ -162,16 +168,25 @@ def score_chunk(
     extracted_words: int,
     headings_count: int,
     max_heading_level: int,
+    word_count: Optional[int] = None,
 ) -> ChunkScore:
-    """Main function — calculate all metrics for a chunk."""
+    """Main function — calculate all metrics for a chunk.
+
+    ``word_count`` defaults to the words of ``text``; md passes its count
+    without Markdown markup.
+    """
     noise = calculate_noise_ratio(raw_words, extracted_words)
     boundary_ok = check_boundary_integrity(text)
     depth = calculate_context_depth(headings_count, max_heading_level)
     score, grade = calculate_grade(noise, boundary_ok, depth)
+    if extracted_words == 0:
+        # An empty record scores perfect on every metric (no noise, no broken
+        # blocks), but there is nothing to feed a model: never better than C.
+        score, grade = 0.0, "C"
 
     return ChunkScore(
         chunk_id=chunk_id,
-        word_count=len(text.split()),
+        word_count=len(text.split()) if word_count is None else word_count,
         noise_ratio=noise,
         boundary_integrity=boundary_ok,
         context_depth=depth,

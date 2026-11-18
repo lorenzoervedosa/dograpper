@@ -14,6 +14,7 @@ import pytest
 
 from dograpper.lib.httrack import policy
 from dograpper.lib.httrack.policy import (
+    FetchMeta,
     build_policy,
     make_ssl_context,
     request_headers,
@@ -169,6 +170,77 @@ def test_https_referer_never_sent_to_http():
     assert got["Referer"] == "http://localhost/a"
 
 
+@pytest.mark.parametrize("meta,uir,fetch", [
+    # htsfetch.c hts_fetch_classify + htslib.c:1240-1297, one row per kind of destination
+    (FetchMeta("iframe", "navigate", False), True, [("Sec-Fetch-Mode", "navigate"),
+                                                    ("Sec-Fetch-Dest", "iframe")]),
+    (FetchMeta("image", "no-cors", False), False, [("Sec-Fetch-Mode", "no-cors"),
+                                                   ("Sec-Fetch-Dest", "image")]),
+    (FetchMeta("font", "cors", False), False, [("Sec-Fetch-Mode", "cors"),
+                                               ("Sec-Fetch-Dest", "font")]),
+    (FetchMeta("", "navigate", True), False, []),  # unclassified link: no fetch metadata
+])
+def test_fetch_metadata_follows_the_link_destination(meta, uir, fetch):
+    got = request_headers(build_policy(), "h.test", kind="linked", referer="https://h.test/",
+                          scheme="https", meta=meta)
+    names = _names(got)
+    assert ("Upgrade-Insecure-Requests" in names) is uir
+    sec = [(k, v) for k, v in got if k.startswith("Sec-Fetch-") and k != "Sec-Fetch-Site"]
+    assert sec == fetch
+    assert ("Sec-Fetch-Site" in names) is bool(fetch)
+
+
+def test_fetch_metadata_can_fix_sec_fetch_site():
+    # a redirect chain carries the site hts_fetch_through computed, whatever the Referer
+    got = dict(request_headers(build_policy(), "h.test", kind="linked",
+                               referer="https://h.test/latest/", scheme="https",
+                               meta=FetchMeta(site="none")))
+    assert got["Sec-Fetch-Site"] == "none" and got["Referer"] == "https://h.test/latest/"
+
+
+@pytest.mark.parametrize("page,url,want", [
+    ("https://h.test/a", "https://h.test/b", "same-origin"),
+    ("https://h.test/a", "https://h.test:8443/b", "same-site"),
+    ("https://h.test/a", "http://h.test/b", "cross-site"),
+    (None, "https://h.test/b", "none"),
+])
+def test_site_of_compares_a_page_and_a_url(page, url, want):
+    assert policy.site_of(page, url) == want
+
+
+@pytest.mark.parametrize("page,want", [
+    ("https://u:pw@h.test/a b?q=é#frag", "https://h.test/a%20b?q=%c3%a9"),
+    ("https://user@h.test:8443", "https://h.test:8443/"),
+    ("https://h.test/%41#", "https://h.test/%41"),
+])
+def test_referer_is_sent_without_userinfo_or_fragment_and_escaped(page, want):
+    # htslib.c:1136-1163: scheme + escaped host past the userinfo + escaped path and query
+    got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
+                               scheme="https"))
+    assert got["Referer"] == want
+
+
+@pytest.mark.parametrize("page,site", [
+    ("https://h.test:99999/", "same-origin"),
+    ("https://h.test:x/", "same-origin"),
+    ("https://h.test:0/", "same-origin"),
+    ("https://docs.h.test:99999/", "same-site"),
+])
+def test_referer_with_unusable_port_keeps_the_scheme_default(page, site):
+    # htsfetch.c origin_of: "a port out of range keeps the scheme default"; never a ValueError
+    assert policy._fetch_site(page, "https", "h.test") == site
+    got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
+                               scheme="https"))
+    assert got["Sec-Fetch-Site"] == site and got["Referer"] == page
+
+
+@pytest.mark.parametrize("page", ["https://[bad/a", "https://h.test/\ud800"])
+def test_unusable_referer_is_dropped_not_raised(page):
+    got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
+                               scheme="https"))
+    assert "Referer" not in got and got["Sec-Fetch-Site"] == "none"
+
+
 @pytest.mark.parametrize("br,zstd,want", [
     (False, False, "gzip, deflate, identity;q=0.9"),
     (True, False, "gzip, deflate, br, identity;q=0.9"),
@@ -311,3 +383,49 @@ def test_zstandard_without_frame_end_api_is_refused(monkeypatch, missing):
     _fake(monkeypatch, "zstandard", ZstdDecompressor=Old)
     assert "zstd" not in policy.accept_encoding()
     assert policy.decoder_module("zstd") is None
+
+
+# -- update mode: validators (htslib.c:1632-1653) and conditional headers (htsback.c:2575-2601) --
+
+LONG = "x" * 64  # HTTrack keeps a value only under 64 characters
+
+
+@pytest.mark.parametrize("headers,want", [
+    ({"etag": '"v1"', "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT"},
+     ('"v1"', "Mon, 01 Jan 2024 00:00:00 GMT")),
+    ({"etag": 'W/"v1"', "date": "Tue, 02 Jan 2024 00:00:00 GMT"},
+     ('W/"v1"', "Tue, 02 Jan 2024 00:00:00 GMT")),  # Date stands for Last-Modified
+    ({"last-modified": LONG, "date": "Tue, 02 Jan 2024 00:00:00 GMT"},
+     (None, "Tue, 02 Jan 2024 00:00:00 GMT")),
+    ({"etag": LONG, "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT",
+      "date": "Tue, 02 Jan 2024 00:00:00 GMT"}, (None, "Mon, 01 Jan 2024 00:00:00 GMT")),
+    ({"etag": "", "date": LONG}, (None, None)),
+    ({}, (None, None)),
+])
+def test_response_validators_are_recorded_as_httrack_records_them(headers, want):
+    assert policy.response_validators(headers) == want
+
+
+@pytest.mark.parametrize("etag,lm,want", [
+    ('"v1"', "Mon", [("If-None-Match", '"v1"'), ("If-Modified-Since", "Mon")]),
+    ('"v1"', None, [("If-None-Match", '"v1"')]),
+    (None, "Mon", [("If-Modified-Since", "Mon")]),
+    (None, None, []),
+    ('"a"\r\nX-Injected: 1', LONG, []),  # an edited manifest never reaches the wire
+    (7, "café", []),
+])
+def test_conditional_headers_follow_htsback_c(etag, lm, want):
+    assert list(policy.conditional_headers(etag, lm)) == want
+
+
+def test_conditional_headers_go_first_and_leave_the_rest_identical():
+    """htslib.c:1113-1115: the conditional lines (xsend) follow the request line, before
+    the Referer; Accept-Encoding is unchanged, the identity of htsback.c:2606 being wiped by
+    hts_init_htsblk (htsback.c:2723, 2754)."""
+    p = build_policy()
+    v = policy.conditional_headers('"v1"', "Mon, 01 Jan 2024 00:00:00 GMT")
+    plain = request_headers(p, "localhost:8443", kind="linked", referer="https://localhost:8443/",
+                            scheme="https")
+    got = request_headers(p, "localhost:8443", kind="linked", referer="https://localhost:8443/",
+                          scheme="https", validators=v)
+    assert got == [*v, *plain]
