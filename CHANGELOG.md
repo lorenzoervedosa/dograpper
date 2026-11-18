@@ -48,6 +48,14 @@ and fixes alone are a PATCH bump.
 
 ### Added
 
+- `download --downloader fire-engine` (and on `sync`): the httrack crawl over a
+  `curl_cffi` transport that sends a browser TLS/HTTP-2 fingerprint, for docs
+  behind a WAF that rejects the stdlib handshake. Adds `--proxy` and
+  `--impersonate`; needs the optional `fire-engine` extra (`curl_cffi`), and
+  fails loud with an install hint when it is missing. Same discovery, scope,
+  pacing, robots.txt and link rewriting as `httrack`; automatic challenge/CAPTCHA
+  solving is a non-goal. ([ADR-0011](docs/adr/0011-fire-engine-downloader.md))
+
 - `dograpper docs`: serves a self-contained, offline reference page for every
   command and option on `127.0.0.1` (`--port`, default 8000; `--no-browser`),
   generated from the installed CLI. Command descriptions and option help

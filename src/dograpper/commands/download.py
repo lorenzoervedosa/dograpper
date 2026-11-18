@@ -5,6 +5,7 @@ import click
 import logging
 from typing import Dict, List, Tuple
 
+from ._fire_engine_profile import run_fire_engine
 from ._httrack_profile import resolve_profile, run_httrack
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import normalize_extensions
@@ -287,9 +288,15 @@ def _run_download_cascade(
 @click.option('--filter', multiple=True, metavar='RULE',
               help="URL rule in HTTrack syntax, repeatable: +pattern accepts, -pattern "
                    "refuses, the last match wins (e.g. --filter '-*' --filter '+example.com/wiki/On*')")
-@click.option('--downloader', type=click.Choice(['wget', 'httrack']), default='wget',
-              show_default=True,
-              help="Download backend: wget (default) or the httrack profile (pure-Python fetch and crawl)")
+@click.option('--downloader', type=click.Choice(['wget', 'httrack', 'fire-engine']),
+              default='wget', show_default=True,
+              help="Download backend: wget (default), the httrack profile (pure-Python fetch "
+                   "and crawl), or fire-engine (httrack crawl over a curl_cffi browser-"
+                   "fingerprint transport, for docs behind a TLS-checking WAF)")
+@click.option('--proxy', type=str, default=None,
+              help="[fire-engine] Proxy URL for every request (e.g. http://user:pass@host:port)")
+@click.option('--impersonate', type=str, default='chrome', show_default=True,
+              help="[fire-engine] curl_cffi browser profile to impersonate (e.g. chrome124)")
 @click.option('--user-agent', type=str, default=None,
               help="[httrack] User-Agent header (default: dograpper identifier)")
 @click.option('--no-robots', is_flag=True, default=False,
@@ -312,7 +319,7 @@ def _run_download_cascade(
 @click.option('--disable-security-limits', is_flag=True, default=False,
               help="[httrack] Lift the connection, rate and bandwidth clamps")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -334,6 +341,8 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'manifest': manifest,
         'filter': filter,
         'downloader': downloader,
+        'proxy': proxy,
+        'impersonate': impersonate,
         'user_agent': user_agent,
         'no_robots': no_robots,
         'connections': connections,
@@ -359,9 +368,16 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     manifest_path = os.path.join(output, manifest_name)
 
     downloader = merged_params.get('downloader', downloader)
-    if downloader not in ('wget', 'httrack'):
+    if downloader not in ('wget', 'httrack', 'fire-engine'):
         raise click.UsageError(
-            f"invalid downloader {downloader!r}; allowed: wget, httrack")
+            f"invalid downloader {downloader!r}; allowed: wget, httrack, fire-engine")
+    proxy = merged_params.get('proxy', proxy)
+    impersonate = merged_params.get('impersonate', impersonate)
+    if downloader != 'fire-engine':  # no silent fallback: a misplaced flag is an error
+        if proxy is not None:
+            raise click.UsageError("--proxy requires --downloader fire-engine")
+        if impersonate != 'chrome':
+            raise click.UsageError("--impersonate requires --downloader fire-engine")
     policy_kw, from_config = resolve_profile(ctx, merged_params, downloader)
     filters = _url_filters(ctx, merged_params['filter'])
     if downloader == 'wget':
@@ -383,6 +399,12 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         files_downloaded, files_skipped, report_lines, fetched = run_httrack(
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
+        )
+    elif downloader == 'fire-engine':
+        files_downloaded, files_skipped, report_lines, fetched = run_fire_engine(
+            url, output, depth, delay, include_extensions, headless,
+            bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
+            proxy=proxy, impersonate=impersonate,
         )
     else:
         files_downloaded, files_skipped, fetched = _run_download_cascade(
