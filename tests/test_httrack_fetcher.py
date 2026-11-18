@@ -1,7 +1,6 @@
 import gzip
 import random
 import socket
-import time
 import logging
 import threading
 import zlib
@@ -13,6 +12,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from dograpper.utils.challenge import is_challenge
+from tests.linearity import assert_linear
 from dograpper.lib.httrack import fetcher as fetcher_mod, policy as policy_mod
 from dograpper.lib.httrack.crawl import fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher
@@ -282,10 +282,10 @@ def test_request_headers_sent_in_order(server):
 
 
 def test_is_challenge_is_linear_on_hostile_bodies():
-    t0 = time.perf_counter()
-    assert not is_challenge(200, {}, b"<title" * 25000)
-    assert not is_challenge(200, {}, b"<title>" * 25000)
-    assert time.perf_counter() - t0 < 1.0
+    def check(body):
+        assert not is_challenge(200, {}, body)
+    assert_linear(lambda k: b"<title" * k, check, 25000)
+    assert_linear(lambda k: b"<title>" * k, check, 25000)
 
 
 def test_decompression_bomb_and_oversize_body_rejected(server, monkeypatch):
@@ -598,11 +598,12 @@ def test_many_tiny_gzip_members_rejected_fast():
     assert fetcher_mod._decode(one * 64, "gzip") == b"x" * 64
     with pytest.raises(ValueError, match="too many compressed members"):
         fetcher_mod._decode(one * 65, "gzip")
-    body = gzip.compress(b"") * 100_000  # ~2 MB; took ~3 s before the cap
-    t = time.perf_counter()
-    with pytest.raises(ValueError, match="too many compressed members"):
-        fetcher_mod._decode(body, "gzip")
-    assert time.perf_counter() - t < 0.5
+    empty = gzip.compress(b"")  # 100_000 of these (~2 MB) took ~3 s before the cap
+
+    def decode(body):
+        with pytest.raises(ValueError, match="too many compressed members"):
+            fetcher_mod._decode(body, "gzip")
+    assert_linear(lambda k: empty * k, decode, 25_000)
 
 
 @pytest.mark.parametrize("name", ["compression.zstd", "zstandard"])
@@ -614,10 +615,12 @@ def test_zstd_frame_cap_and_fast_rejection(name):
     assert fetcher_mod._zstd(mod, one * 64) == b"x" * 64
     with pytest.raises(ValueError, match="too many compressed members"):
         fetcher_mod._zstd(mod, one * 65)
-    t = time.perf_counter()
-    with pytest.raises(ValueError, match="too many compressed members"):
-        fetcher_mod._zstd(mod, mod.compress(b"") * 100_000)
-    assert time.perf_counter() - t < 0.5
+    empty = mod.compress(b"")
+
+    def decode(body):
+        with pytest.raises(ValueError, match="too many compressed members"):
+            fetcher_mod._zstd(mod, body)
+    assert_linear(lambda k: empty * k, decode, 25_000)
 
 
 def test_brotli_multi_call_continuation():
