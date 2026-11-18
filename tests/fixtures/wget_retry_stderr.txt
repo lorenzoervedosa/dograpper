@@ -1,0 +1,71 @@
+--2026-11-18 07:09:33--  http://127.0.0.1:8766/
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 100 [text/html]
+Saving to: ‘out/127.0.0.1:8766/index.html’
+
+     0K                                                       100% 48.7M=0s
+
+Last-modified header missing -- time-stamps turned off.
+2026-11-18 07:09:33 (48.7 MB/s) - ‘out/127.0.0.1:8766/index.html’ saved [100/100]
+
+Loading robots.txt; please ignore errors.
+--2026-11-18 07:09:33--  http://127.0.0.1:8766/robots.txt
+Reusing existing connection to 127.0.0.1:8766.
+HTTP request sent, awaiting response... 404 Not Found
+2026-11-18 07:09:33 ERROR 404: Not Found.
+
+--2026-11-18 07:09:33--  http://127.0.0.1:8766/gone
+Reusing existing connection to 127.0.0.1:8766.
+HTTP request sent, awaiting response... No data received.
+Retrying.
+
+--2026-11-18 07:09:34--  (try: 2)  http://127.0.0.1:8766/gone
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 404 Not Found
+2026-11-18 07:09:34 ERROR 404: Not Found.
+
+--2026-11-18 07:09:34--  http://127.0.0.1:8766/flaky
+Reusing existing connection to 127.0.0.1:8766.
+HTTP request sent, awaiting response... No data received.
+Retrying.
+
+--2026-11-18 07:09:35--  (try: 2)  http://127.0.0.1:8766/flaky
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 57 [text/html]
+Saving to: ‘out/127.0.0.1:8766/flaky.html’
+
+     0K                                                       100%  488K=0s
+
+Last-modified header missing -- time-stamps turned off.
+2026-11-18 07:09:35 (488 KB/s) - ‘out/127.0.0.1:8766/flaky.html’ saved [57/57]
+
+--2026-11-18 07:09:35--  http://127.0.0.1:8766/old
+Reusing existing connection to 127.0.0.1:8766.
+HTTP request sent, awaiting response... 302 Found
+Location: /new [following]
+--2026-11-18 07:09:35--  http://127.0.0.1:8766/new
+Reusing existing connection to 127.0.0.1:8766.
+HTTP request sent, awaiting response... No data received.
+Retrying.
+
+--2026-11-18 07:09:36--  (try: 2)  http://127.0.0.1:8766/new
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 43 [text/html]
+Saving to: ‘out/127.0.0.1:8766/old.html’
+
+     0K                                                       100%  345K=0s
+
+Last-modified header missing -- time-stamps turned off.
+2026-11-18 07:09:36 (345 KB/s) - ‘out/127.0.0.1:8766/old.html’ saved [43/43]
+
+FINISHED --2026-11-18 07:09:36--
+Total wall clock time: 3.0s
+Downloaded: 3 files, 200 in 0s (821 KB/s)
+Converting links in out/127.0.0.1:8766/flaky.html... nothing to do.
+Converting links in out/127.0.0.1:8766/index.html... 3.
+2-1
+Converting links in out/127.0.0.1:8766/old.html... nothing to do.
+Converted links in 3 files in 0 seconds.

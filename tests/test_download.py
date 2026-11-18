@@ -1036,6 +1036,40 @@ def test_both_wget_paths_report_saved_urls():
             assert fn(arg, d).urls == parse_wget_log(stderr)[1]
 
 
+# Real wget 1.21.4 --mirror stderr (LANGUAGE=C) against a local server that dropped
+# the first request for /gone, /flaky and /new: wget retried each one on a request
+# line "--<date>--  (try: 2)  <url>"; /gone then got a 404, /flaky a 200, and /new,
+# where /old redirects, a 200 saved as old.html (exit 8).
+
+def test_parse_wget_log_reads_the_url_of_a_retry_line():
+    from dograpper.lib.wget_mirror import parse_wget_log
+    failed, saved = parse_wget_log(_fixture("wget_retry_stderr.txt"))
+    assert saved == {f"{O}/index.html": f"{H}/", f"{O}/flaky.html": f"{H}/flaky",
+                     f"{O}/old.html": f"{H}/old"}  # a retry goes on with the chain it is in
+    assert [(f.url, f.status) for f in failed] == [(f"{H}/gone", 404)]
+
+
+def test_a_page_fetched_on_a_retry_keeps_its_url(tmp_path, monkeypatch):
+    """In the manifest, in the Failed: list and in the [progress] last: field."""
+    stderr = _fixture("wget_retry_stderr.txt")
+    assert _wget_progress(run_wget_mirror, H + "/", stderr)[-1][1].endswith(f"last: {H}/old")
+
+    monkeypatch.chdir(tmp_path)  # wget printed paths relative to its working directory
+    for name in ("index.html", "flaky.html", "old.html"):
+        page = tmp_path / O / name
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text("<html><body><p>x</p></body></html>")
+    with _fake_wget(stderr, returncode=8), \
+            patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        res = CliRunner().invoke(download, [H + "/", '-o', 'out'])
+    assert res.exit_code == 0, res.output
+    assert f"  {H}/gone: 404" in res.output and "(try:" not in res.output
+    files = load_manifest(str(tmp_path / "out" / ".dograpper-manifest.json")).files
+    assert {k: e.url for k, e in files.items()} == {
+        "index.html": f"{H}/", "flaky.html": f"{H}/flaky", "old.html": f"{H}/old"}
+
+
 def test_both_wget_paths_read_stderr_while_stdout_is_discarded():
     """wget's stderr is read line by line while it runs; its stdout (empty here) goes
     to DEVNULL, so no second pipe can fill up and stall wget."""

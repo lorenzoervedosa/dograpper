@@ -121,11 +121,12 @@ def _record_refused(log_path: str, filters: UrlFilters) -> None:
 
 MAX_SHOWN_FAILURES = 5
 
-# wget prints "--YYYY-MM-DD HH:MM:SS--  <URL>" per request and later
-# "YYYY-MM-DD HH:MM:SS ERROR <code>: <message>." when the server refuses it, or
-# a line naming the file it saved or found up to date. A redirect it follows
-# prints "Location: <URL> [following]" and, on the next line, a new request.
-_REQUEST_LINE = re.compile(r"^--\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}--\s+(\S+)")
+# wget prints "--YYYY-MM-DD HH:MM:SS--  <URL>" per request ("--...--  (try: 2)  <URL>"
+# when it retries one) and later "YYYY-MM-DD HH:MM:SS ERROR <code>: <message>." when
+# the server refuses it, or a line naming the file it saved or found up to date. A
+# redirect it follows prints "Location: <URL> [following]" and, on the next line, a
+# new request.
+_REQUEST_LINE = re.compile(r"^--\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}--\s+(\(try:\s*\d+\)\s+)?(\S+)")
 _ERROR_LINE = re.compile(r"\bERROR (\d{3}): ")
 _FOLLOWING_LINE = re.compile(r"^Location: .* \[following\]$")
 _FILE_LINE = re.compile(
@@ -194,8 +195,9 @@ class WgetLog:
     def feed(self, line: str) -> None:
         request = _REQUEST_LINE.match(line)
         if request:
-            self._current = request.group(1)
-            if not self._following:
+            self._current = request.group(2)
+            # a retry goes on with the chain it is in, which may be a redirect's
+            if not (self._following or request.group(1)):
                 self._requested = self._current
                 key = _request_form(self._requested)
                 if key in self.listed:
