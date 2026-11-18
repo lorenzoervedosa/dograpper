@@ -1,11 +1,11 @@
 import logging
-import time
 from urllib.parse import urlsplit
 
 import pytest
 
 from dograpper.lib.httrack.escape import request_target
 from dograpper.lib.httrack.robots import NO_RULES, RobotsRules, parse_robots
+from tests.linearity import assert_linear
 
 
 def test_specific_group_beats_star():
@@ -102,10 +102,12 @@ def test_text_capped_at_500kib(caplog):
 
 
 def test_many_wildcards_is_linear():
+    # The rule line is capped at 1024 bytes, so the wildcard count is fixed and the path grows.
     r = parse_robots("User-agent: *\nDisallow: /" + "*a" * 200 + "b\n")
-    start = time.perf_counter()
-    assert r.allowed("/" + "a" * 5000) is True
-    assert time.perf_counter() - start < 1.0
+
+    def allowed(path):
+        assert r.allowed(path) is True
+    assert_linear(lambda n: "/" + "a" * n, allowed, 100000)
 
 
 def test_multi_star_anchored_suffix():
