@@ -4,7 +4,7 @@ import os
 import re
 import logging
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import Callable, List, Dict
 
 from ..utils.word_counter import count_words_file
 from ..utils.html_stripper import strip_html
@@ -429,7 +429,7 @@ def _split_text_by_words(text: str, max_words: int) -> list:
     return result if result else [("", 0)]
 
 
-def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max_words: int, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, chunk_id: str = ""):
+def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max_words: int, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, chunk_id: str = "", annotate: Callable[[str, str], str] = None):
     """Write a file's content with per-sub-chunk context headers.
 
     Splits the content at paragraph boundaries respecting max_words,
@@ -463,10 +463,10 @@ def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max
             readiness=readiness_map.get(chunk_id) if readiness_map and chunk_id else None,
         )
         f.write(header)
-        f.write(sub_text)
+        f.write(annotate(cf.relative_path, sub_text) if annotate else sub_text)
 
 
-def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, prefix: str = "docs_chunk_"):
+def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, prefix: str = "docs_chunk_", annotate: Callable[[str, str], str] = None):
     """Write a chunk as plain text (no markdown or HTML markup)."""
     with open(out_filepath, 'w', encoding='utf-8') as f:
         if with_index:
@@ -483,13 +483,13 @@ def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index
 
             if heading_map is not None and cf.relative_path in heading_map:
                 chunk_id = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
-                _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id)
+                _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id, annotate=annotate)
             else:
                 f.write(f"=== SOURCE: {cf.relative_path} ===\n\n")
-                f.write(content)
+                f.write(annotate(cf.relative_path, content) if annotate else content)
 
 
-def _write_chunk_markdown(chunk: Chunk, base_dir: str, out_filepath: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, prefix: str = "docs_chunk_"):
+def _write_chunk_markdown(chunk: Chunk, base_dir: str, out_filepath: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, prefix: str = "docs_chunk_", annotate: Callable[[str, str], str] = None):
     with open(out_filepath, 'w', encoding='utf-8') as f:
         if with_index:
             f.write(f"# Chunk {format_chunk_index(chunk.index, total_chunks)} of {format_chunk_index(total_chunks, total_chunks)}\n\n")
@@ -505,10 +505,10 @@ def _write_chunk_markdown(chunk: Chunk, base_dir: str, out_filepath: str, with_i
 
             if heading_map is not None and cf.relative_path in heading_map:
                 chunk_id = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
-                _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id)
+                _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id, annotate=annotate)
             else:
                 f.write(f"<!-- SOURCE: {cf.relative_path} -->\n\n")
-                f.write(content)
+                f.write(annotate(cf.relative_path, content) if annotate else content)
 
 def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
                        with_index: bool, total_chunks: int,
@@ -518,7 +518,8 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
                        max_words: int = 0,
                        url_map: Dict[str, str] = None,
                        readiness_map: Dict[str, dict] = None,
-                       prefix: str = "docs_chunk_"):
+                       prefix: str = "docs_chunk_",
+                       annotate: Callable[[str, str], str] = None):
     """Write a chunk as a JSONL file (one JSON line per source file/sub-chunk)."""
     import json
 
@@ -546,7 +547,7 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
                     "id": f"{format_chunk_index(chunk.index, total_chunks)}_{cf.relative_path}",
                     "source": cf.relative_path,
                     "words": len(sub_text.split()),
-                    "content": sub_text,
+                    "content": annotate(cf.relative_path, sub_text) if annotate else sub_text,
                     "schema_version": "v1",
                 }
                 if active:
@@ -568,7 +569,7 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
                 "id": f"{format_chunk_index(chunk.index, total_chunks)}_{cf.relative_path}",
                 "source": cf.relative_path,
                 "words": len(content.split()),
-                "content": content,
+                "content": annotate(cf.relative_path, content) if annotate else content,
                 "schema_version": "v1",
             }
             if url_map and cf.relative_path in url_map:
@@ -579,8 +580,13 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
         f.write("\n".join(lines) + "\n")
 
 
-def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: str, format: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None) -> List[str]:
-    """Flush chunk classes out as disk files with or without headings."""
+def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: str, format: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, annotate: Callable[[str, str], str] = None) -> List[str]:
+    """Flush chunk classes out as disk files with or without headings.
+
+    ``annotate(relative_path, content)``, when given, rewrites each record's
+    content right before it is serialized (``--cross-refs`` markers), so it
+    never sees the file index, context headers or JSONL metadata.
+    """
     os.makedirs(output_dir, exist_ok=True)
     generated_paths = []
 
@@ -595,10 +601,10 @@ def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: st
                 "XML format is deprecated. Use 'md' (default) or 'jsonl'."
             )
         elif fmt == "jsonl":
-            _write_chunk_jsonl(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix)
+            _write_chunk_jsonl(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate)
         elif fmt == "txt":
-            _write_chunk_text(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix)
+            _write_chunk_text(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate)
         else:
-            _write_chunk_markdown(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix)
+            _write_chunk_markdown(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate)
 
     return generated_paths

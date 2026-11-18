@@ -396,8 +396,10 @@ list files → apply .docsignore → skip bot-challenge pages
            → --dedup → --bundle? cap max-chunks/max-words-per-chunk
            → --strategy (size|semantic) → boundary-aware chunking
            → --score? compute readiness
+           → --cross-refs? resolve links
            → --format (md|txt|jsonl) + --context-header? inject → write
-           → --cross-refs? annotate written chunks → --bundle? generate guide
+             (--cross-refs markers go into each page's content)
+           → --bundle? generate guide
 ```
 
 #### Smart extraction (on by default)
@@ -477,8 +479,12 @@ Optional fields (`url`, `llm_readiness`) are omitted when not available
 Extracts internal links from HTML, resolves relative paths, maps each
 target to the chunk where the file was packed, and generates
 `cross_refs.json` with `references_to`, `referenced_by`, and `links`
-lists per chunk. The text is annotated in-place with `[-> chunk_id]`
-markers, letting LLMs navigate between chunks.
+lists per chunk. As each chunk is written, every page's content (each of
+its records, when a long page is split) gets a `[-> chunk_id]` marker after
+the first whole-word occurrence of the text of each link that page holds,
+letting LLMs navigate between chunks. Record
+metadata (JSONL `id`/`source`, the file index, context headers) is never
+annotated.
 
 Links pointing to files excluded via `.docsignore` appear as
 `unresolved` (counted in the summary).

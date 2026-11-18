@@ -107,6 +107,11 @@ and fixes alone are a PATCH bump.
   summary and the `--dry-run` report gain a `Matches kept` line counting the
   blocks each rule kept. A block identical on several pages, an identical
   version banner included, is still kept only on the first. ([#89])
+- `pack --cross-refs` annotates each page's own content, for the links that
+  page holds, as the chunk is written, instead of the first occurrence of the
+  link text anywhere in the written chunk file. Markers no longer rewrite
+  JSONL `id`/`source` values, md/txt file indexes or context headers, or land
+  in another page that merely mentions the link text. ([#67])
 
 ### Security
 
@@ -187,3 +192,4 @@ and fixes alone are a PATCH bump.
 [#91]: https://github.com/lorenzoervedosa/dograpper/issues/91
 [#69]: https://github.com/lorenzoervedosa/dograpper/issues/69
 [#89]: https://github.com/lorenzoervedosa/dograpper/issues/89
+[#67]: https://github.com/lorenzoervedosa/dograpper/issues/67
