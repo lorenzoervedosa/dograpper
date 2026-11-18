@@ -100,6 +100,13 @@ and fixes alone are a PATCH bump.
 - `pack` no longer drops HTML-escaped angle brackets (`&lt;T&gt;`, escaped
   markup in code blocks) during content extraction; default output now keeps
   `List<T>` and `<div>` examples, matching `--no-extract`. ([#66])
+- `pack --dedup` no longer deletes a page's own content. A block is never
+  removed against another block of the same page, in any mode, and `fuzzy`
+  keeps a near-duplicate that starts with a different token (a key, tag or
+  parameter name) or differs only in numbers (a version banner, a date). The
+  summary and the `--dry-run` report gain a `Matches kept` line counting the
+  blocks each rule kept. A block identical on several pages, an identical
+  version banner included, is still kept only on the first. ([#89])
 
 ### Security
 
@@ -179,3 +186,4 @@ and fixes alone are a PATCH bump.
 [#77]: https://github.com/lorenzoervedosa/dograpper/issues/77
 [#91]: https://github.com/lorenzoervedosa/dograpper/issues/91
 [#69]: https://github.com/lorenzoervedosa/dograpper/issues/69
+[#89]: https://github.com/lorenzoervedosa/dograpper/issues/89

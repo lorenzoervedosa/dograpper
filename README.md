@@ -423,12 +423,30 @@ disclaimers, navigation). Three modes:
 - **`exact`** — MD5 hash of a normalized block (lowercase + collapsed
   whitespace). Zero false positives.
 - **`fuzzy`** — 64-bit SimHash + Hamming distance ≤ `--dedup-threshold`.
-  Detects trivial variations ("page X of Y", timestamps).
+  Detects trivial variations (a navigation box with one extra link).
 - **`both`** — exact first (cheap), then fuzzy on the remainder.
 
 Blocks with fewer than 10 words are ignored (prevents false positives
 on repeated `<h1>`). The first occurrence (alphabetical order) is
 always preserved.
+
+A match never removes a block when:
+
+- **it is on the same page** (any mode). A block repeated inside one
+  page, such as two parameters that share a description, is page
+  content, not boilerplate.
+- **it starts with a different token** (`fuzzy`). The leading token is
+  the first token holding a letter or digit, so list bullets are
+  skipped: `base:hardcover Book, …` and `base:hollowbook Book, …` are
+  different entries.
+- **only numbers differ** (`fuzzy`). Tokens holding digits (versions,
+  dates, counts) are the page's own data: `… build (42.5.1).` and
+  `… build (42.17.0).` are both kept.
+
+The summary's `Matches kept` line counts the blocks each rule kept. A
+block identical on several pages is still kept only on the first, even
+when it is per-page metadata such as a version banner with the same
+version.
 
 #### Context header (`--context-header`)
 
@@ -1064,7 +1082,7 @@ Conditional extra lines (per enabled flag):
 | Flag | Extra lines |
 |---|---|
 | `--show-tokens` | `Tokens per chunk`, `Total tokens`, `Encoding` |
-| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Words removed` |
+| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Matches kept`, `Words removed` |
 | `--cross-refs` | `Cross-refs: ./chunks/cross_refs.json (N links, M unresolved)` |
 | `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, `Grade distribution` |
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
