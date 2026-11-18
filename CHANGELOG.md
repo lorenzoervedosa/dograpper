@@ -175,6 +175,10 @@ and fixes alone are a PATCH bump.
 - `<br>` separates its neighbours instead of gluing them (`-debuglog=All-debuglog=Network,Sound`):
   a line break in body text (md and txt), and `; ` inside an md pipe-table cell, so the row stays
   on one line. Word counts are unchanged.
+- `pack` drops the heading a MediaWiki page is left with once a navbox or
+  maintenance box is removed from its section (the empty `## Navigation` that
+  ended most wiki pages). A heading whose section still has content stays.
+  ([#119](https://github.com/lorenzoervedosa/dograpper/issues/119))
 - `download` and `pack --delta` exit 1 with the path in the message when the
   manifest (`.dograpper-manifest.json`) or `pack_state.json` cannot be written,
   instead of logging an error and exiting 0; both files are now written

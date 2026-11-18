@@ -194,6 +194,57 @@ def test_clean_leaves_a_non_mediawiki_page_alone():
 
 
 # ---------------------------------------------------------------------------
+# Headings left empty by a removed block
+# ---------------------------------------------------------------------------
+
+def _citizen_section(text, body):
+    return (f'<section class="citizen-section"><h2 class="citizen-section-heading">'
+            f'<span class="mw-headline" id="{text}">{text}</span></h2>'
+            f'<div class="citizen-section-body">{body}</div></section>')
+
+
+def test_a_heading_left_empty_by_a_removed_navbox_is_dropped():
+    cleaned = clean(_page(_heading("Usage", "Usage") + "<p>Real text.</p>"
+                          + _heading("Navigation", "Navigation") + NAVBOX))
+    assert "Navigation" not in cleaned and "Modding guides" not in cleaned
+    assert '<h2 id="Usage">Usage</h2>' in cleaned and "<p>Real text.</p>" in cleaned
+
+
+def test_an_emptied_heading_is_dropped_up_to_the_next_heading_of_the_same_level():
+    cleaned = clean(_page(_heading("Navigation", "Navigation") + NAVBOX + _heading("Notes", "Notes")
+                          + "<p>Note text.</p>"))
+    assert "Navigation" not in cleaned and '<h2 id="Notes">Notes</h2>' in cleaned
+
+
+def test_a_heading_whose_subsection_has_content_is_kept():
+    sub = '<div class="mw-heading mw-heading3"><h3 id="Detail">Detail</h3></div><p>Detail text.</p>'
+    cleaned = clean(_page(_heading("Usage", "Usage") + NAVBOX + sub))
+    assert '<h2 id="Usage">Usage</h2>' in cleaned and "Detail text." in cleaned
+
+
+def test_a_heading_with_content_besides_the_removed_block_is_kept():
+    cleaned = clean(_page(_heading("Usage", "Usage") + "<p>Kept.</p>" + NAVBOX))
+    assert '<h2 id="Usage">Usage</h2>' in cleaned
+
+
+def test_a_heading_that_was_empty_before_any_removal_is_untouched():
+    page = _page(_heading("Usage", "Usage") + _heading("Other", "Other") + "<p>Text.</p>" + NAVBOX)
+    assert '<h2 id="Usage">Usage</h2>' in clean(page)
+
+
+def test_a_section_wrapped_heading_left_empty_is_dropped():
+    page = _page(_citizen_section("Usage", "<p>Real text.</p>") + _citizen_section("Navigation", NAVBOX))
+    cleaned = clean(page)
+    assert "Navigation" not in cleaned and 'id="Usage"' in cleaned
+    assert _text(page).rstrip().endswith("Real text.")
+
+
+def test_an_emptied_heading_stays_on_a_non_mediawiki_page():
+    page = _page(_heading("Navigation", "Navigation") + NAVBOX, generator="")
+    assert clean(page) is page
+
+
+# ---------------------------------------------------------------------------
 # Page version as metadata
 # ---------------------------------------------------------------------------
 
