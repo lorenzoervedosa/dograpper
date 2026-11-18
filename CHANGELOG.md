@@ -60,6 +60,16 @@ and fixes alone are a PATCH bump.
   summary as `Failed: N URLs (first 5 shown)` with each URL and HTTP status;
   `--verbose` lists them all ([#97](https://github.com/lorenzoervedosa/dograpper/issues/97)).
 
+### Changed
+
+- `pack` now packs documentation formats only by default (`.html`, `.htm`,
+  `.md`, `.txt`). `.js`, `.css`, `.json` and other text files are skipped and
+  listed by extension in one summary line; `robots.txt`,
+  `.dograpper-manifest.json`, `delta_manifest.json` and `pack_state.json` are
+  always skipped. `--include-extensions` (config key `include-extensions`)
+  brings other extensions back. Corpora that relied on packing e.g. `.json`
+  or extensionless files must now opt in. ([#91])
+
 ### Fixed
 
 - `pack` zero-pads chunk file names, JSONL ids, `Chunk N of M` headers and sidecar
@@ -161,3 +171,4 @@ and fixes alone are a PATCH bump.
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
 [#66]: https://github.com/lorenzoervedosa/dograpper/issues/66
 [#77]: https://github.com/lorenzoervedosa/dograpper/issues/77
+[#91]: https://github.com/lorenzoervedosa/dograpper/issues/91

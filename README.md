@@ -367,6 +367,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--strategy` | — | `size` | Strategy: `size` or `semantic` |
 | `--ignore-file` | — | `./.docsignore` | Exclusion file (gitignore syntax) |
 | `--ignore` | — | *(none)* | Inline exclusion patterns (repeatable) |
+| `--include-extensions` | — | `html,htm,md,txt` | Extensions packed as documentation (csv). Other files are skipped and counted by extension in the summary. `robots.txt` and dograpper's own manifests are always skipped |
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
 | `--format` | — | `md` | Output format: `txt`, `md`, `jsonl`, `xml` (deprecated — errors, use `md`) |
@@ -1049,6 +1050,10 @@ Pack complete:
   Total words:     470,120
   Output:          ./chunks/
 ```
+
+Before the summary, when files outside `--include-extensions` were found, one
+line lists them: `Skipped non-documentation files: 15 (.css x1, .js x13, robots.txt x1)`.
+They are also counted in `Files excluded`.
 
 Conditional extra lines (per enabled flag):
 
