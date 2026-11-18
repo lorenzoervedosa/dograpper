@@ -27,14 +27,14 @@ src/dograpper/
 ├── cli.py                  # Entry point click, flags globais (--verbose, --quiet, --config)
 ├── commands/
 │   ├── _httrack_profile.py # Modo `--downloader httrack` do download: resolve_profile() (opções do perfil, guarda sob wget, policy_kw), discovery_fetch() (robots antes do GET), run_httrack() (fetch semeado + relatório + fail-loud)
-│   ├── _page_layout.py     # Modo `pack --layout page` (ADR-0010): check_flags() (flags só-chunk na CLI ou no config, --bundle, --for-queries, --format jsonl, --dedup ≠ off → exit 2), check_ownership() (pages/ sem INDEX.md → exit 1), write() (falha de escrita → exit 1)
+│   ├── _page_layout.py     # Modo `pack --layout page` (ADR-0010): check_flags() (flags só-chunk na CLI ou no config, --bundle, --for-queries, --api-records, --format jsonl, --dedup ≠ off → exit 2), check_ownership() (pages/ sem INDEX.md → exit 1), write() (falha de escrita → exit 1)
 │   ├── doctor.py           # Detecta e instala deps pesadas (wget, chromium) em DOGRAPPER_HOME; --check-system-libs
 │   ├── download.py         # Opções click + despacho do --downloader; cascade 4-layer do wget: llms.txt → sitemap → wget --mirror → Playwright bounded (layers 1+2 compartilhadas com o perfil httrack)
 │   ├── drift.py            # Drift de contexto entre dois llm-readiness.json (+ delta_manifest.json opcional)
 │   ├── eval.py             # Hit-rate empírico do pack JSONL: golden Q&A offline → BM25 → hit-rate@k/MRR por grade
 │   ├── explain.py          # Preview read-only do que o LLM recebe por chunk (headers v1, cross-refs, grade)
 │   ├── init.py             # Wizard de onboarding: gera .dograpper.json por alvo (notebooklm/rag/claude-project/claude-code); claude-code também escreve um SKILL.md stub em --skill-dir (nunca sobrescreve; pack não toca nele)
-│   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary; --layout chunk|page (modo page em _page_layout.py)
+│   ├── pack.py             # Orquestração: list files → filter → chunk → write → summary; --layout chunk|page (modo page em _page_layout.py); --api-records (só jsonl) chama utils/api_reference/
 │   ├── serve.py            # Servidor MCP local (stdio) sobre o pack JSONL: search/get/cross-refs/readiness
 │   └── sync.py             # Subcomando sync (download + pack em um passo); repassa --downloader, as flags do perfil (PROFILE_OPTIONS de _httrack_profile.py) e --layout
 ├── lib/
@@ -68,6 +68,9 @@ src/dograpper/
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth; UrlFilters/rule_regex() — regras `--filter` (sintaxe HTTrack +/-, última vence) como regex lida igual por Python re e pelo POSIX ERE do wget, para todos os caminhos
 │   └── wget_mirror.py      # run_wget_mirror() --mirror + run_wget_urls() -i; BROWSER_UA Chrome/120, --no-parent (url_filter_args(): --accept/--reject-regex quando há --filter), --timestamping sempre
 └── utils/
+    ├── api_reference/      # Registros de referência de API (ADR-0009), opt-in via `pack --api-records`
+    │   ├── __init__.py     # split_api_pages()/split_page(): detecção pelo gerador (utils/generator.py) e despacho ao adaptador; ApiRecord (url() com âncora percent-encoded), NotSplit, aviso das páginas mantidas inteiras e linha do resumo
+    │   └── javadoc.py      # records(): página de tipo javadoc 25 (javadoc/ClassWriter) → 1 registro contêiner + 1 por membro (section.detail); só a markup medida, senão NotSplit; HTMLParser linear (pilha com contagem por tag)
     ├── atomic_write.py     # atomic_write_bytes() — arquivo temporário no mesmo diretório + os.replace; modo padrão do umask
     ├── challenge.py        # is_challenge() / is_challenge_page() / find_challenge_files() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/); fonte única do fetcher httrack e do pack
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
@@ -90,6 +93,7 @@ src/dograpper/
 tests/
 ├── conftest.py             # Fixture `server`: http.server local roteirizado por path (usado por test_httrack_crawl e test_download_cascade)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
+├── test_api_reference.py   # --api-records: detecção/despacho, registros contêiner e membro sobre a fixture javadoc 25 (tests/fixtures/javadoc), markup não suportada, linearidade, CLI (erros de uso, dedup, --for-queries, --delta, serve)
 ├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
@@ -123,7 +127,7 @@ tests/
 ├── test_httrack_policy.py  # Policy: clamps, headers vs fixture httrack_wire, Accept-Encoding, contexto TLS, ClientHello (OpenSSL >= 3.5)
 ├── test_httrack_robots.py  # parse_robots: grupos, longest-match, Allow vence empate, wildcard/$, Crawl-delay, Sitemap, caps, corpo HTML sem regras
 ├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo, stub SKILL.md do claude-code (nunca sobrescrito, sobrevive ao pack)
-├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, CLI
+├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, registros de API, CLI
 ├── test_link_extractor.py  # Link extraction, cross-ref index, annotation, CLI integration
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
 ├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
@@ -202,6 +206,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_readiness_report.py` | Antes de alterar `utils/readiness_report.py` ou a lógica de `--report` em `commands/pack.py` |
 | `tests/test_context_v1.py` | Antes de alterar o formato `dograpper-context-v1` em `utils/heading_extractor.py` |
 | `tests/test_jsonl_format.py` | Antes de alterar a escrita JSONL em `lib/chunker.py` |
+| `tests/test_api_reference.py` | Antes de alterar `utils/api_reference/` ou a integração `--api-records` em `commands/pack.py` e `lib/chunker.py`. A fixture sai de `tests/fixtures/javadoc/src` via `tests/fixtures/javadoc/regenerate.sh` (javadoc 25; nunca editar o HTML à mão) |
 | `tests/test_delta_manifest.py` | Antes de alterar `lib/manifest.py` ou lógica de `--delta` |
 | `tests/test_delta_artifacts.py` | Antes de alterar o portão de `--delta` em `commands/pack.py` ou `PACK_STATE_FILENAME` (semântica fixada na ADR-0008) |
 | `tests/test_redact.py` | Antes de alterar `utils/redact.py` (usado por todo log que imprime URL) |

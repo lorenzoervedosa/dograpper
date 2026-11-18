@@ -485,6 +485,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
+| `--api-records` | — | `false` | Splits API reference pages (Javadoc) into one container record and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
 
 #### Pack internal pipeline
 
@@ -492,6 +493,8 @@ Operation order (each stage reads the output of the previous one):
 
 ```
 list files → apply .docsignore → skip bot-challenge pages
+           → --api-records? split API reference pages into records
+             (those pages skip extraction and dedup)
            → --no-extract? yes: full HTML / no: extract
            → --dedup → --bundle? cap max-chunks/max-words-per-chunk
            → --strategy (size|semantic) → boundary-aware chunking
@@ -653,10 +656,50 @@ Schema (required fields in **bold**, optional in italics):
   `url` or the page's HTTrack / saved-from marker — `--score` alone never
   populates it)
 - *`readiness_grade`* (with `--score`)
+- *`symbol`, `kind`, `symbol_kind`, `container`, `generator`* (with
+  `--api-records`, on API records only; see below)
 
 Field names diverge from the header format for word count, breadcrumb and
 readiness — see the full field-by-field spec, including the JSONL/header
 mapping table, in [docs/schema-v1.md](docs/schema-v1.md).
+
+#### API reference records (`--api-records`)
+
+An API reference page holds many symbols, and one record per page buries a
+member's signature in a class-sized record. With `--api-records` (config key
+`api_records`), each page that a generator adapter recognises is written as
+one **container record** plus one **member record** per documented member
+([ADR-0009](docs/adr/0009-api-reference-symbol-records.md)):
+
+```bash
+dograpper pack ./javadoc-mirror -o ./pack --format jsonl --api-records --context-header
+dograpper serve ./pack   # search_chunks now ranks member records
+```
+
+- **Javadoc** (javadoc 25 type pages, `<meta name="generator"
+  content="javadoc/ClassWriter">`) is the only adapter so far.
+- **Container record** (`id` `NN_path`): qualified name and kind, inheritance,
+  implemented interfaces and known subclasses, signature, description, the
+  declared member names, and the "inherited from" lists. Summary tables are
+  dropped.
+- **Member record** (`id` `NN_path#anchor`): the qualified name
+  (`zombie.characters.IsoGameCharacter#getInventory()`), the full signature
+  with its type parameters, the doc comment and the notes (Overrides,
+  Specified by, Parameters, Returns, Throws). `url` ends with the member's
+  anchor; `breadcrumb` is `[container, member]`.
+- **Other pages** (prose, package summaries, other generators, or a type page
+  whose markup differs from the measured one) keep one record each. They are
+  listed in a warning with the reason (the first 10; all with `--verbose`) and
+  counted in the summary's `API records:` line.
+- Split pages skip content extraction and `--dedup`, so a member is never
+  removed for repeating on another page. `--for-queries` and `--delta` work
+  per page, and all records of a page land in that page's chunk.
+  `--cross-refs` markers go into each record's content; `--score` grades the
+  chunk as before.
+- Usage error (exit 2) with `--format md` or `txt`, with `--bundle notebooklm`
+  and with `--layout page`.
+
+Field list: [docs/schema-v1.md](docs/schema-v1.md#api-records---api-records).
 
 #### LLM Readiness Score (`--score`)
 
@@ -831,7 +874,7 @@ out/
 | Flag | With `--layout page` |
 |---|---|
 | `--max-words-per-chunk`, `--max-chunks`, `--strategy`, `--prefix`, `--with-index`/`--no-index` | usage error (exit 2) when set on the CLI or in `.dograpper.json`, even to the default value |
-| `--bundle`, `--for-queries`, `--format jsonl`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
+| `--bundle`, `--for-queries`, `--format jsonl`, `--api-records`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
 | `--delta` | the [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md) gate is unchanged; a run that passes it rebuilds `pages/` in full |
 | `--context-header` | one header at line 1 of each page file: `title`, `source`, `url`, `word_count`, `llm_readiness`; no breadcrumb or outline |
 | `--cross-refs` | markers name the page from the output root, `[-> pages/Target.md]`; `cross_refs.json` is keyed by page path |

@@ -98,6 +98,20 @@ and fixes alone are a PATCH bump.
   A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
   filtered. Refused URLs are counted as `Filtered by --filter: N` in the
   summary ([#96](https://github.com/lorenzoervedosa/dograpper/issues/96)).
+- `pack --api-records` (config key `api_records`, `--format jsonl` only)
+  writes each javadoc 25 type page as one container record (qualified name and
+  kind, inheritance, signature, description, declared member names,
+  "inherited from" lists; no summary tables) plus one member record per
+  member (qualified name, full signature with type parameters, doc comment,
+  notes), with ids `NN_path` and `NN_path#anchor`, `breadcrumb`
+  `[container, member]`, `url` ending with the member anchor, and new optional
+  JSONL fields `symbol`, `kind`, `symbol_kind`, `container` and `generator`.
+  Split pages skip extraction and `--dedup`; every other page keeps one
+  record, is listed in a warning with the reason and is counted in the
+  summary's `API records:` line. With `--format md`/`txt`, `--bundle
+  notebooklm` or `--layout page` it exits 2.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#76](https://github.com/lorenzoervedosa/dograpper/issues/76))
 
 ### Changed
 

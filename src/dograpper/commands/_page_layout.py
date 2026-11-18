@@ -28,6 +28,9 @@ def check_flags(ctx: click.Context, merged_params: dict, config_path: str) -> No
             where = f" (set in {config_path})" if not is_explicit(ctx, name) else ""
             raise click.UsageError(
                 f"{_flag(ctx, name)}{where} has no effect with --layout page")
+    if merged_params['api_records']:
+        raise click.UsageError(
+            "--api-records writes JSONL records; it needs --layout chunk, not --layout page")
     if merged_params['format'] == 'jsonl':
         raise click.UsageError(
             "--layout page writes md or txt pages; --format jsonl needs --layout chunk")

@@ -525,13 +525,40 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
                        url_map: Dict[str, str] = None,
                        readiness_map: Dict[str, dict] = None,
                        prefix: str = "docs_chunk_",
-                       annotate: Callable[[str, str], str] = None):
-    """Write a chunk as a JSONL file (one JSON line per source file/sub-chunk)."""
+                       annotate: Callable[[str, str], str] = None,
+                       api_records: Dict[str, list] = None):
+    """Write a chunk as a JSONL file (one JSON line per source file/sub-chunk).
+
+    A page in ``api_records`` is written as its container and member records
+    instead (ADR-0009), in its page's chunk.
+    """
     import json
 
     lines = []
 
     for cf in chunk.files:
+        if api_records and cf.relative_path in api_records:
+            page_id = f"{format_chunk_index(chunk.index, total_chunks)}_{cf.relative_path}"
+            chunk_id = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
+            for rec in api_records[cf.relative_path]:
+                record = {
+                    "id": f"{page_id}#{rec.anchor}" if rec.anchor else page_id,
+                    "source": cf.relative_path,
+                    "words": len(rec.text.split()),
+                    "content": annotate(cf.relative_path, rec.text) if annotate else rec.text,
+                    "schema_version": "v1",
+                    "breadcrumb": rec.breadcrumb,
+                }
+                if url_map and cf.relative_path in url_map:
+                    record["url"] = rec.url(url_map[cf.relative_path])
+                if readiness_map and chunk_id in readiness_map:  # the page records' lookup, below
+                    record["readiness_grade"] = readiness_map[chunk_id]["grade"]
+                record.update(symbol=rec.symbol, kind=rec.kind, symbol_kind=rec.symbol_kind)
+                if rec.container:
+                    record["container"] = rec.container
+                record["generator"] = rec.generator
+                lines.append(json.dumps(record, ensure_ascii=False))
+            continue
         content = _read_source_content(base_dir, cf, no_extract=no_extract,
                                        text_overrides=text_overrides)
 
@@ -588,12 +615,13 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
         f.write("\n".join(lines) + "\n")
 
 
-def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: str, format: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, annotate: Callable[[str, str], str] = None) -> List[str]:
+def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: str, format: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, annotate: Callable[[str, str], str] = None, api_records: Dict[str, list] = None) -> List[str]:
     """Flush chunk classes out as disk files with or without headings.
 
     ``annotate(relative_path, content)``, when given, rewrites each record's
     content right before it is serialized (``--cross-refs`` markers), so it
     never sees the file index, context headers or JSONL metadata.
+    ``api_records`` (relative path -> records, ``--api-records``) is JSONL only.
     """
     os.makedirs(output_dir, exist_ok=True)
     generated_paths = []
@@ -609,7 +637,7 @@ def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: st
                 "XML format is deprecated. Use 'md' (default) or 'jsonl'."
             )
         elif fmt == "jsonl":
-            _write_chunk_jsonl(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate)
+            _write_chunk_jsonl(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate, api_records=api_records)
         elif fmt == "txt":
             _write_chunk_text(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate)
         else:

@@ -20,12 +20,19 @@ PACK_STATE_FILENAME = "pack_state.json"
 
 
 def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
-                    is_dry_run, is_score):
+                    is_dry_run, is_score, api_records, bundle_preset):
     """Reject unusable flag combinations before any file is read.
 
     Returns the loaded query list (``None`` when --for-queries was not used)
     and the effective score flag, since --report implies --score.
     """
+    if api_records and fmt != 'jsonl':
+        raise click.UsageError(
+            f"--api-records writes JSONL records; it needs --format jsonl, not --format {fmt}")
+    if api_records and bundle_preset == 'notebooklm':
+        raise click.UsageError(
+            "--api-records cannot be combined with --bundle notebooklm, which shapes "
+            "whole pages into NotebookLM sources")
     if fmt == 'xml':
         raise click.ClickException(
             "XML format is deprecated since v1.x. Use 'md' (default) or 'jsonl'."
@@ -182,8 +189,11 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--report/--no-report', default=False, show_default=True,
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
+@click.option('--api-records', is_flag=True, default=False,
+              help="Split API reference pages (Javadoc) into one container record "
+                   "and one record per member. Requires --format jsonl.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, layout: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, layout: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool, api_records: bool):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -240,6 +250,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'score': score,
         'for_queries': for_queries,
         'report': report,
+        'api_records': api_records,
     }
     
     merged_params = load_config(config_path, 'pack', cli_params, ctx)
@@ -270,6 +281,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     is_score = merged_params.get('score', score)
     for_queries_path = merged_params.get('for_queries', for_queries)
     is_report = merged_params.get('report', report)
+    is_api_records = merged_params.get('api_records', api_records)
 
     # 2a. Page layout (ADR-0010): reject chunk-only settings, never touch a pages/ we did not write
     if page_layout:
@@ -287,7 +299,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     # 2c-2e. Flag validation, fail fast and with no silent fallback
     query_list, is_score = _validate_flags(
-        ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score)
+        ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score,
+        is_api_records, bundle_preset)
     # 2f. Manifest for --context-header (and INDEX.md) URLs, loaded before any page is read
     manifest_data = _load_url_manifest(ctx, manifest_name, input_dir) if ctx_header or page_layout else None
 
@@ -370,6 +383,15 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             click.echo("Delta: no files changed since last pack. Nothing to do.")
             return
 
+    # 6c. API reference records (opt-in, ADR-0009): split the recognised pages, report the rest
+    api_split = None
+    if is_api_records:
+        from ..utils.api_reference import format_kept_whole, split_api_pages
+
+        api_split = split_api_pages(filtered_paths, input_dir)
+        for line in format_kept_whole(api_split, bool(ctx.obj.get('VERBOSE'))):
+            click.echo(line, err=True)
+
     # 7. Deduplication (opt-in, before chunking)
     dedup_stats = None
     dedup_word_counts = None
@@ -381,6 +403,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         processed_texts = {}
         for fpath in filtered_paths:
             rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
+            if api_split is not None and rel in api_split.records:
+                continue  # split pages bypass dedup (ADR-0009, #68)
             try:
                 processed_texts[rel] = read_source_text(fpath, no_extract=no_ext)
             except Exception:
@@ -390,6 +414,13 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         dedup_stats = dedup_result.stats
         dedup_word_counts = {rp: len(t.split()) for rp, t in dedup_result.texts.items()}
         dedup_text_overrides = dedup_result.texts
+
+    # 7a. A split page's text is its records: it sizes the chunks and feeds ranking and scoring
+    if api_split is not None:
+        api_texts = api_split.texts
+        dedup_text_overrides = {**(dedup_text_overrides or {}), **api_texts}
+        dedup_word_counts = {**(dedup_word_counts or {}),
+                             **{rel: len(t.split()) for rel, t in api_texts.items()}}
 
     # 7b. Extract headings for context-header or scoring (opt-in, before chunking)
     heading_map = None
@@ -621,7 +652,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             url_map=url_resolution.urls if url_resolution else None,
             readiness_map=readiness_map, annotate=annotate, with_header=ctx_header)
     else:
-        write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate)
+        write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate, api_records=api_split.records if api_split else None)
 
     # 10b. Delta report (opt-in, after write)
     if is_delta and diff is not None:
@@ -718,6 +749,10 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     if query_pack_result is not None:
         click.echo(_query_packing_summary(query_list, query_pack_result))
+
+    if api_split is not None:
+        from ..utils.api_reference import format_summary
+        click.echo(f"  {format_summary(api_split)}")
 
     if is_delta and diff is not None:
         click.echo(f"  Delta:           {len(diff.added)} added, {len(diff.modified)} modified, {len(diff.removed)} removed")
