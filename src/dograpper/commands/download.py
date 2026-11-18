@@ -272,15 +272,15 @@ def _run_download_cascade(
 )
 @click.argument('url', type=str, required=True)
 @click.option('--output', '-o', required=True, type=click.Path(),
-              help="Destination directory for downloaded files")
+              help="Directory the site is mirrored into; created if missing. Also the default home of the manifest.")
 @click.option('--depth', '-d', type=int, default=0, show_default=True,
-              help="Maximum link depth to follow (0 = unlimited)")
+              help="Maximum number of links to follow from the start URL. 0 (default) follows links without a depth limit.")
 @click.option('--headless', is_flag=True, default=False, show_default=True,
-              help="Skip wget and crawl directly with Playwright (use for SPAs)")
+              help="Skip wget and crawl directly with Playwright, which runs the page JavaScript. Use for single-page apps whose HTML is empty without it.")
 @click.option('--delay', type=int, default=0, show_default=True,
-              help="Interval between requests in ms (rate limiting)")
+              help="Pause between requests, in milliseconds, to avoid hammering the server. 0 (default) adds no pause.")
 @click.option('--include-extensions', type=str, default="html,md,txt", show_default=True,
-              help="Allowed extensions, comma-separated")
+              help="Comma-separated file extensions to keep from the mirror; other files are discarded. Default: html,md,txt.")
 @click.option('--manifest', type=str, default=".dograpper-manifest.json", show_default=True,
               help="JSON cache file for incremental downloads; a relative path "
                    "resolves against --output")

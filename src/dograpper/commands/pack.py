@@ -121,11 +121,11 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 )
 @click.argument('input_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True)
 @click.option('--output', '-o', required=True, type=click.Path(),
-              help="Directory where chunks will be saved")
+              help="Directory the chunk files and sidecars (cross_refs.json, llm-readiness.json, ...) are written to; created if missing.")
 @click.option('--max-words-per-chunk', type=int, default=500000, show_default=True,
-              help="Word limit per chunk (NotebookLM per-source ceiling)")
+              help="Maximum words in one chunk file. The default, 500000, is the NotebookLM per-source ceiling; a larger input is split into more chunks.")
 @click.option('--max-chunks', type=int, default=50, show_default=True,
-              help="Total chunk limit (per-notebook source ceiling)")
+              help="Maximum number of chunk files. The default, 50, is the NotebookLM per-notebook source ceiling; a warning is logged when the input needs more.")
 @click.option('--strategy', type=click.Choice(['size', 'semantic']), default='size', show_default=True,
               help="size: pack by word count. semantic: group by directory first")
 @click.option('--ignore-file', type=click.Path(), default='./.docsignore', show_default=True,
@@ -133,22 +133,22 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--ignore', multiple=True, type=str, default=[],
               help="Inline exclusion pattern (repeatable): --ignore '*.png' --ignore '**/404.html'")
 @click.option('--prefix', type=str, default="docs_chunk_", show_default=True,
-              help="Prefix for generated files")
+              help="Filename prefix of every chunk file (default docs_chunk_ gives docs_chunk_01.md). explain, serve and eval look chunks up by this prefix.")
 @click.option('--with-index/--no-index', default=True, show_default=True,
-              help="Include a file summary in the header of each chunk")
+              help="Put a list of the source files in the header of each chunk (default). --no-index leaves the list out.")
 @click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True,
               help="Chunk output format. 'xml' is deprecated.")
 @click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
               help="chunk: numbered chunk files. page: one md/txt file per page "
                    "under pages/, mirroring INPUT_DIR, plus INDEX.md.")
 @click.option('--no-extract', is_flag=True, default=False,
-              help="Disable smart content extraction. Use the whole HTML as in the previous behavior.")
+              help="Keep the whole HTML instead of extracting only the main content. By default navigation, footers and other boilerplate are removed.")
 @click.option('--show-tokens', is_flag=True, default=False,
               help="Show per-chunk and total token count in the final summary.")
 @click.option('--token-encoding', type=str, default="cl100k", show_default=True,
               help="Tokenizer encoding (cl100k, o200k, p50k). Requires --show-tokens.")
 @click.option('--dry-run', is_flag=True, default=False,
-              help="Simulate the pack without writing files. Prints compression report and chunk projection.")
+              help="Run the whole pipeline but write no files; print the compression report and the projected chunks instead.")
 @click.option('--dedup', type=click.Choice(['off', 'exact', 'fuzzy', 'both'], case_sensitive=False),
               default='off', show_default=True,
               help="Cross-file block deduplication. "

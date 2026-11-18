@@ -185,7 +185,7 @@ def build_tools(chunks, index, cross_refs, readiness, prefix: str):
 )
 @click.argument('chunks_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True)
 @click.option('--prefix', type=str, default="docs_chunk_", show_default=True,
-              help="Chunk filename prefix to load.")
+              help="Only load chunk files whose name starts with this prefix. Default: docs_chunk_, the pack default.")
 @click.pass_context
 def serve(ctx, chunks_dir, prefix):
     """Serve the packed context as a local MCP server (stdio).
