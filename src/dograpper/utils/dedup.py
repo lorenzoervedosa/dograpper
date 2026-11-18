@@ -37,6 +37,7 @@ class DedupStats:
     words_removed: int = 0
     # Blocks that matched an earlier block but were kept by a _keep_reason rule.
     blocks_kept_same_page: int = 0
+    blocks_kept_leading_token: int = 0
 
     @property
     def blocks_removed(self) -> int:
@@ -155,7 +156,16 @@ def _keep_reason(path: str, text: str, other_path: str, other_text: str):
         # Repeats inside one page are page content (sibling list entries,
         # parameters sharing a description), not cross-page boilerplate.
         return "blocks_kept_same_page"
+    if _leading_token(text) != _leading_token(other_text):
+        # A different key, tag or parameter name: a different entry whose
+        # body happens to look alike (base:hardcover vs base:hollowbook).
+        return "blocks_kept_leading_token"
     return None
+
+
+def _leading_token(text: str) -> str:
+    """First token holding a letter or digit, skipping list bullets and pipes."""
+    return next((t for t in text.split() if re.search(r"\w", t)), "")
 
 
 def _split_blocks(text: str) -> list:

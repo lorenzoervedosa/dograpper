@@ -329,6 +329,35 @@ class TestDeduplicateSamePage:
         assert result.stats.blocks_kept_same_page == 1
 
 
+class TestDeduplicateLeadingToken:
+
+    def test_keeps_list_keyed_by_a_different_tag(self):
+        result = deduplicate({"a.txt": TAG_HARDCOVER, "b.txt": TAG_HOLLOWBOOK}, mode="fuzzy")
+        assert "base:hollowbook" in result.texts["b.txt"]
+        assert result.stats.blocks_removed == 0
+        assert result.stats.blocks_kept_leading_token == 1
+
+    def test_removes_same_list_under_the_same_tag(self):
+        same_tag = TAG_HOLLOWBOOK.replace("base:hollowbook", "base:hardcover")
+        result = deduplicate({"a.txt": TAG_HARDCOVER, "b.txt": same_tag}, mode="fuzzy")
+        assert result.stats.blocks_removed_fuzzy == 1
+        assert result.stats.blocks_kept_leading_token == 0
+
+    def test_keeps_parameter_description_with_a_different_name(self):
+        assert _distance(POSITION_DESC, ZOOM_DESC) <= 10
+        result = deduplicate({"a.txt": POSITION_DESC, "b.txt": ZOOM_DESC},
+                             mode="both", hamming_threshold=10)
+        assert ZOOM_DESC in result.texts["b.txt"]
+        assert result.stats.blocks_kept_leading_token == 1
+
+    def test_leading_token_skips_list_bullets(self):
+        a, b = f"- {POSITION_DESC}", f"- {ZOOM_DESC}"
+        assert _distance(a, b) <= 10
+        result = deduplicate({"a.txt": a, "b.txt": b}, mode="fuzzy", hamming_threshold=10)
+        assert result.stats.blocks_removed == 0
+        assert result.stats.blocks_kept_leading_token == 1
+
+
 class TestDeduplicateCrossPageBoilerplate:
 
     @pytest.mark.parametrize("mode", ["exact", "fuzzy", "both"])
