@@ -20,7 +20,9 @@ def server():
 
         def do_GET(self):
             seen.append(self.path)
-            status, hdrs, body = script.get(self.path, (404, {}, b"nope"))
+            reply = script.get(self.path, (404, {}, b"nope"))
+            # a callable reply answers from the request headers (conditional GETs)
+            status, hdrs, body = reply(self.headers) if callable(reply) else reply
             self.send_response(status)
             for k, v in hdrs.items():
                 self.send_header(k, v)

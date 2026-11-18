@@ -311,8 +311,14 @@ def _run_download_cascade(
               help="[httrack] Max seconds honored from Retry-After / Crawl-delay")
 @click.option('--disable-security-limits', is_flag=True, default=False,
               help="[httrack] Lift the connection, rate and bandwidth clamps")
+@click.option('--no-parse-scripts', is_flag=True, default=False,
+              help="[httrack] Do not scan scripts, event handlers and stylesheets for links "
+                   "(HTTrack -j4, which also stops CSS links). Default: scanned, as HTTrack does")
+@click.option('--no-extended-parsing', is_flag=True, default=False,
+              help="[httrack] Do not guess links from quoted strings in other attributes and "
+                   "in scripts (HTTrack -%P0). Default: guessed, as HTTrack does")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -344,6 +350,8 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'max_links': max_links,
         'max_retry_after': max_retry_after,
         'disable_security_limits': disable_security_limits,
+        'no_parse_scripts': no_parse_scripts,
+        'no_extended_parsing': no_extended_parsing,
     }
     merged_params = load_config(config_path, 'download', cli_params, ctx)
 
@@ -379,10 +387,12 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
                    err=True)
     manifest_data = load_manifest(manifest_path)
 
+    records = None
     if downloader == 'httrack':
-        files_downloaded, files_skipped, report_lines, fetched = run_httrack(
+        files_downloaded, files_skipped, report_lines, fetched, records = run_httrack(
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
+            previous=manifest_data,
         )
     else:
         files_downloaded, files_skipped, fetched = _run_download_cascade(
@@ -391,7 +401,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         )
 
     new_manifest = build_manifest(url, output, fetched, previous=manifest_data,
-                                  manifest_path=manifest_path)
+                                  manifest_path=manifest_path, records=records)
     final_manifest = merge_manifests(manifest_data, new_manifest)
     try:
         save_manifest(final_manifest, manifest_path)

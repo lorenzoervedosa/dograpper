@@ -39,6 +39,124 @@ Entry format:
   downloader that adds them (an ADR first: a native dependency such as
   `curl_cffi` falls under contract 1).
 
+## 2026-11-18 — Table cells in plain text, Javadoc grids in md only (#125, #120)
+
+- **Decision:** (#125) the plain-text renderer starts each `td`/`th` with a
+  tab (private marker, turned into `\t` when the prose is rendered; a `<tr>`
+  also starts a block, since `</td>` and `</tr>` may be omitted); the md
+  renderer does not emit it. (#120) a Javadoc `div.summary-table` with a
+  `two|three-column-summary` class is a table in md: its child divs are the
+  cells, N to a row, the first row the header. The plain path keeps one cell
+  per paragraph for these grids.
+- **Why:** `text.split()` counts ` | ` as a word, a tab is whitespace, so
+  word counts (ADR-0003) change only where gluing had merged two words. The
+  grid reuses the md table frame and `_pipe_table`; the plain path has no
+  frames, so one line per grid row there needs a second row tracker in the
+  base class, and the issue asks for md.
+- **Rejected:** ` | ` in plain text (inflates counts); a space (cells with
+  several words become ambiguous); a plain-text grid renderer (follow-up if
+  grep over txt/jsonl needs it).
+- **Pending:** whether txt/jsonl should also get one line per Javadoc grid row.
+
+## 2026-11-18 — httrack profile update mode (#78, PR 3)
+
+- **Decision:** a challenged start URL still exits 1 on an update (its previous
+  copy kept, the manifest not rewritten), while a start URL answering 404/5xx
+  is kept and the run goes on, as HTTrack does for both.
+- **Why:** spec §5.4 makes a challenged start URL exit 1 with the
+  `--browser-login` hint; a corpus refreshed on a schedule should fail loud
+  when the site starts refusing dograpper rather than go stale with exit 0.
+- **Rejected:** exit 0 with `Challenged: N`, as HTTrack masks the 403.
+- **Pending:** the maintainer may prefer HTTrack's behavior; one condition in
+  `crawl.fetch_url_list.keep` and `mirror.keep` decides it.
+
+- **Decision:** the manifest gains `redirected`; the validators of a file
+  reached through a redirect go to the hop whose file name is exactly that
+  file's (`crawl.sends`), and that hop alone gets the name back.
+- **Why:** HTTrack sends the redirecting URL plain and the target its
+  validators; the manifest never records the target (it can carry a secret).
+  Without the flag every redirected start URL would be refetched in full. The
+  name check (added after review) stops a redirect that now leads to another
+  page from getting a 304 for the old one.
+- **Rejected:** validators on every hop after the first (a changed redirect
+  got the old page kept as the new one's); recording the target URL (breaks
+  the README's "requested URL only" rule).
+- **Pending:** none.
+
+- **Decision:** a kept page's links are read back from its saved copy and
+  mapped to URLs through the previous manifest; no cache of original bodies.
+- **Why:** HTTrack re-parses a 304 page from `hts-cache/`; a dograpper cache
+  would be a new state directory that `pack` and `build_manifest` must skip,
+  and would double the disk use. The cost is recorded in spec §5.6: a file
+  with `"url": null` is not reached from a kept page.
+- **Rejected:** a body cache under `-o`; refetching a 304 page to read it.
+- **Pending:** none.
+
+- **Decision:** `NameRegistry.reserve()` keeps the names of the files an update
+  may keep: only the URL a file was saved from gets it back (`assign(prefer=)`,
+  matched through `url_key`, so userinfo or spelling never matter), and none is
+  renamed. A previous entry whose file is not named as its URL would be is
+  ignored, so an edited manifest cannot direct a write.
+- **Why:** names come in queue order; on a changed site a new page could take
+  a kept file's name and overwrite it, and the kept pages' links (never
+  rewritten) point at those names.
+- **Rejected:** HTTrack's rename of a file whose name changed (breaks the
+  links of kept pages).
+- **Pending:** none.
+
+- **Decision:** HTTrack's other cache options (`-C0`, `-C1`/`--continue`,
+  `-%s`, `-%n`, `--changes`) and file times from `Last-Modified` are left as
+  known gaps (spec), not ported in PR 3.
+- **Why:** the epic scopes PR 3 to manifest records and conditional
+  revalidation, and PR 2 set the precedent for listing an HTTrack feature not
+  ported yet (#122). File times interact with the mtime fast path of
+  `pack --delta` (ADR-0008).
+- **Rejected:** porting them in the same PR (doubles its spread).
+- **Pending:** an issue for the follow-up PR under #78.
+
+## 2026-11-18 — HTTrack -j and -%P in the httrack profile (#122)
+
+- **Decision:** two boolean `[httrack]` flags, `--no-parse-scripts` (HTTrack
+  `-j4`) and `--no-extended-parsing` (`-%P0`, the same effect as `-j8`), not
+  a `-j` bitmask flag.
+- **Why:** of `-j`'s bits only `|4` and `|8` change anything here. `|2` and
+  `-j0` switch HTTrack's external parser modules (`src/htscore.c:2020-2022`),
+  plug-in callbacks dograpper has none of; the built-in `.class` parser is
+  gone (`history.txt:458`). Two booleans cover every effective state, and
+  match `--no-robots`'s shape.
+- **Rejected:** `--parse-java N` with HTTrack's bitmask (two of its values do
+  nothing here, and `-j0` would silently keep scripts scanned, as HTTrack's
+  code does against its help text).
+- **Pending:** the maintainer may prefer HTTrack's names or bitmask.
+
+- **Decision:** the scans run on the contexts PR 2's HTML5 tokenizer reads (a
+  tag's attributes, a `<script>`/`<style>` body), HTTrack's byte rules inside
+  each; a script attribute ends at its HTML5 value, or earlier where HTTrack
+  ends it (the byte after `=`, or `>`).
+- **Why:** porting HTTrack's byte-level tag reader would replace PR 2's
+  tokenizer, the piece that keeps parsing linear; the two read apart only
+  markup such as a `>` inside a quoted event handler.
+- **Rejected:** a byte-level port of HTTrack's whole loop (disproportionate,
+  and it would undo PR 2's linear-time guarantee).
+- **Pending:** whether this belongs in spec §5 as a deviation; recorded in
+  §5.5 and the evidence doc as a convention.
+
+- **Decision:** CSS `url()` / `@import` now go through the ported
+  `hts_js_scan_link` (in CSS mode) instead of PR 2's regex, and so stop with
+  `--no-parse-scripts`.
+- **Why:** HTTrack has one scanner for both (`src/htsparse.c:584`, 630-640),
+  so `-j4` turns CSS links off too.
+- **Rejected:** keeping the regex (a second, diverging CSS rule).
+- **Pending:** none.
+
+- **Decision:** `document.write("…")` parsing (`src/htsparse.c:1828-1880`)
+  is not ported, and links found by the scans are not rewritten (`-K0`).
+- **Why:** the first never fires on a string with content in HTTrack 3.51
+  (its closing-quote loop stops on the opening quote, lines 1847-1852); the
+  second is recorded as a known gap in the spec.
+- **Rejected:** none.
+- **Pending:** a follow-up for the rewrite under #78.
+
 ## 2026-11-18 — Harness patterns mirrored from open-notes (#35)
 
 - **Decision:** Phases 2–5 of the epic ship as one commit each in a single
@@ -77,4 +195,9 @@ Entry format:
   domain-modeling format and names things in code.
 - **Rejected:** merging both into `GLOSSARY.md` (two formats and two readers
   in one file).
+- **Pending:** none.
+
+- **Decision:** saved HTTP error pages (#121) are detected by `utils/error_page.py` (new module), not folded into `utils/challenge.py`; rule = `<title>` fully matches `[45]xx <reason>` AND file <= 16 KiB AND <= 40 visible words (scripts/styles dropped); wired as step 6a-1 of `pack`, a second copy of the 6a block.
+- **Why:** `challenge.py` is Cloudflare-specific and shared with the httrack fetcher; the error-page rule has no fetcher use. Both layouts and `--dry-run` run after 6a, so they inherit the skip. Second copy tolerated per the project rule; a third skip class should extract the shared block.
+- **Rejected:** matching "404" anywhere in the text; requiring an `<h1>` (not all servers emit one).
 - **Pending:** none.

@@ -113,7 +113,8 @@ def test_profile_options_tuple_matches_download_and_sync():
 
 
 @pytest.mark.parametrize("flag", ["--no-robots", "--connections=2", "--user-agent=x",
-                                  "--retries=2"])  # explicit, even at its default
+                                  "--retries=2", "--no-parse-scripts",
+                                  "--no-extended-parsing"])  # explicit, even at its default
 def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     res = run(str(tmp_path / "o"), flag)
     assert res.exit_code == 2
@@ -276,6 +277,47 @@ def test_httrack_crawl_of_one_page_fails_loud_playwright(crawl):
     assert "Playwright fallback is not implemented yet" in res.output
 
 
+def _updated(out, written=(), kept=("index.html", "a.html")):
+    """An update crawl: `kept` left as they were (304), `written` saved again."""
+    res = _crawled(out, names=(*written, *kept))
+    res.files_downloaded = [f for f in res.files_downloaded
+                            if os.path.basename(f) in written]
+    res.kept = sorted(set(res.urls) - set(res.files_downloaded))
+    res.files_skipped, res.success = len(res.kept), True
+    res.records = {f: {"status": 200, "content_type": "text/html", "etag": '"e"',
+                       "last_modified": None, "redirected": False} for f in res.urls}
+    return res
+
+
+def test_httrack_second_run_is_an_update_of_the_first(crawl):
+    """The manifest a run saves is what the next one revalidates (HTTrack -C2)."""
+    out, ms = crawl
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    assert ms.call_args.kwargs["previous"] is None
+    ms.side_effect = lambda u, o, *a, **k: _updated(o)
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output  # two kept pages are no one-page crawl
+    previous = ms.call_args.kwargs["previous"]
+    assert sorted(e.local_path for e in previous.files.values()) == ["a.html", "index.html"]
+    assert "Files downloaded: 0" in res.output and "Files skipped:    2 (cached)" in res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: (e["status"], e["etag"]) for e in manifest["files"].values()} == {
+        "index.html": (200, '"e"'), "a.html": (200, '"e"')}
+
+
+def test_httrack_update_lists_the_files_it_did_not_reach(crawl):
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: _crawled(o, names=("index.html", "a.html", "b.html"))
+    assert run(out, "--downloader", "httrack").exit_code == 0
+    ms.side_effect = lambda u, o, *a, **k: _updated(o, written=("index.html",), kept=("a.html",))
+    res = CliRunner().invoke(cli, ["-v", "download", "http://example.com", "-o", out,
+                                   "--manifest", out + ".manifest.json", "--downloader", "httrack"])
+    assert res.exit_code == 0, res.output
+    assert "Not reached this run, kept on disk: 1" in res.output
+    assert "    http://example.com/b.html" in res.output
+    assert os.path.exists(os.path.join(out, "b.html"))  # never purged
+
+
 def test_httrack_headless_fails_loud_playwright(ht):
     out, fu, _ = ht
     res = run(out, "--downloader", "httrack", "--headless")
@@ -304,6 +346,21 @@ def test_httrack_config_keys_respected_and_cli_wins(ht, tmp_path):
     assert policy.obey_robots is False
 
 
+def test_httrack_script_scans_on_by_default_and_turned_off_by_flags(ht, tmp_path):
+    # HTTrack -j (parsejava = HTSPARSE_DEFAULT) and -%P (parseall) default on
+    # (htslib.c:5406, 5425); --no-parse-scripts is -j4, --no-extended-parsing -%P0 (or -j8)
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output
+    policy = fu.call_args.args[2]
+    assert (policy.parse_scripts, policy.extended_parsing) == (True, True)
+    cfg = _config(tmp_path, downloader="httrack", **{"no-parse-scripts": False})
+    res = run(out, "--no-parse-scripts", "--no-extended-parsing", config=cfg)
+    assert res.exit_code == 0, res.output
+    policy = fu.call_args.args[2]
+    assert (policy.parse_scripts, policy.extended_parsing) == (False, False)  # CLI wins
+
+
 def test_httrack_invalid_config_value_names_option_and_source(ht, tmp_path):
     out, _, _ = ht
     res = run(out, config=_config(tmp_path, downloader="httrack", connections=0))
@@ -326,6 +383,9 @@ def test_httrack_non_numeric_config_value_is_usage_error(ht, tmp_path):
     ("no-robots", "true", "obey_robots", False),
     ("connections", "3", "connections", 3),          # what `--connections 3` receives
     ("max-conn-rate", 2, "max_conn_rate", 2.0),
+    ("no-parse-scripts", True, "parse_scripts", False),
+    ("no-extended-parsing", "true", "extended_parsing", False),
+    ("no-extended-parsing", "false", "extended_parsing", True),
 ])
 def test_httrack_config_value_converted_like_cli(ht, tmp_path, key, value, attr, expected):
     out, fu, _ = ht

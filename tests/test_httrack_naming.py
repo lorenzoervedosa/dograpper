@@ -138,3 +138,20 @@ def test_thread_safe_unique_paths(tmp_path):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert len(set(out)) == 40
+
+
+def test_reserved_names_of_an_update_go_back_to_their_urls_only(tmp_path):
+    """A file kept by an update (304) is not rewritten, so no URL may take its name unless
+    it asks for it (the URL the previous run saved it from), in any queue order."""
+    reg, root = _reg(tmp_path)
+    d = os.path.join(root, "e.com")
+    page2, t = os.path.join(d, "page-2.html"), os.path.join(d, "t.html")
+    reg.reserve(page2)
+    reg.reserve(t)
+    assert reg.name_of("http://e.com/t", "text/html") == t  # claims nothing
+    assert reg.assign("http://e.com/t", "text/html") == os.path.join(d, "t-2.html")
+    assert reg.assign("http://e.com/Page", "text/html") == os.path.join(d, "Page.html")
+    assert reg.assign("http://e.com/page#x", "text/html", prefer=page2) == page2
+    assert reg.assign("http://e.com/page", "text/html") == page2  # same URL, same name
+    assert reg.assign("http://e.com/new", "text/html", prefer=t) == t
+    assert reg.assign("http://e.com/other", "text/html", prefer=t) == os.path.join(d, "other.html")

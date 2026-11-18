@@ -383,3 +383,49 @@ def test_zstandard_without_frame_end_api_is_refused(monkeypatch, missing):
     _fake(monkeypatch, "zstandard", ZstdDecompressor=Old)
     assert "zstd" not in policy.accept_encoding()
     assert policy.decoder_module("zstd") is None
+
+
+# -- update mode: validators (htslib.c:1632-1653) and conditional headers (htsback.c:2575-2601) --
+
+LONG = "x" * 64  # HTTrack keeps a value only under 64 characters
+
+
+@pytest.mark.parametrize("headers,want", [
+    ({"etag": '"v1"', "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT"},
+     ('"v1"', "Mon, 01 Jan 2024 00:00:00 GMT")),
+    ({"etag": 'W/"v1"', "date": "Tue, 02 Jan 2024 00:00:00 GMT"},
+     ('W/"v1"', "Tue, 02 Jan 2024 00:00:00 GMT")),  # Date stands for Last-Modified
+    ({"last-modified": LONG, "date": "Tue, 02 Jan 2024 00:00:00 GMT"},
+     (None, "Tue, 02 Jan 2024 00:00:00 GMT")),
+    ({"etag": LONG, "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT",
+      "date": "Tue, 02 Jan 2024 00:00:00 GMT"}, (None, "Mon, 01 Jan 2024 00:00:00 GMT")),
+    ({"etag": "", "date": LONG}, (None, None)),
+    ({}, (None, None)),
+])
+def test_response_validators_are_recorded_as_httrack_records_them(headers, want):
+    assert policy.response_validators(headers) == want
+
+
+@pytest.mark.parametrize("etag,lm,want", [
+    ('"v1"', "Mon", [("If-None-Match", '"v1"'), ("If-Modified-Since", "Mon")]),
+    ('"v1"', None, [("If-None-Match", '"v1"')]),
+    (None, "Mon", [("If-Modified-Since", "Mon")]),
+    (None, None, []),
+    ('"a"\r\nX-Injected: 1', LONG, []),  # an edited manifest never reaches the wire
+    (7, "café", []),
+])
+def test_conditional_headers_follow_htsback_c(etag, lm, want):
+    assert list(policy.conditional_headers(etag, lm)) == want
+
+
+def test_conditional_headers_go_first_and_leave_the_rest_identical():
+    """htslib.c:1113-1115: the conditional lines (xsend) follow the request line, before
+    the Referer; Accept-Encoding is unchanged, the identity of htsback.c:2606 being wiped by
+    hts_init_htsblk (htsback.c:2723, 2754)."""
+    p = build_policy()
+    v = policy.conditional_headers('"v1"', "Mon, 01 Jan 2024 00:00:00 GMT")
+    plain = request_headers(p, "localhost:8443", kind="linked", referer="https://localhost:8443/",
+                            scheme="https")
+    got = request_headers(p, "localhost:8443", kind="linked", referer="https://localhost:8443/",
+                          scheme="https", validators=v)
+    assert got == [*v, *plain]

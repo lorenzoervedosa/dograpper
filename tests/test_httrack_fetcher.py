@@ -699,3 +699,21 @@ def test_non_ascii_and_space_seeds_are_fetched(server):
     assert f.get(base + "/docs/café", kind="navigate").body == b"cafe"
     assert f.get(base + "/a b?q=é", kind="navigate").body == b"ab"
     assert [p for p, _ in seen] == ["/docs/caf%c3%a9", "/a%20b?q=%c3%a9"]
+
+
+def test_conditional_request_sends_validators_first_and_is_not_retried(server):
+    """htsback.c:4266-4280 masks an answered error to a revalidation as a 304 before
+    htsmirror.c's retry switch sees it; the Retry-After gate still holds the queue
+    (deviation, spec 5.6: politeness)."""
+    base, script, seen = server
+    script["/a"] = [(503, {"Retry-After": "5"}, b""), (200, {}, b"ok")]
+    script["/b"] = [(200, {}, b"ok")]
+    f, ft = make(retries=2)
+    v = (("If-None-Match", '"v1"'), ("If-Modified-Since", "Mon, 01 Jan 2024 00:00:00 GMT"))
+    r = f.get(base + "/a", kind="navigate", validators=v)
+    assert (r.status, r.attempts) == (503, 1)
+    assert seen[0][1][:2] == list(v)
+    ft.sleeps.clear()
+    f.get(base + "/b", kind="navigate")
+    assert ft.sleeps[0] == pytest.approx(5.0)
+    assert not any(k.startswith("If-") for k, _ in seen[1][1])

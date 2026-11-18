@@ -135,7 +135,8 @@ def test_pack_javadoc_signatures_read_as_the_source_shows_them(tmp_path):
     assert result.exit_code == 0, result.output
     lines = (out / "pages" / "fixture" / "api" / "Box.md").read_text().split("\n")
     assert "public Box(String name)" in lines
-    assert "Box(String name)" in lines  # the constructor summary, a <code> cell
+    # the constructor summary: a row of the grid, the cell in code as the source shows it
+    assert "| Box(String name) | Creates an empty box with a name. |" in lines
 
 
 # ---------------------------------------------------------------------------
@@ -467,3 +468,93 @@ def test_br_does_not_add_words(markdown):
 @pytest.mark.parametrize("page", ["<p>onetwo</p>", "<p>one&#xE000;two</p>", "<p>one&amp;#xE000;two</p>"])
 def test_a_page_cannot_forge_a_br(page, markdown):
     assert "\n" not in strip_html(page, markdown=markdown)
+
+
+# ---------------------------------------------------------------------------
+# Plain-text table cells (#125)
+# ---------------------------------------------------------------------------
+
+ROW = "<table><tr><th>Name</th><th>Example</th></tr><tr><td>debuglog</td><td>-debuglog=All</td></tr></table>"
+
+
+def test_plain_text_separates_the_cells_of_a_row_with_a_tab():
+    assert strip_html(ROW) == "Name\tExample\n\ndebuglog\t-debuglog=All"
+
+
+def test_plain_text_keeps_empty_cells_and_drops_the_trailing_separator():
+    assert strip_html("<table><tr><td>a</td><td></td><td>b</td><td></td></tr></table>") == "a\t\tb"
+
+
+def test_plain_text_separates_cells_whose_end_tags_are_omitted():
+    assert strip_html("<table><tr><td>a<td>b<tr><td>c<th>d</table>") == "a\tb\n\nc\td"
+
+
+def test_plain_text_cell_separator_is_not_a_word():
+    assert count_words(strip_html(ROW)) == 4
+    assert count_words(strip_html("<table><tr><td>a b</td><td>c</td></tr></table>")) == 3
+
+
+def test_md_table_is_unchanged_by_the_plain_cell_separator():
+    assert md(ROW).splitlines()[-1] == "| debuglog | -debuglog=All |"
+
+
+@pytest.mark.parametrize("page", ["<p>onetwo</p>", "<p>one&#xE001;two</p>", "<p>one&amp;#xE001;two</p>"])
+def test_a_page_cannot_forge_a_cell_separator(page):
+    assert "\t" not in strip_html(page)
+
+
+# ---------------------------------------------------------------------------
+# Javadoc summary grids (#120): div.summary-table, cells are flat child divs
+# ---------------------------------------------------------------------------
+
+GRID = (
+    '<div class="summary-table three-column-summary">'
+    '<div class="table-header col-first">Modifier and Type</div>'
+    '<div class="table-header col-second">Constant Field</div>'
+    '<div class="table-header col-last">Value</div>'
+    '<div class="col-first even-row-color"><code>static&nbsp;final&nbsp;double</code></div>'
+    '<div class="col-second even-row-color"><code><a href="M.html#PI">PI</a></code></div>'
+    '<div class="col-last even-row-color"><code>3.14</code></div>'
+    '<div class="col-first odd-row-color"><code>int</code></div>'
+    '<div class="col-second odd-row-color"><code>N</code></div>'
+    '<div class="col-last odd-row-color">\n<div class="block">Count.</div>\n<div class="block">More.</div>\n</div>'
+    '</div><p>after</p>'
+)
+
+
+def test_javadoc_summary_grid_is_a_pipe_table_one_line_per_row():
+    assert md(GRID) == (
+        "| Modifier and Type | Constant Field | Value |\n"
+        "| --- | --- | --- |\n"
+        "| static final double | PI | 3.14 |\n"
+        "| int | N | Count. More. |\n\nafter")
+
+
+def test_javadoc_two_column_grid_and_stray_div_are_handled():
+    html = ('<div class="summary-table two-column-summary">'
+            '<div class="table-header col-first">Constructor</div>'
+            '<div class="table-header col-last">Description</div>'
+            '<div class="col-first"><code>Box()</code></div><div class="col-last">Empty.</div>'
+            '<div class="col-first"><code>Box(int)</code></div></div>')
+    assert md(html) == ("| Constructor | Description |\n| --- | --- |\n"
+                        "| Box() | Empty. |\n| Box(int) |")
+
+
+def test_div_without_the_grid_class_is_still_one_paragraph_per_div():
+    assert md('<div class="x"><div>a</div><div>b</div></div>') == "a\n\nb"
+
+
+def test_javadoc_summary_grid_row_is_one_line_in_a_pack(tmp_path):
+    page = "<html><body><main><h1>Consts</h1>" + GRID + "</main></body></html>"
+    written = next(_pack(tmp_path, "md", "--no-index", pages={"c.html": page}).glob("*.md")).read_text()
+    assert "| int | N | Count. More. |\n" in written
+
+
+def test_unclosed_javadoc_grids_render_in_linear_time():
+    n = 20000
+    start = time.perf_counter()
+    out = md('<div class="summary-table two-column-summary"><div>k<div>v' * n)
+    assert out.count("k") == n
+    grid = md('<div class="summary-table three-column-summary">' + "<div>a</div>" * 3 * n + "</div>")
+    assert len(grid.split("\n")) == n + 1
+    assert time.perf_counter() - start < 10
