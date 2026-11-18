@@ -238,6 +238,25 @@ def test_page_layout_writes_no_chunk_files_and_respects_format_txt(tmp_path):
     assert "(<pages/Modding/vi.txt>)" in _read("out/INDEX.md")
 
 
+def test_txt_pages_carry_code_without_its_fence(tmp_path):
+    code = "local function onTick()\n    if x then\n\n        print(x)\n    end\nend"
+    _write("docs", {"Events.html": (
+        "<html><body><main><h2>Events</h2><p>Some prose so the page has text to extract.</p>"
+        f'<div class="mw-highlight mw-highlight-lang-lua"><pre>{code}\n</pre></div>'
+        "</main></body></html>")})
+    for extra in ((), ("--context-header",)):
+        result = _pack("docs", "-o", "out", "--layout", "page", "--format", "txt", *extra)
+        assert result.exit_code == 0, result.output
+        text = _read("out/pages/Events.txt")
+        assert code in text, text
+        assert "```" not in text
+    body = text.split("\n-->\n\n", 1)[1]
+    assert _header("out/pages/Events.txt")["word_count"] == len(body.split())
+    assert f"), {len(body.split())} words" in _read("out/INDEX.md")
+    result = _pack("docs", "-o", "out-md", "--layout", "page")
+    assert "```lua\n" + code + "\n```" in _read("out-md/pages/Events.md")
+
+
 def test_page_over_the_word_cap_is_neither_split_nor_warned(tmp_path):
     _write("docs", {"big.html": "<html><body><main><p>" + "w " * 600000
                     + "</p></main></body></html>"})

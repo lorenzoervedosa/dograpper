@@ -241,6 +241,9 @@ and fixes alone are a PATCH bump.
 - `pack --cross-refs` writes its marker after a Markdown link whose text it
   matched (`[Item](Item.html) [-> docs_chunk_02]`) instead of inside the
   brackets, and never inside a link's target, where it broke the link. ([#87])
+- `pack --layout page --format txt` writes `<pre>` code without its fence
+  lines, as txt chunks do, and leaves them out of the page's `INDEX.md` and
+  header word counts. ([#86])
 
 ### Security
 

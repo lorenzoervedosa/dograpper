@@ -14,7 +14,7 @@ import shutil
 from collections import Counter
 from html.parser import HTMLParser
 
-from .chunker import Chunk, ChunkFile, is_html, read_source_text
+from .chunker import Chunk, ChunkFile, _plain_text, is_html, read_source_text
 from ..utils.atomic_write import atomic_write_bytes
 from ..utils.heading_extractor import format_context_header
 from ..utils.html_stripper import escape_link_text
@@ -182,7 +182,8 @@ def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = Fals
     """Write ``pages/`` and ``INDEX.md`` for ``page_chunks`` output. Returns the index path.
 
     ``markdown`` writes HTML pages as Markdown (md) and counts their words
-    without its markup. The caller checks ``owns_pages`` first. Raises OSError
+    without its markup; otherwise (txt) code blocks lose their fence, as in
+    txt chunks. The caller checks ``owns_pages`` first. Raises OSError
     on any failed write, leaving the previous ``pages/`` in place.
     """
     chunks = sorted(chunks, key=lambda c: c.page_path)
@@ -200,6 +201,8 @@ def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = Fals
             if content is None:
                 content = read_source_text(os.path.join(input_dir, rel), no_extract=no_extract,
                                            markdown=markdown)
+            if not markdown:
+                content = _plain_text(chunk.files[0], content)
             words = count_words(content, markdown and is_html(rel))
             url = (url_map or {}).get(rel, "")
             text = annotate(rel, content) if annotate else content
