@@ -240,10 +240,10 @@ def _sync_httrack(runner, args):
     seen = {}
 
     def fake_run(url, output, depth, delay, ext, headless, verbose, policy_kw,
-                 from_config, discover):
+                 from_config, discover, filters):
         seen["policy_kw"] = policy_kw
         seen["from_config"] = from_config
-        return 0, 0, []
+        return 0, 0, [], {}
 
     with patch("dograpper.commands.download.run_httrack", fake_run):
         result = runner.invoke(

@@ -105,3 +105,17 @@ class TestContextV1Header:
         data = json.loads(json_str)  # Não deve lançar exceção
         assert len(data["context_breadcrumb"]) == 3
         assert data["schema_version"] == "v1"
+
+    def test_greater_than_is_escaped_so_a_value_cannot_close_the_comment(self):
+        """json.dumps leaves '>' alone; a '-->' in a value would end the comment (ADR-0010)."""
+        header = format_context_header(
+            active_headings=[Heading(1, "a --> b", 0), Heading(2, "x > y", 9)],
+            source_path="odd-->name.html",
+        )
+        assert header.count("-->") == 1
+        assert header.endswith("\n-->\n\n")
+        json_str = header.split("<!-- dograpper-context-v1\n")[1].split("\n-->")[0]
+        assert ">" not in json_str and "\\u003e" in json_str
+        data = json.loads(json_str)
+        assert data["context_breadcrumb"] == ["a --> b", "x > y"]
+        assert data["source"] == "odd-->name.html"

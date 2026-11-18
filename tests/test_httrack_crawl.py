@@ -1,6 +1,5 @@
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -23,37 +22,6 @@ class FakeTime:
     def sleep(self, s):
         with self.lock:
             self.now += s
-
-
-# Second copy of the local-server fixture in test_httrack_fetcher.py; factor it out on the third.
-@pytest.fixture
-def server():
-    script, seen = {}, []
-
-    class H(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            seen.append(self.path)
-            status, hdrs, body = script.get(self.path, (404, {}, b"nope"))
-            self.send_response(status)
-            for k, v in hdrs.items():
-                self.send_header(k, v)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
-    srv.daemon_threads = True
-    t = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}", script, seen
-    srv.shutdown()
-    srv.server_close()
-    t.join(5)
 
 
 def run(urls, out, exts="html", **kw):
@@ -105,6 +73,22 @@ def test_same_host_redirect_is_followed_and_final_url_named(server, tmp_path):
     script["/new"] = (200, HTML, b"<p>n</p>")
     res = run([f"{base}/old"], tmp_path)
     assert [os.path.basename(f) for f in res.files_downloaded] == ["new.html"]
+
+
+def test_redirect_target_refused_by_filters_is_not_fetched(server, tmp_path):
+    from dograpper.lib.url_filter import UrlFilters
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/old"] = (301, {"location": "/Special:Login"}, b"")
+    script["/Special:Login"] = (200, HTML, b"<p>login</p>")
+    filters = UrlFilters(["-*Special:*"])
+    policy = build_policy(retries=0)
+    ft = FakeTime()
+    res = fetch_url_list([f"{base}/old"], str(tmp_path), policy, "html",
+                         fetcher=Fetcher(policy, clock=ft.clock, sleep=ft.sleep), filters=filters)
+    assert res.files_downloaded == [] and not res.front_failed
+    assert "/Special:Login" not in seen
+    assert filters.excluded == {f"{base}/Special:Login"}
 
 
 def test_redirect_with_undecodable_body_is_followed(server, tmp_path):
@@ -195,6 +179,36 @@ def test_seeds_redirecting_to_one_target_write_one_file(server, tmp_path):
     script["/t"] = (200, HTML, b"<p>t</p>")
     res = run([f"{base}/a", f"{base}/b", f"{base}/t"], tmp_path)
     assert [os.path.basename(f) for f in res.files_downloaded] == ["t.html"]
+    assert list(res.urls.values()) == [f"{base}/t"]  # the seed that needed no redirect
+
+
+def test_seeds_redirecting_to_one_file_record_the_smallest_url(server, tmp_path):
+    """Whichever thread writes first, the manifest gets the same URL."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/b"] = (301, {"location": "/t"}, b"")
+    script["/a"] = (301, {"location": "/t"}, b"")
+    script["/t"] = (200, HTML, b"<p>t</p>")
+    res = run([f"{base}/b", f"{base}/a"], tmp_path)
+    assert list(res.urls.values()) == [f"{base}/a"]
+
+
+def test_each_written_file_maps_to_the_url_fetched(server, tmp_path):
+    """#94: the manifest records these instead of rebuilding a URL from the name."""
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/wiki/Category:En"] = (200, HTML, b"<p>c</p>")
+    script["/w/index.php?title=A"] = (200, HTML, b"<p>q</p>")
+    script["/old"] = (301, {"location": "/new"}, b"")
+    script["/new"] = (200, HTML, b"<p>n</p>")
+    script["/gone"] = (404, HTML, b"<p>x</p>")
+    res = run([f"{base}/wiki/Category:En", f"{base}/w/index.php?title=A", f"{base}/old",
+               f"{base}/gone"], tmp_path)
+    assert sorted(res.urls) == res.files_downloaded
+    by_name = {os.path.basename(f): u for f, u in res.urls.items()}
+    assert by_name.pop("Category_En.html") == f"{base}/wiki/Category:En"
+    assert by_name.pop("new.html") == f"{base}/old"  # named after the target, URL as requested
+    assert list(by_name.values()) == [f"{base}/w/index.php?title=A"]
 
 
 def test_malformed_seed_is_recorded_and_run_continues(server, tmp_path):

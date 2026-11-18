@@ -4,9 +4,10 @@ import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
 
+from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.redact import redact_url
 
@@ -28,14 +29,21 @@ class HttrackResult:
     files_skipped: int
     report: RunReport
     front_failed: bool
+    urls: dict[str, str] = field(default_factory=dict)  # written file -> seed URL requested
 
 
 def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
-                   include_extensions: str, *, fetcher: Fetcher | None = None) -> HttrackResult:
+                   include_extensions: str, *, fetcher: Fetcher | None = None,
+                   filters: UrlFilters | None = None) -> HttrackResult:
+    """Fetch `urls` (already scoped and filtered); a redirect target goes through the
+    same-host check and `filters` (refusals land in `filters.excluded`) before its GET."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
     report, lock, written = RunReport(), threading.Lock(), set()
+    # written file -> (redirected?, seed): of several seeds reaching one file, the one
+    # that needed no redirect, else the smallest, whichever thread wrote first
+    requested: dict[str, tuple[bool, str]] = {}
     seeds = list(dict.fromkeys(urls))
     if len(seeds) > policy.max_links:
         seeds, report.partial = seeds[:policy.max_links], True
@@ -47,7 +55,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
 
     def fetch_one(url: str) -> str:
         """Return "refused", "scoped" (skipped by scope/filter) or "written"."""
-        hops = 0
+        seed, hops = url, 0
         while True:
             safe = redact_url(url)
             try:
@@ -89,6 +97,8 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                     if not same_host(url, nxt):
                         report.out_of_scope.append(redact_url(nxt))
                         return "scoped"
+                    if filters is not None and filters.decide(nxt) is False:
+                        return "scoped"
                     if hops >= MAX_REDIRECTS:
                         report.errors.append((safe, "too many redirects", None))
                         return "refused"
@@ -100,9 +110,9 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                 if not (res.status and 200 <= res.status < 300):
                     report.errors.append((safe, f"HTTP {res.status}", None))
                     return "refused"
-            return write(url, safe, res)
+            return write(url, seed, safe, res)
 
-    def write(url: str, safe: str, res) -> str:
+    def write(url: str, seed: str, safe: str, res) -> str:
         path = names.assign(url, res.headers.get("content-type"))
         if path is None:
             with lock:
@@ -112,15 +122,19 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
             with lock:
                 report.filtered.append(safe)
             return "scoped"
+        key = (url != seed, seed)
         with lock:
             if path in written:  # same final URL reached from several seeds
+                requested[path] = min(requested[path], key)
                 return "written"
             written.add(path)
+            requested[path] = key
         try:
             atomic_write_bytes(path, res.body)
         except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
             with lock:
                 written.remove(path)
+                del requested[path]
                 report.errors.append((safe, f"write failed: {exc}", None))
             return "refused"
         return "written"
@@ -140,4 +154,5 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     report.errors.sort(key=lambda e: (e[0], e[1]))
     files = sorted(written)
     front_failed = not files and bool(seeds) and refused[0] == len(seeds)
-    return HttrackResult(bool(files), files, 0, report, front_failed)
+    chosen = {path: seed for path, (_, seed) in requested.items()}
+    return HttrackResult(bool(files), files, 0, report, front_failed, chosen)

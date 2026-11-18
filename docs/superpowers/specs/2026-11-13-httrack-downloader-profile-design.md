@@ -280,6 +280,12 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     `*[param]`, `*[a-z]`, `*[]`;
   - optional (builder may defer to a later PR): `*[<NN]`/`*[>NN]` size rules
     and `-mime:`.
+  - Shipped by #96 for **both** profiles (`lib/url_filter.py`), ahead of PR 2.
+    Under `wget` the rules also scope `wget --mirror` as
+    `--accept-regex`/`--reject-regex`; a rule order those cannot express is a
+    usage error. PR 2's recursive crawl should reuse the same `UrlFilters`.
+  - **Deviation:** a rule never widens the host scope above (HTTrack's
+    `+other.host/*` crosses hosts).
 - **URL normalization** (HTTrack `-%u`): drop the fragment, collapse `//`,
   sort query keys.
 - **Run limits:** a link cap (default 100,000). When it is reached, the run
@@ -339,10 +345,10 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
      `navigator.userAgent`, and uses both for the crawl.
   4. With `--cookies FILE`, the jar is also saved there for reuse.
 - **Fail loud:**
-  - any `httrack`-only flag (`--user-agent`, `--no-robots`, `--filter`,
-    `--cookies`, `--browser-headers`, `--browser-login` and every tunable in
-    §5.3) combined with `--downloader wget` is a usage error (exit 2, click's
-    convention);
+  - any `httrack`-only flag (`--user-agent`, `--no-robots`, `--cookies`,
+    `--browser-headers`, `--browser-login` and every tunable in §5.3) combined
+    with `--downloader wget` is a usage error (exit 2, click's convention).
+    `--filter` left this list with #96, which made it shared;
   - `--browser-login` without Playwright or without a display exits 1 with the
     fix in the message.
 

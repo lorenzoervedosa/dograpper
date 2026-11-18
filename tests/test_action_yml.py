@@ -89,3 +89,8 @@ def test_action_yml_comment_lookup_takes_first_page_hit():
     # gh api --paginate applies --jq per page: without head -n1 a comment
     # id could be emitted once per page.
     assert "head -n1" in _content()
+
+
+def test_action_yml_source_drift_leaves_out_the_manifest():
+    # download keeps its manifest in input-dir (#95) and rewrites it every run.
+    assert ':(exclude)${INPUT_DIR}/.dograpper-manifest.json' in _content()

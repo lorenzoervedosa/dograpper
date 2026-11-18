@@ -1,19 +1,32 @@
 """Manifest management and generation."""
 
 import os
+import re
 import json
 import hashlib
 import logging
 from dataclasses import dataclass, asdict, field, fields
 from typing import Dict, Optional
 from datetime import datetime, timezone
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
+
+from ..utils.redact import recordable_url
+from .ignore_parser import DOGRAPPER_STATE_NAMES
 
 logger = logging.getLogger(__name__)
 
+# How far above INPUT_DIR pack looks for the download root holding the manifest.
+MAX_MANIFEST_LEVELS = 8
+# A directory download names after a host: "<host>[:port]" (wget, Playwright)
+# or an IPv6 literal in brackets (httrack). The last label of a name starts
+# with a letter, so version segments such as "3.12" or "v1.2" do not match.
+_HOST_DIR = re.compile(
+    r"(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z][a-z0-9-]*"
+    r"|\[[0-9a-f:._]+\])(?::\d+)?", re.IGNORECASE)
+
 @dataclass
 class ManifestEntry:
-    # None when the URL cannot be rebuilt from the saved path (see build_manifest).
+    # URL dograpper requested for the file; None when no run recorded one (see build_manifest).
     url: Optional[str]
     size_bytes: int
     etag: Optional[str] = None
@@ -71,6 +84,29 @@ def load_manifest(path: str) -> Optional[Manifest]:
         logger.warning(f"Failed to parse manifest at {path}, treating as missing: {e}")
         return None
 
+def find_manifest(input_dir: str, name: str) -> Optional[str]:
+    """The manifest ``name`` pack uses by default for ``input_dir``, or None.
+
+    download keeps it in ``-o`` and saves pages under ``-o/<host>/``, so when a
+    subdirectory of a mirror is packed the manifest sits in the parent of the
+    nearest directory named after a host. The search covers ``input_dir`` and its
+    ancestors up to that root, at most MAX_MANIFEST_LEVELS up, and never above
+    it: a manifest in /tmp, $HOME or a shared parent is not this mirror's. The
+    nearest one wins. An absolute ``name`` is used as is.
+    """
+    if os.path.isabs(name):
+        return name if os.path.exists(name) else None
+    chain = [os.path.abspath(input_dir)]
+    while len(chain) <= MAX_MANIFEST_LEVELS and os.path.dirname(chain[-1]) != chain[-1]:
+        chain.append(os.path.dirname(chain[-1]))
+    hosts = [i for i, d in enumerate(chain[:-1]) if _HOST_DIR.fullmatch(os.path.basename(d))]
+    for d in chain[:hosts[0] + 2] if hosts else chain[:1]:
+        candidate = os.path.join(d, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def save_manifest(manifest: Manifest, path: str) -> None:
     """Save manifest to disk."""
     d = asdict(manifest)
@@ -80,7 +116,10 @@ def save_manifest(manifest: Manifest, path: str) -> None:
     except Exception as e:
         logger.error(f"Failed to save manifest to {path}: {e}")
 
-def build_manifest(base_url: str, output_dir: str) -> Manifest:
+def build_manifest(base_url: str, output_dir: str,
+                   fetched: Optional[Dict[str, str]] = None,
+                   previous: Optional[Manifest] = None,
+                   manifest_path: Optional[str] = None) -> Manifest:
     """Build a manifest based on the output directory contents.
 
     Keys are URL-relative paths (the path component the file would have on the
@@ -89,23 +128,33 @@ def build_manifest(base_url: str, output_dir: str) -> Manifest:
     created by wget — is preserved in ``local_path`` so callers can still find
     the file when re-running.
 
-    The fetched URL is not recorded per file, so ``url`` is rebuilt from
-    ``local_path`` as ``<seed scheme>://<host dir>/<rest>``; the seed's path is
-    never used. A ``.html`` added by ``--adjust-extension`` cannot be told apart
-    from a real one on disk, so the saved name is kept. ``url`` is None when
-    there is no seed scheme or host directory, or when the saved name has a
-    ``?``: wget decodes the query (``%26`` and ``&`` both save as ``&``).
+    ``url`` comes from ``fetched``: saved file path, as the downloader reported
+    it, -> URL requested for it, without userinfo. A URL whose query has a
+    parameter off the navigation allowlist is recorded as None
+    (recordable_url). A file not in ``fetched`` keeps the URL ``previous``
+    recorded for the same local_path, if any. The saved path is never turned back into a URL:
+    ``--adjust-extension``'s ``.html``, ``index.html`` for a directory URL, a
+    dropped or decoded query and httrack's renaming all make one saved name
+    stand for several URLs.
+
+    The manifest at ``manifest_path`` and dograpper's state files are left out.
     """
     files = {}
     last_run = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
     parsed_base = urlparse(base_url)
     netloc = parsed_base.netloc
-    scheme = parsed_base.scheme
+    real_output = os.path.realpath(output_dir)
+    urls = {os.path.relpath(os.path.realpath(path), real_output).replace(os.sep, '/'):
+            recordable_url(url) for path, url in (fetched or {}).items()}
+    recorded = {(e.local_path or k): e.url for k, e in previous.files.items()} if previous else {}
+    own = os.path.realpath(manifest_path) if manifest_path else None
 
     for root, _, filenames in os.walk(output_dir):
         for f in filenames:
             full_path = os.path.join(root, f)
+            if f.lower() in DOGRAPPER_STATE_NAMES or os.path.realpath(full_path) == own:
+                continue
             fs_rel = os.path.relpath(full_path, output_dir).replace(os.sep, '/')
             size = os.path.getsize(full_path)
 
@@ -119,19 +168,12 @@ def build_manifest(base_url: str, output_dir: str) -> Manifest:
             else:
                 url_rel = fs_rel
 
-            host, sep, path = fs_rel.partition('/')
-            url = None
-            if scheme and sep and '?' not in path:
-                # shortcut: "%" is kept because Playwright saves paths still
-                # escaped; a literal "%" wget decoded from %25 comes out wrong.
-                path = quote(path, safe="/:@!$&'()*+,;=%", errors='surrogateescape')
-                url = f"{scheme}://{host}/{path}"
             key = url_rel or fs_rel
 
             mtime = os.path.getmtime(full_path)
 
             files[key] = ManifestEntry(
-                url=url,
+                url=urls[fs_rel] if fs_rel in urls else recorded.get(fs_rel),
                 size_bytes=size,
                 etag=None,
                 last_modified=None,

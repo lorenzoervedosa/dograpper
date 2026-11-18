@@ -9,6 +9,7 @@ from typing import Callable, List, Dict
 from ..utils.word_counter import count_words_file
 from ..utils.html_stripper import strip_html
 from ..utils.content_extractor import extract_content
+from ..utils.code_fence import split_blocks, unfence
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,13 @@ class Chunk:
     index: int
     files: List[ChunkFile] = field(default_factory=list)
     total_words: int = 0
+    # Page layout (ADR-0010): the page file's path from the pack root, also its id.
+    page_path: str = ""
+
+
+def chunk_id(prefix: str, chunk: Chunk, total_chunks: int) -> str:
+    """Id of a chunk in sidecars and headers: its page path in the page layout."""
+    return chunk.page_path or f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
 
 def chunk_by_size(files: List[str], base_dir: str, max_words: int, no_extract: bool = False, word_counts: Dict[str, int] = None, preserve_order: bool = False) -> List[Chunk]:
     """Group incoming files in chunks keeping them under the soft limit max_words per chunk.
@@ -312,6 +320,11 @@ def _read_source_content(base_dir: str, cf: ChunkFile, no_extract: bool = False,
         return f"[Excluded unreadable blob: {e}]"
 
 
+def _plain_text(cf: ChunkFile, text: str) -> str:
+    """txt and jsonl carry a ``<pre>``'s code without the fence the HTML stripper put around it."""
+    return unfence(text) if cf.relative_path.lower().endswith(('.html', '.htm')) else text
+
+
 def _group_into_blocks(paragraphs: list) -> list:
     """Group paragraphs into indivisible structural blocks.
 
@@ -320,30 +333,19 @@ def _group_into_blocks(paragraphs: list) -> list:
     a structural unit (fenced code block, ``<pre>`` block, contiguous
     list, or markdown table).
     """
+    if not paragraphs:
+        return []
+    # Rejoin the paragraphs a fenced code block spans.
+    paragraphs = split_blocks("\n\n".join(paragraphs))
     blocks = []
     i = 0
     while i < len(paragraphs):
         para = paragraphs[i]
 
-        # Fenced code block: starts with ```
+        # Fenced code block: already whole, and never part of another block
         if para.lstrip().startswith("```"):
-            lines = para.split("\n")
-            fence_count = sum(1 for l in lines if l.strip().startswith("```"))
-            if fence_count >= 2:
-                # Self-contained in one paragraph
-                blocks.append(para)
-                i += 1
-                continue
-            # Accumulate until closing fence
-            group = [para]
+            blocks.append(para)
             i += 1
-            while i < len(paragraphs):
-                group.append(paragraphs[i])
-                if paragraphs[i].rstrip().endswith("```") or paragraphs[i].strip() == "```":
-                    i += 1
-                    break
-                i += 1
-            blocks.append("\n\n".join(group))
             continue
 
         # <pre> block without closing </pre>
@@ -429,12 +431,13 @@ def _split_text_by_words(text: str, max_words: int) -> list:
     return result if result else [("", 0)]
 
 
-def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max_words: int, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, chunk_id: str = "", annotate: Callable[[str, str], str] = None):
+def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max_words: int, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, chunk_id: str = "", annotate: Callable[[str, str], str] = None, plain: bool = False):
     """Write a file's content with per-sub-chunk context headers.
 
     Splits the content at paragraph boundaries respecting max_words,
     computes the active heading hierarchy for each sub-chunk, and
-    writes the context header before each piece.
+    writes the context header before each piece. ``plain`` writes code
+    blocks without their fence (txt).
     """
     from ..utils.heading_extractor import get_active_headings, format_context_header
 
@@ -445,6 +448,8 @@ def _write_file_with_context(f, cf: ChunkFile, content: str, headings: list, max
 
     total_sub = len(sub_chunks)
     for j, (sub_text, char_offset) in enumerate(sub_chunks):
+        if plain:
+            sub_text = _plain_text(cf, sub_text)
         if j > 0:
             f.write("\n\n")
         active = get_active_headings(headings, char_offset) if headings else []
@@ -483,9 +488,10 @@ def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index
 
             if heading_map is not None and cf.relative_path in heading_map:
                 chunk_id = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
-                _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id, annotate=annotate)
+                _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id, annotate=annotate, plain=True)
             else:
                 f.write(f"=== SOURCE: {cf.relative_path} ===\n\n")
+                content = _plain_text(cf, content)
                 f.write(annotate(cf.relative_path, content) if annotate else content)
 
 
@@ -539,6 +545,7 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
 
             total_sub = len(sub_chunks)
             for j, (sub_text, char_offset) in enumerate(sub_chunks):
+                sub_text = _plain_text(cf, sub_text)
                 active = get_active_headings(headings, char_offset) if headings else []
                 if not active and headings and j == 0:
                     active = get_active_headings(headings, headings[0].char_offset)
@@ -565,6 +572,7 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
 
                 lines.append(json.dumps(record, ensure_ascii=False))
         else:
+            content = _plain_text(cf, content)
             record = {
                 "id": f"{format_chunk_index(chunk.index, total_chunks)}_{cf.relative_path}",
                 "source": cf.relative_path,

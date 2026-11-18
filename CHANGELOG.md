@@ -63,6 +63,41 @@ and fixes alone are a PATCH bump.
 - `download` (wget paths) lists the URLs behind a wget exit code 8 in the
   summary as `Failed: N URLs (first 5 shown)` with each URL and HTTP status;
   `--verbose` lists them all ([#97](https://github.com/lorenzoervedosa/dograpper/issues/97)).
+- `pack --layout page` (config key `layout`, forwarded by `sync`) writes one
+  file per page under `pages/`, mirroring `INPUT_DIR` with the `--format`
+  extension (`Modding/vi.html` -> `pages/Modding/vi.md`), plus an `INDEX.md`
+  with one line per page: `- [title](<path>), N words, URL`. Names are
+  portable (HTTrack's forbidden characters, Windows reserved names and a
+  trailing dot or space get `_`; case-only collisions get `-2`, `-3`...).
+  Every run rebuilds `pages/` and swaps it in, with no word cap, chunk cap or
+  size warning, and never touches other files in the output directory.
+  `--context-header` writes one header per page; `--cross-refs` markers,
+  `cross_refs.json`, `llm-readiness.json` and `delta_manifest.json` name pages
+  by path. Chunk-only settings, `--bundle`, `--for-queries`, `--format jsonl`
+  and `--dedup` other than `off` exit 2; a `pages/` without `INDEX.md` exits
+  1. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md), [#84])
+- `pack --layout page --context-header` writes exactly one
+  `dograpper-context-v1` header per page file, at line 1, with a new
+  optional `title` field first: the `<title>` minus the site suffix shared by
+  more than half of the pages, else the raw page's first `h1`, else the file
+  stem. The page header holds no `chunk_index`, `total_chunks` or
+  `context_breadcrumb`. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md),
+  [#85])
+- `init --target claude-code`: a config for Claude Code (`layout: page`,
+  `format: md`, `context-header`, `dedup: off`, no chunk-only key) and a
+  `SKILL.md` stub in `--skill-dir` (default `docs-skill`, the directory to
+  pack into) with the skill name, a description to fill in, a link to
+  `INDEX.md` and grep-then-Read usage. An existing `SKILL.md` is never
+  overwritten. The `claude-project` description now says it targets Claude
+  Projects. ([#93])
+- `download --filter RULE` (repeatable, config key `filter`, forwarded by
+  `sync`): HTTrack scan rules (`+pattern` accepts, `-pattern` refuses, the last
+  match wins) applied to every discovered link before it is fetched, under both
+  downloaders: the llms.txt/sitemap lists, `wget --mirror` (as
+  `--accept-regex`/`--reject-regex`), Playwright and httrack redirect targets.
+  A `+` rule lifts `--no-parent` for the URLs it matches; the start URL is never
+  filtered. Refused URLs are counted as `Filtered by --filter: N` in the
+  summary ([#96](https://github.com/lorenzoervedosa/dograpper/issues/96)).
 
 ### Changed
 
@@ -79,6 +114,17 @@ and fixes alone are a PATCH bump.
   length, characters, host) and the manifest still wins. The pack summary gains
   a `Source URLs` line counting URLs by source and listing files left without
   one, including rejected or conflicting markers. ([#90])
+- `download --manifest` resolves a relative path against `-o`, so the default
+  `.dograpper-manifest.json` now lives in the output directory instead of the
+  current one: a re-run from another directory stays incremental and two
+  mirrors no longer share a manifest. A manifest left at the old location is
+  not read; `download` prints a one-line note naming the new path.
+  `pack --manifest` resolves against `INPUT_DIR`; by default `pack` looks in
+  `INPUT_DIR` and, inside a mirror, up to its root (the parent of the host
+  directory, at most 8 levels up), naming a manifest found above `INPUT_DIR`
+  in a note. The GitHub Action's manifest moves into `input-dir` and is left
+  out of the source-file drift list; a repo-root one from earlier runs is no
+  longer read. ([#95])
 
 ### Fixed
 
@@ -88,11 +134,19 @@ and fixes alone are a PATCH bump.
   ([#92](https://github.com/lorenzoervedosa/dograpper/issues/92)).
 - `pack --score` no longer grades a chunk with empty extracted content as `A`;
   it is graded `C` with score 0. ([#69])
-- `download` manifest entries record `url` as `<scheme>://<host dir>/<saved
-  path>` instead of appending the path to the seed URL, which doubled a seed's
-  path segment (`.../PZ-API-Docs/PZ-API-Docs/index.html`) or glued paths onto a
-  page seed. A saved name with `?` (wget query pages) now gets `"url": null`,
-  and `pack --context-header` leaves `url` out for such sources. ([#94])
+- `download` manifest entries record `url` as the URL dograpper requested for
+  each file (never a redirect target, which may carry a signed token; without
+  userinfo; none at all when its query has a parameter other than a
+  navigation name such as `title`, `oldid`, `page` or `lang`) instead of
+  appending the saved path to the seed URL, which doubled a seed's path
+  segment (`.../PZ-API-Docs/PZ-API-Docs/index.html`), glued paths onto a page
+  seed and kept the `.html` that `--adjust-extension` added. Query pages such
+  as `index.php?title=...` get their real URL. A file no run recorded gets
+  `"url": null`, and `pack --context-header` leaves `url` out for such
+  sources. ([#94])
+- `download` no longer lists its own manifest, `delta_manifest.json` or
+  `pack_state.json` among the mirror's files when they sit inside `-o`, and
+  `pack --delta` leaves them out of `pack_state.json`. ([#95])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
@@ -135,12 +189,33 @@ and fixes alone are a PATCH bump.
   matched on their path in the mirror, so a page in a subdirectory no longer
   takes the URL of a same-named page at the site root; a file that matches
   several entries gets no `url` and is listed in the summary. ([#90])
+- `pack --context-header` writes `>` in header values as the JSON escape
+  `\u003e`, so a heading or source path holding `-->` no longer closes the
+  `dograpper-context-v1` comment early; JSON parsers read the same value.
+  ([ADR-0010](docs/adr/0010-per-page-pack-layout.md))
+- `pack` keeps the line breaks and indentation of HTML `<pre>` blocks in
+  `md`, `txt` and `jsonl` instead of flattening each one to a single line.
+  `md` writes them as fenced code blocks tagged with the language named by a
+  `mw-highlight-lang-*`, `language-*`, `lang-*` or Sphinx `highlight-*` class
+  (` ```lua `); `txt`
+  and `jsonl` carry the code without the fence. `--dedup` and chunking no
+  longer split a code block at a blank line, and `--score` counts a fenced
+  block as intact even when its code holds backticks or a `<pre>` sample.
+  ([#86])
+- `download`'s Playwright layer follows the links of a page it skips as
+  cached on an incremental run, instead of ending the crawl there. ([#94])
 
 ### Security
 
 - URLs that `download` logs during llms.txt and sitemap discovery drop
   credentials and escape control characters, so a hostile sitemap or
   robots.txt cannot inject terminal escape sequences.
+- `download` never writes a credential from a URL's query into the manifest,
+  and so into a pack: a URL is recorded only when every query parameter is a
+  navigation name (`title`, `oldid`, `page`, `lang`, `q`, ... see README),
+  otherwise `"url": null`. Logs and failure reports show the value of
+  credential-like parameters (`token`, `secret`, `key`, `sig`, `jwt`,
+  `X-Amz-*`, ...) as `REDACTED`. ([#94])
 
 ## [0.4.0] - 2026-08-15
 
@@ -218,3 +293,8 @@ and fixes alone are a PATCH bump.
 [#67]: https://github.com/lorenzoervedosa/dograpper/issues/67
 [#94]: https://github.com/lorenzoervedosa/dograpper/issues/94
 [#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
+[#84]: https://github.com/lorenzoervedosa/dograpper/issues/84
+[#85]: https://github.com/lorenzoervedosa/dograpper/issues/85
+[#93]: https://github.com/lorenzoervedosa/dograpper/issues/93
+[#86]: https://github.com/lorenzoervedosa/dograpper/issues/86
+[#95]: https://github.com/lorenzoervedosa/dograpper/issues/95

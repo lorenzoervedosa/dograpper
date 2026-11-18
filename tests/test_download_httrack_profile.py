@@ -143,6 +143,31 @@ def test_httrack_seeded_fetch_happy_path(ht):
     assert "Responses:" in res.output
 
 
+def test_httrack_filter_scopes_discovered_urls_and_reaches_the_fetch(ht):
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", "--filter", "-*/p1",
+              "--filter", "-*/p2", "--filter", "+*/p2")  # any order works off wget
+    assert res.exit_code == 0, res.output
+    assert fu.call_args.args[0] == [u for u in URLS if not u.endswith("/p1")]
+    assert [r[1] for r in fu.call_args.kwargs["filters"].rules] == ["*/p1", "*/p2", "*/p2"]
+    assert "Filtered by --filter: 1" in res.output
+
+
+def test_httrack_manifest_records_the_urls_fetched(ht):
+    out, fu, _ = ht
+
+    def fetched(urls, o, *a, **k):
+        res = _res(o)
+        res.urls = {res.files_downloaded[0]: "http://example.com/p0?lang=en"}
+        return res
+    fu.side_effect = fetched
+    res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: e["url"] for e in manifest["files"].values()} == {
+        "p0.html": "http://example.com/p0?lang=en"}
+
+
 def test_httrack_one_fetcher_shared_by_discovery_and_fetch(ht):
     out, fu, _ = ht
 

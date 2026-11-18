@@ -7,9 +7,11 @@ import logging
 import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List, Tuple
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
+from dograpper.lib.url_filter import UrlFilters, rule_regex
 from dograpper.utils.dep_resolver import resolve_wget
 from dograpper.utils.redact import neutralize_controls, redact_url
 
@@ -68,12 +70,69 @@ def _content_filter_args(include_extensions: str) -> List[str]:
         return [f"--reject={ASSET_REJECT_EXTENSIONS}"]
     return [f"--accept={include_extensions}"]
 
+
+def url_filter_args(filters: UrlFilters | None, url: str) -> List[str]:
+    """wget's scope for a crawl from `url` under the --filter rules.
+
+    No +rule: ``--no-parent``, plus the -rules as ``--reject-regex``. A +rule lifts
+    ``--no-parent``; the start directory then becomes HTTrack's implicit first rule,
+    ``+<host>/<directory>*`` (htswizard.c), so links no rule matches keep that scope.
+    wget takes a link that matches ``--accept-regex`` and not ``--reject-regex``,
+    which says exactly what the rules say only when no +rule follows a -rule (after
+    the last bare ``*`` rule, which overrides every rule before it); other orders
+    raise ValueError.
+    """
+    rules = list(filters.rules) if filters is not None else []
+    if not any(accepts for accepts, _, _ in rules):
+        reject = "|".join(rx for _, _, rx in rules)
+        return ["--no-parent"] + ([f"--reject-regex={reject}"] if reject else [])
+    parts = urlsplit(url)
+    directory = parts.path[:parts.path.rfind("/") + 1] or "/"
+    rules.insert(0, (True, None, rule_regex(parts.netloc.rpartition("@")[2] + directory + "*")))
+    stars = [i for i, (_, pattern, _) in enumerate(rules) if pattern == "*"]
+    if stars:
+        rules = rules[stars[-1]:]
+        while rules and not rules[0][0]:  # after "-*", -rules before the first +rule change nothing
+            rules.pop(0)
+    first_refusal = next((i for i, rule in enumerate(rules) if not rule[0]), len(rules))
+    late = next((rule for rule in rules[first_refusal:] if rule[0]), None)
+    if late is not None:
+        raise ValueError(
+            f"under --downloader wget, '+{late[1]}' follows '-{rules[first_refusal][1]}': "
+            "wget's --accept-regex/--reject-regex cannot let a +rule override an earlier "
+            "-rule. Put the -rules after the +rules (they then win), or start with '-*'")
+    accept = "|".join(rx for accepts, _, rx in rules if accepts)
+    reject = "|".join(rx for accepts, _, rx in rules if not accepts)
+    if not accept:  # "-*" with no +rule after it: only the start URL is fetched
+        return ["--reject-regex=.*"]
+    return [f"--accept-regex={accept}"] + ([f"--reject-regex={reject}"] if reject else [])
+
+
+def _record_refused(log_path: str, filters: UrlFilters) -> None:
+    """Re-decide each link wget's regexes refused (its --rejected-log) so that only the
+    ones a rule refused land in ``filters.excluded``; the others were outside the scope."""
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            reason, _, rest = line.partition("\t")
+            if reason == "REGEX":
+                filters.decide(unquote(rest.split("\t", 1)[0]))
+
+
 MAX_SHOWN_FAILURES = 5
 
 # wget prints "--YYYY-MM-DD HH:MM:SS--  <URL>" per request and later
-# "YYYY-MM-DD HH:MM:SS ERROR <code>: <message>." when the server refuses it.
+# "YYYY-MM-DD HH:MM:SS ERROR <code>: <message>." when the server refuses it, or
+# a line naming the file it saved or found up to date. A redirect it follows
+# prints "Location: <URL> [following]" and, on the next line, a new request.
 _REQUEST_LINE = re.compile(r"^--\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}--\s+(\S+)")
 _ERROR_LINE = re.compile(r"\bERROR (\d{3}): ")
+_FOLLOWING_LINE = re.compile(r"^Location: .* \[following\]$")
+_FILE_LINE = re.compile(
+    r"^(?:Saving to: |File |Server file no newer than local file )(\u2018.*\u2019|'.*')"
+    r"(?: not modified on server\. Omitting download\.| -- not retrieving\.)?$")
+# gnulib quotearg: \\, the closing quote and, outside UTF-8 locales, every
+# non-ASCII byte (as \ooo) are backslash-escaped inside the quotes.
+_QUOTE_ESCAPE = re.compile(rb"\\([0-7]{3}|.)", re.DOTALL)
 
 # wget localizes these lines; LANGUAGE=C makes gettext return the untranslated msgid and leaves LC_CTYPE (IRI encoding) alone.
 _WGET_ENV = {**os.environ, "LANGUAGE": "C"}
@@ -93,22 +152,46 @@ class WgetResult:
     errors: List[str]
     files_skipped: int = 0
     failed: List[WgetFailure] = field(default_factory=list)
+    # Saved file, as wget printed its path -> URL requested for it.
+    urls: Dict[str, str] = field(default_factory=dict)
 
 
-def parse_failed_urls(stderr: str) -> List[WgetFailure]:
-    """Pair each ``ERROR <code>`` line of wget's stderr with its request URL."""
+def _unquote(quoted: str) -> str:
+    raw = _QUOTE_ESCAPE.sub(
+        lambda m: bytes([int(m.group(1), 8)]) if len(m.group(1)) == 3 else m.group(1),
+        quoted[1:-1].encode())
+    return os.fsdecode(raw)
+
+
+def parse_wget_log(stderr: str) -> Tuple[List[WgetFailure], Dict[str, str]]:
+    """Pair each request URL in wget's stderr with what became of it.
+
+    Returns the ``ERROR <code>`` failures and a map from each file wget saved,
+    or found up to date, to the URL requested for it: the first of a redirect
+    chain, never one a server handed back (it may carry a signed token).
+    """
     failed: List[WgetFailure] = []
-    current = None
+    saved: Dict[str, str] = {}
+    current = requested = None
+    following = False
     for line in stderr.splitlines():
         request = _REQUEST_LINE.match(line)
         if request:
             current = request.group(1)
+            if not following:
+                requested = current
+            following = False
+            continue
+        following = bool(_FOLLOWING_LINE.match(line))
+        kept = _FILE_LINE.match(line)
+        if kept and requested:
+            saved[_unquote(kept.group(1))] = requested
             continue
         error = _ERROR_LINE.search(line)
         # A missing robots.txt is routine, not a failed page.
         if error and current and not current.endswith("/robots.txt"):
             failed.append(WgetFailure(current, int(error.group(1))))
-    return failed
+    return failed, saved
 
 
 def format_failures(failed: List[WgetFailure], verbose: bool) -> List[str]:
@@ -127,9 +210,11 @@ def run_wget_mirror(
     depth: int = 0,
     delay: int = 0,
     include_extensions: str = "html,md,txt",
-    incremental: bool = False
+    incremental: bool = False,
+    filters: UrlFilters | None = None,
 ) -> WgetResult:
-    """Run wget --mirror with the specified options."""
+    """Run wget --mirror with the specified options. URLs the --filter rules refused are
+    recorded in ``filters.excluded``."""
     
     # Check if wget is installed
     wget_bin = resolve_wget()
@@ -144,10 +229,10 @@ def run_wget_mirror(
         "--convert-links",
         "--adjust-extension",
         "--page-requisites",
-        "--no-parent",
         f"--directory-prefix={output_dir}",
         f"--user-agent={BROWSER_UA}",
     ])
+    cmd.extend(url_filter_args(filters, url))
 
     for header_name, header_value in BROWSER_HEADERS.items():
         cmd.append(f"--header={header_name}: {header_value}")
@@ -161,6 +246,12 @@ def run_wget_mirror(
     
     cmd.extend(_content_filter_args(include_extensions))
 
+    rejected_log = None
+    if filters is not None and filters.rules:
+        fd, rejected_log = tempfile.mkstemp(suffix=".rejected.tsv")
+        os.close(fd)
+        cmd.append(f"--rejected-log={rejected_log}")
+
     cmd.append(url)
 
     max_retries = 3
@@ -170,31 +261,41 @@ def run_wget_mirror(
     stderr_output = ""
     errors = []
     failed: List[WgetFailure] = []
+    saved: Dict[str, str] = {}
 
-    while attempt < max_retries and not success:
-        attempt += 1
-        logger.info(f"Running wget (attempt {attempt}/{max_retries}): {' '.join(cmd)}")
+    try:
+        while attempt < max_retries and not success:
+            attempt += 1
+            logger.info(f"Running wget (attempt {attempt}/{max_retries}): {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                errors="replace", env=_WGET_ENV)
-        stdout_output += result.stdout
-        stderr_output += result.stderr
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    errors="replace", env=_WGET_ENV)
+            stdout_output += result.stdout
+            stderr_output += result.stderr
+            attempt_failed, attempt_saved = parse_wget_log(result.stderr)
+            saved.update(attempt_saved)  # a failed attempt's files are on disk too
         
-        if result.returncode == 0:
-            success = True
-        elif result.returncode == 8:
-            logger.warning("wget returned 8 (Server error). Treating as partial success.")
-            success = True
-            errors.append("Server error on some URLs (exit code 8)")
-            failed = parse_failed_urls(result.stderr)
-        else:
-            logger.error(f"wget failed with exit code {result.returncode}")
-            errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
-            if attempt < max_retries:
-                backoff_time = 2 ** attempt
-                logger.info(f"Retrying in {backoff_time} seconds...")
-                time.sleep(backoff_time)
+            if result.returncode == 0:
+                success = True
+            elif result.returncode == 8:
+                logger.warning("wget returned 8 (Server error). Treating as partial success.")
+                success = True
+                errors.append("Server error on some URLs (exit code 8)")
+                failed = attempt_failed
+            else:
+                logger.error(f"wget failed with exit code {result.returncode}")
+                errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
+                if attempt < max_retries:
+                    backoff_time = 2 ** attempt
+                    logger.info(f"Retrying in {backoff_time} seconds...")
+                    time.sleep(backoff_time)
             
+        if rejected_log and success:
+            _record_refused(rejected_log, filters)
+    finally:
+        if rejected_log:
+            os.unlink(rejected_log)
+
     files_downloaded = []
     if success:
         outpath = Path(output_dir)
@@ -207,6 +308,7 @@ def run_wget_mirror(
         files_downloaded=files_downloaded,
         errors=errors,
         failed=failed,
+        urls=saved,
     )
 
 
@@ -261,6 +363,7 @@ def run_wget_urls(
         success = False
         errors: List[str] = []
         failed: List[WgetFailure] = []
+        saved: Dict[str, str] = {}
 
         while attempt < max_retries and not success:
             attempt += 1
@@ -270,13 +373,15 @@ def run_wget_urls(
             )
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                     errors="replace", env=_WGET_ENV)
+            attempt_failed, attempt_saved = parse_wget_log(result.stderr)
+            saved.update(attempt_saved)
             if result.returncode == 0:
                 success = True
             elif result.returncode == 8:
                 logger.warning("wget -i returned 8 (Server error). Treating as partial success.")
                 success = True
                 errors.append("Server error on some URLs (exit code 8)")
-                failed = parse_failed_urls(result.stderr)
+                failed = attempt_failed
             else:
                 logger.error(f"wget -i failed with exit code {result.returncode}")
                 errors.append(f"Attempt {attempt} failed with exit code {result.returncode}")
@@ -295,6 +400,7 @@ def run_wget_urls(
             files_downloaded=files_downloaded,
             errors=errors,
             failed=failed,
+            urls=saved,
         )
     finally:
         try:

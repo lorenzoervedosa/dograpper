@@ -3,6 +3,8 @@ import json
 import tempfile
 import time
 
+import pytest
+
 from click.testing import CliRunner
 
 from dograpper.lib.manifest import (
@@ -399,72 +401,153 @@ def test_build_manifest_populates_content_hash():
         assert entry.content_hash == hashlib.md5(b"content").hexdigest()
 
 
-# --- build_manifest URL rebuild (#94) ---
+# --- build_manifest url: the URL each file was fetched from (#94) ---
 #
-# Fixtures reproduce wget 1.21.4 --mirror --adjust-extension layouts: the
-# saved path is <host>[:port]/<decoded path>, a query string stays in the
-# file name after "?", and ".html" is appended to HTML without that suffix.
+# Layouts as wget 1.21.4 --mirror --adjust-extension saves them (see
+# tests/fixtures/wget_mirror_stderr.txt): <host>[:port]/<decoded path>, a query
+# kept after "?", ".html" appended to HTML without that suffix.
 
 SPHINX_SEED = "https://pz-wiki-modding.github.io/PZ-API-Docs/"
 QUERY_SEED = ("https://pzwiki.net/w/index.php"
               "?title=Category:Current_Lua_events&pagefrom=OnLoadSoundBanks")
 
 
-def _urls(base_url, tmp_path, rel_paths):
-    _make_test_dir(str(tmp_path), {rel: "<p>x</p>" for rel in rel_paths})
-    manifest = build_manifest(base_url, str(tmp_path))
+def _urls(base_url, tmp_path, fetched, unfetched=()):
+    """local_path -> url after building over the files named in ``fetched``
+    (local path -> URL a downloader reported) and ``unfetched``."""
+    _make_test_dir(str(tmp_path), {rel: "<p>x</p>" for rel in [*fetched, *unfetched]})
+    manifest = build_manifest(base_url, str(tmp_path),
+                              {str(tmp_path / rel): url for rel, url in fetched.items()})
     return {e.local_path: e.url for e in manifest.files.values()}
 
 
-def test_build_manifest_url_does_not_repeat_the_seed_path(tmp_path):
-    urls = _urls(SPHINX_SEED, tmp_path, [
-        "pz-wiki-modding.github.io/PZ-API-Docs/index.html",
-        "pz-wiki-modding.github.io/PZ-API-Docs/api/zombie.html",
-    ])
-    assert urls == {
+def test_build_manifest_url_is_the_fetched_url_not_the_seed_path(tmp_path):
+    fetched = {
         "pz-wiki-modding.github.io/PZ-API-Docs/index.html":
-            "https://pz-wiki-modding.github.io/PZ-API-Docs/index.html",
+            "https://pz-wiki-modding.github.io/PZ-API-Docs/",
         "pz-wiki-modding.github.io/PZ-API-Docs/api/zombie.html":
             "https://pz-wiki-modding.github.io/PZ-API-Docs/api/zombie.html",
     }
+    assert _urls(SPHINX_SEED, tmp_path, fetched) == fetched
 
 
 def test_build_manifest_url_is_not_appended_to_a_page_seed(tmp_path):
-    urls = _urls(QUERY_SEED, tmp_path, ["pzwiki.net/robots.txt"])
-    assert urls == {"pzwiki.net/robots.txt": "https://pzwiki.net/robots.txt"}
+    fetched = {"pzwiki.net/robots.txt": "https://pzwiki.net/robots.txt"}
+    assert _urls(QUERY_SEED, tmp_path, fetched) == fetched
 
 
-def test_build_manifest_omits_url_for_a_query_in_the_saved_name(tmp_path):
-    """wget decodes the query (``%26`` and ``&`` both save as ``&``) and may or
-    may not have appended ``.html``, so no URL is better than a guessed one."""
-    urls = _urls(QUERY_SEED, tmp_path, [
-        "pzwiki.net/w/index.php?title=Category:Current_Lua_events"
-        "&pagefrom=OnLoadSoundBanks.html",
-        "pzwiki.net/w/q?x=a&b.html",
-    ])
-    assert set(urls.values()) == {None}
+def test_build_manifest_url_has_no_suffix_adjust_extension_added(tmp_path):
+    fetched = {"pzwiki.net/wiki/Category:En.html": "https://pzwiki.net/wiki/Category:En"}
+    assert _urls(QUERY_SEED, tmp_path, fetched) == fetched
 
 
-def test_build_manifest_url_keeps_port_and_escapes_decoded_path(tmp_path):
-    """The scheme comes from the seed. wget saves ``a%20b.html`` decoded, the
-    Playwright layer saves the path still escaped: both give the same URL."""
-    urls = _urls("http://127.0.0.1:8765/docs/", tmp_path,
-                 ["127.0.0.1:8765/docs/a b.html", "127.0.0.1:8765/docs/c%20d.html",
-                  "127.0.0.1:8765/wiki/Category:En.txt"])
-    assert urls == {
-        "127.0.0.1:8765/docs/a b.html": "http://127.0.0.1:8765/docs/a%20b.html",
-        "127.0.0.1:8765/docs/c%20d.html": "http://127.0.0.1:8765/docs/c%20d.html",
-        "127.0.0.1:8765/wiki/Category:En.txt":
-            "http://127.0.0.1:8765/wiki/Category:En.txt",
-    }
+def test_build_manifest_url_of_a_query_page_is_the_real_one(tmp_path):
+    """wget decodes the query when it names the file: %26 and & both save as &."""
+    fetched = {"pzwiki.net/w/index.php?title=Category:Lua&pagefrom=On&Off.html":
+               "https://pzwiki.net/w/index.php?title=Category:Lua&pagefrom=On%26Off"}
+    assert _urls(QUERY_SEED, tmp_path, fetched) == fetched
 
 
-def test_build_manifest_omits_url_without_scheme_or_host_dir(tmp_path):
-    assert _urls("", tmp_path / "a", ["site.com/a.html"]) == {"site.com/a.html": None}
-    assert _urls(SPHINX_SEED, tmp_path / "b", ["loose.html"]) == {"loose.html": None}
 
 
-def test_context_header_uses_rebuilt_urls_and_skips_missing_ones(tmp_path):
+def test_build_manifest_never_turns_a_saved_path_into_a_url(tmp_path):
+    """A file no downloader reported has url None, however plain its name:
+    index.html may stand for a directory URL, .html may have been added,
+    and sync's <output>/chunks is not a host."""
+    unfetched = ["pz-wiki-modding.github.io/PZ-API-Docs/index.html",
+                 "pzwiki.net/robots.txt", "chunks/docs_chunk_01.md", "loose.html"]
+    assert _urls(SPHINX_SEED, tmp_path, {}, unfetched) == dict.fromkeys(unfetched)
+
+
+def test_build_manifest_url_drops_credentials(tmp_path):
+    """wget logs a URL's password as *password*; neither form belongs in the manifest."""
+    urls = _urls("https://h.example/", tmp_path,
+                 {"h.example/a.html": "https://user:*password*@h.example/a.html"})
+    assert urls == {"h.example/a.html": "https://h.example/a.html"}
+
+
+@pytest.mark.parametrize("query", [
+    "token=abc", "client_secret=a", "X-Amz-Credential=a", "sessionToken=a", "apiKey=a",
+    "foo=1",  # fail closed: an unknown parameter costs only this page's URL
+])
+def test_build_manifest_records_no_url_with_a_query_off_the_allowlist(tmp_path, query):
+    """A masked URL is a wrong URL, so such a query records none."""
+    urls = _urls("https://h.example/", tmp_path,
+                 {"h.example/a.html": f"https://h.example/a?title=T&{query}"})
+    assert urls == {"h.example/a.html": None}
+
+
+def test_build_manifest_keeps_an_ordinary_query_verbatim(tmp_path):
+    fetched = {"h.example/w/index.php?title=X&oldid=5.html":
+               "https://h.example/w/index.php?title=X&oldid=5"}
+    assert _urls("https://h.example/", tmp_path, fetched) == fetched
+
+
+def _previous(entries):
+    """Manifest of an earlier run: local_path -> url; keys drop the host dir."""
+    return Manifest("https://h.example/", "", {
+        lp.split("/", 1)[1]: ManifestEntry(url, 1, local_path=lp) for lp, url in entries.items()})
+
+
+def test_build_manifest_keeps_the_url_of_a_file_not_fetched_this_run(tmp_path):
+    _make_test_dir(str(tmp_path), {"h.example/a.html": "a", "h.example/b.html": "b"})
+    manifest = build_manifest(
+        "https://h.example/", str(tmp_path),
+        {str(tmp_path / "h.example/b.html"): "https://h.example/b2"},
+        previous=_previous({"h.example/a.html": "https://h.example/a",
+                            "h.example/b.html": "https://h.example/b"}))
+    assert {e.local_path: e.url for e in manifest.files.values()} == {
+        "h.example/a.html": "https://h.example/a", "h.example/b.html": "https://h.example/b2"}
+
+
+def test_build_manifest_never_takes_the_url_of_another_file(tmp_path):
+    """Keys drop the seed's host directory, so two hosts can share a key."""
+    _make_test_dir(str(tmp_path), {"two/index.html": "x"})
+    manifest = build_manifest("https://two/", str(tmp_path),
+                              previous=_previous({"one/index.html": "https://one/"}))
+    assert [e.url for e in manifest.files.values()] == [None]
+
+
+def test_build_manifest_withheld_url_does_not_fall_back_to_an_earlier_one(tmp_path):
+    """Playwright saves ?title=A and ?title=B&token=x to one file: this run's
+    content is B's, so A's URL from the last run would be wrong."""
+    _make_test_dir(str(tmp_path), {"h.example/w/index.php.html": "b"})
+    manifest = build_manifest(
+        "https://h.example/", str(tmp_path),
+        {str(tmp_path / "h.example/w/index.php.html"): "https://h.example/w/index.php?title=B&token=x"},
+        previous=_previous({"h.example/w/index.php.html": "https://h.example/w/index.php?title=A"}))
+    assert [e.url for e in manifest.files.values()] == [None]
+
+
+def test_build_manifest_matches_reported_paths_however_spelled(tmp_path, monkeypatch):
+    """wget reports paths relative to the CWD, as -o was given; httrack's are
+    real paths, and -o may go through a symlink."""
+    monkeypatch.chdir(tmp_path)
+    _make_test_dir("real", {"h.example/a.html": "a", "h.example/b.html": "b"})
+    os.symlink("real", "link")
+    manifest = build_manifest("https://h.example/", "link", {
+        "link/h.example/a.html": "https://h.example/a",
+        str(tmp_path / "real" / "h.example" / "b.html"): "https://h.example/b",
+    })
+    assert {e.local_path: e.url for e in manifest.files.values()} == {
+        "h.example/a.html": "https://h.example/a", "h.example/b.html": "https://h.example/b"}
+
+
+def test_build_manifest_never_lists_itself_or_dograpper_state_files(tmp_path):
+    """#95: a manifest kept in the output directory it describes."""
+    _make_test_dir(str(tmp_path), {
+        "h.example/a.html": "a",
+        ".dograpper-manifest.json": "{}",
+        "chunks/pack_state.json": "{}",
+        "chunks/delta_manifest.json": "{}",
+        "state/custom.json": "{}",
+    })
+    manifest = build_manifest("https://h.example/", str(tmp_path),
+                              manifest_path=str(tmp_path / "state" / "custom.json"))
+    assert [e.local_path for e in manifest.files.values()] == ["h.example/a.html"]
+
+
+def test_context_header_uses_recorded_urls_and_skips_missing_ones(tmp_path):
     """pack step 7c: correct URLs reach the chunks; a missing one is left out."""
     input_dir = str(tmp_path / "mirror")
     _make_test_dir(input_dir, {
@@ -474,7 +557,9 @@ def test_context_header_uses_rebuilt_urls_and_skips_missing_ones(tmp_path):
             "<html><body><h1>Query</h1><p>delta epsilon zeta</p></body></html>",
     })
     manifest_path = str(tmp_path / "manifest.json")
-    save_manifest(build_manifest(SPHINX_SEED, input_dir), manifest_path)
+    fetched = {os.path.join(input_dir, "pz-wiki-modding.github.io/PZ-API-Docs/index.html"):
+               "https://pz-wiki-modding.github.io/PZ-API-Docs/index.html"}
+    save_manifest(build_manifest(SPHINX_SEED, input_dir, fetched), manifest_path)
     output_dir = str(tmp_path / "chunks")
 
     result = CliRunner().invoke(pack, [

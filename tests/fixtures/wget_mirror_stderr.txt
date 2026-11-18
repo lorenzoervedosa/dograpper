@@ -1,0 +1,118 @@
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 339 [text/html]
+Saving to: ‘out/127.0.0.1:8766/index.html’
+
+     0K                                                       100%  144M=0s
+
+2026-11-17 22:45:24 (144 MB/s) - ‘out/127.0.0.1:8766/index.html’ saved [339/339]
+
+Loading robots.txt; please ignore errors.
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/robots.txt
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 404 Not Found
+2026-11-17 22:45:24 ERROR 404: Not Found.
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/wiki/Category:En
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 55 [text/html]
+Saving to: ‘out/127.0.0.1:8766/wiki/Category:En.html’
+
+     0K                                                       100% 25.5M=0s
+
+2026-11-17 22:45:24 (25.5 MB/s) - ‘out/127.0.0.1:8766/wiki/Category:En.html’ saved [55/55]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On%26Off
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 87 [text/html]
+Saving to: ‘out/127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On&Off.html’
+
+     0K                                                       100% 42.4M=0s
+
+2026-11-17 22:45:24 (42.4 MB/s) - ‘out/127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On&Off.html’ saved [87/87]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/old
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 301 Moved Permanently
+Location: /new [following]
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/new
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 42 [text/html]
+Saving to: ‘out/127.0.0.1:8766/old.html’
+
+     0K                                                       100% 24.0M=0s
+
+2026-11-17 22:45:24 (24.0 MB/s) - ‘out/127.0.0.1:8766/old.html’ saved [42/42]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/a%20b.html
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 49 [text/html]
+Saving to: ‘out/127.0.0.1:8766/a b.html’
+
+     0K                                                       100% 29.2M=0s
+
+2026-11-17 22:45:24 (29.2 MB/s) - ‘out/127.0.0.1:8766/a b.html’ saved [49/49]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/notes.txt
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 48 [text/plain]
+Saving to: ‘out/127.0.0.1:8766/notes.txt’
+
+     0K                                                       100% 25.9M=0s
+
+2026-11-17 22:45:24 (25.9 MB/s) - ‘out/127.0.0.1:8766/notes.txt’ saved [48/48]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/dir/
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 43 [text/html]
+Saving to: ‘out/127.0.0.1:8766/dir/index.html’
+
+     0K                                                       100% 16.0M=0s
+
+2026-11-17 22:45:24 (16.0 MB/s) - ‘out/127.0.0.1:8766/dir/index.html’ saved [43/43]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/caf%C3%A9
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 48 [text/html]
+Saving to: ‘out/127.0.0.1:8766/café.html’
+
+     0K                                                       100% 29.8M=0s
+
+2026-11-17 22:45:24 (29.8 MB/s) - ‘out/127.0.0.1:8766/café.html’ saved [48/48]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/it's
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 43 [text/html]
+Saving to: ‘out/127.0.0.1:8766/it's.html’
+
+     0K                                                       100% 25.4M=0s
+
+2026-11-17 22:45:24 (25.4 MB/s) - ‘out/127.0.0.1:8766/it's.html’ saved [43/43]
+
+--2026-11-17 22:45:24--  http://127.0.0.1:8766/missing.html
+Connecting to 127.0.0.1:8766... connected.
+HTTP request sent, awaiting response... 404 Not Found
+2026-11-17 22:45:24 ERROR 404: Not Found.
+
+FINISHED --2026-11-17 22:45:24--
+Total wall clock time: 0.01s
+Downloaded: 9 files, 754 in 0s (42.3 MB/s)
+Converting links in out/127.0.0.1:8766/dir/index.html... nothing to do.
+Converting links in out/127.0.0.1:8766/café.html... nothing to do.
+Converting links in out/127.0.0.1:8766/index.html... 9.
+8-1
+Converting links in out/127.0.0.1:8766/it's.html... nothing to do.
+Converting links in out/127.0.0.1:8766/wiki/Category:En.html... nothing to do.
+Converting links in out/127.0.0.1:8766/old.html... nothing to do.
+Converting links in out/127.0.0.1:8766/w/index.php?title=Category:Lua&pagefrom=On&Off.html... nothing to do.
+Converting links in out/127.0.0.1:8766/a b.html... nothing to do.
+Converted links in 8 files in 0 seconds.

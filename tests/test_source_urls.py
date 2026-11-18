@@ -97,11 +97,12 @@ def test_explicit_manifest_with_wrong_shape_is_an_error(tmp_path, monkeypatch):
 def test_default_manifest_malformed_is_a_note(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write(tmp_path / "docs" / "a.html", PAGE)
-    _write(tmp_path / ".dograpper-manifest.json", "{not json")
+    _write(tmp_path / "docs" / ".dograpper-manifest.json", "{not json")
     result = _pack([str(tmp_path / "docs"), "-o", str(tmp_path / "out"), "--format", "jsonl",
                     "--context-header"])
     assert result.exit_code == 0, result.output
-    assert "Note: ignoring manifest .dograpper-manifest.json" in result.stderr
+    assert (f"Note: ignoring manifest {tmp_path / 'docs' / '.dograpper-manifest.json'}"
+            in result.stderr)
     assert "url" not in _records(tmp_path / "out")["a.html"]
 
 
@@ -270,7 +271,7 @@ def test_marker_url_reaches_md_context_header(tmp_path, monkeypatch):
 def test_manifest_wins_over_marker(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     docs = _mirror(tmp_path / "docs", {"a.html": _page(_httrack("https://marker.example.com/a"))})
-    _manifest(tmp_path / ".dograpper-manifest.json", {"a.html": "https://manifest.example.com/a"})
+    _manifest(docs / ".dograpper-manifest.json", {"a.html": "https://manifest.example.com/a"})
     result = _pack([str(docs), "-o", str(tmp_path / "out"), "--format", "jsonl", "--context-header"])
     assert result.exit_code == 0, result.output
     assert _records(tmp_path / "out")["a.html"]["url"] == "https://manifest.example.com/a"
@@ -365,7 +366,7 @@ def _site(tmp_path):
     for rel in ("example.com/index.html", "example.com/guide/index.html",
                 "example.com/guide/a.html"):
         _write(mirror / rel, PAGE)
-    _wget_manifest(tmp_path / ".dograpper-manifest.json", {
+    _wget_manifest(mirror / ".dograpper-manifest.json", {
         "example.com/index.html": "https://example.com/",
         "example.com/guide/index.html": "https://example.com/guide/",
         "example.com/guide/a.html": "https://example.com/guide/a.html",
@@ -407,7 +408,7 @@ def test_ambiguous_manifest_match_gives_no_url(tmp_path, monkeypatch):
     _write(docs / "a.html", _page(_httrack("https://marker.example.com/a")))
     # Both "guide/a.html" and "example.com/guide/a.html" name the same file
     # from an ancestor of INPUT_DIR; neither can be told to be the right one.
-    _manifest(tmp_path / ".dograpper-manifest.json", {
+    _manifest(tmp_path / "mirror" / ".dograpper-manifest.json", {
         "guide/a.html": "https://one.example.com/a",
         "example.com/guide/a.html": "https://two.example.com/a",
     })
@@ -420,9 +421,98 @@ def test_ambiguous_manifest_match_gives_no_url(tmp_path, monkeypatch):
 def test_manifest_without_local_path_matches_by_key(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write(tmp_path / "docs" / "a.html", PAGE)
-    _write(tmp_path / ".dograpper-manifest.json", json.dumps(
+    _write(tmp_path / "docs" / ".dograpper-manifest.json", json.dumps(
         {"files": {"a.html": {"url": "https://example.com/a", "size_bytes": 1}}}))
     result = _pack([str(tmp_path / "docs"), "-o", str(tmp_path / "out"), "--format", "jsonl",
                     "--context-header"])
     assert result.exit_code == 0, result.output
     assert _records(tmp_path / "out")["a.html"]["url"] == "https://example.com/a"
+
+
+# ---------------------------------------------------------------------------
+# Where pack looks for the manifest (#95)
+# ---------------------------------------------------------------------------
+
+def test_default_manifest_is_found_in_input_dir_from_any_cwd(tmp_path, monkeypatch):
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    mirror = tmp_path / "dl"
+    _write(mirror / "example.com" / "a.html", PAGE)
+    _wget_manifest(mirror / ".dograpper-manifest.json",
+                   {"example.com/a.html": "https://example.com/a"})
+    result = _pack(["../dl", "-o", str(tmp_path / "out"), "--format", "jsonl", "--context-header"])
+    assert result.exit_code == 0, result.output
+    assert _records(tmp_path / "out")["example.com/a.html"]["url"] == "https://example.com/a"
+
+
+def test_default_manifest_of_the_mirror_root_serves_a_subdirectory(tmp_path, monkeypatch):
+    """G8: packing part of a mirror still finds the manifest download left in -o."""
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    mirror = tmp_path / "dl"
+    _write(mirror / "example.com" / "guide" / "a.html", PAGE)
+    _wget_manifest(mirror / ".dograpper-manifest.json",
+                   {"example.com/guide/a.html": "https://example.com/guide/a"})
+    result = _pack([str(mirror / "example.com" / "guide"), "-o", str(tmp_path / "out"),
+                    "--format", "jsonl", "--context-header"])
+    assert result.exit_code == 0, result.output
+    assert _records(tmp_path / "out")["a.html"]["url"] == "https://example.com/guide/a"
+    assert (f"Note: using manifest {mirror / '.dograpper-manifest.json'} "
+            "from a parent of INPUT_DIR") in result.stderr
+
+
+def test_default_manifest_in_input_dir_needs_no_note(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write(tmp_path / "docs" / "a.html", PAGE)
+    _manifest(tmp_path / "docs" / ".dograpper-manifest.json", {"a.html": "https://example.com/a"})
+    result = _pack([str(tmp_path / "docs"), "-o", str(tmp_path / "out"), "--context-header"])
+    assert result.exit_code == 0, result.output
+    assert "Note:" not in result.stderr
+
+
+@pytest.mark.parametrize("planted, input_dir", [
+    # above the mirror root: the parent of the host directory, where download writes it
+    (".dograpper-manifest.json", "mirror/example.com/guide"),
+    # above a directory that is not part of a mirror at all
+    (".dograpper-manifest.json", "docs"),
+    # in a host-named directory's parent, but beyond the level cap
+    (".dograpper-manifest.json", "example.com/" + "/".join("abcdefghi")),
+])
+def test_default_manifest_above_the_mirror_root_is_never_used(tmp_path, monkeypatch, planted,
+                                                              input_dir):
+    """A manifest someone else left in /tmp, $HOME or a shared parent must not
+    put its URLs into this pack."""
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    _write(tmp_path / input_dir / "a.html", PAGE)
+    _manifest(tmp_path / planted, {f"{input_dir}/a.html": "https://evil.example/a",
+                                   "a.html": "https://evil.example/a"})
+    result = _pack([str(tmp_path / input_dir), "-o", str(tmp_path / "out"), "--format", "jsonl",
+                    "--context-header"])
+    assert result.exit_code == 0, result.output
+    assert "url" not in _records(tmp_path / "out")["a.html"]
+    assert "Source URLs:     0 from manifest" in result.output
+    assert "Note:" not in result.stderr
+
+
+def test_explicit_relative_manifest_resolves_against_input_dir(tmp_path, monkeypatch):
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    _manifest(tmp_path / "cwd" / "m.json", {"a.html": "https://cwd.example.com/a"})
+    _write(tmp_path / "docs" / "a.html", PAGE)
+    _manifest(tmp_path / "docs" / "m.json", {"a.html": "https://input.example.com/a"})
+    result = _pack([str(tmp_path / "docs"), "-o", str(tmp_path / "out"), "--format", "jsonl",
+                    "--context-header", "--manifest", "m.json"])
+    assert result.exit_code == 0, result.output
+    assert _records(tmp_path / "out")["a.html"]["url"] == "https://input.example.com/a"
+
+
+def test_explicit_relative_manifest_missing_names_the_resolved_path(tmp_path, monkeypatch):
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    _write(tmp_path / "cwd" / "m.json", "{}")  # the CWD is never searched
+    _write(tmp_path / "docs" / "a.html", PAGE)
+    result = _pack([str(tmp_path / "docs"), "-o", str(tmp_path / "out"),
+                    "--context-header", "--manifest", "m.json"])
+    assert result.exit_code == 1
+    assert f"manifest not found: {tmp_path / 'docs' / 'm.json'}" in result.output

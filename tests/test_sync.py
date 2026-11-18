@@ -115,6 +115,13 @@ def test_sync_forwards_downloader_and_httrack_flags():
     assert dl["disable_security_limits"] is True
 
 
+def test_sync_forwards_filter_rules():
+    result, captured = _run_sync(['https://example.com', '-o', './out',
+                                  '--filter', '-*', '--filter', '+*/wiki/On*'])
+    assert result.exit_code == 0, result.output
+    assert captured["download"]["filter"] == ('-*', '+*/wiki/On*')
+
+
 def test_sync_downloader_defaults_match_download():
     result, captured = _run_sync(['https://example.com', '-o', './out'])
     assert result.exit_code == 0, result.output
@@ -125,3 +132,38 @@ def test_sync_downloader_defaults_match_download():
     for p in download_cmd.params:
         if p.name in names:
             assert dl[p.name] == p.default, p.name
+
+
+def test_sync_download_and_pack_share_the_manifest_in_output(tmp_path, monkeypatch):
+    """#95: download writes the manifest into -o and pack reads it from there,
+    whatever the CWD; --context-header URLs come from it."""
+    import json
+    import os
+    from dograpper.lib.wget_mirror import WgetResult
+
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    docs = tmp_path / "docs"
+    page = docs / "h.example" / "wiki" / "A.html"
+    page.parent.mkdir(parents=True)
+    page.write_text("<html><body><h1>A</h1><p>alpha beta gamma</p></body></html>")
+    (docs / "h.example" / "b.html").write_text("<html><body><h1>B</h1><p>delta</p></body></html>")
+    files = [str(page), str(docs / "h.example" / "b.html")]
+    with patch('dograpper.commands.download.run_wget_mirror',
+               return_value=WgetResult(True, str(docs), files, [], 0, [],
+                                       {str(page): "https://h.example/wiki/A"})), \
+            patch('dograpper.commands.download._discover_urls', return_value=([], "none")), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        result = CliRunner().invoke(cli, ['sync', 'https://h.example/', '-o', str(docs),
+                                          '--chunks-dir', str(tmp_path / "chunks"),
+                                          '--format', 'jsonl', '--context-header'])
+    assert result.exit_code == 0, result.output
+    assert os.listdir(tmp_path / "cwd") == []
+    assert (docs / ".dograpper-manifest.json").is_file()
+    records = {}
+    for chunk in (tmp_path / "chunks").glob("*.jsonl"):
+        for line in chunk.read_text().splitlines():
+            rec = json.loads(line)
+            records[rec["source"]] = rec
+    assert records["h.example/wiki/A.html"]["url"] == "https://h.example/wiki/A"
+    assert "url" not in records["h.example/b.html"]

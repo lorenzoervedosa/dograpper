@@ -15,9 +15,9 @@ import os
 import threading
 from urllib.parse import unquote, urlsplit
 
+from ...utils.portable_names import FORBIDDEN, claim_unique, resolve_under
+
 _DEFAULT_PORTS = {"http": 80, "https": 443}
-# htsname.c: replaced by "_" in every saved name, on every platform
-_FORBIDDEN = {c: "_" for c in [*range(32), 127, *map(ord, '~\\:*?"<>|')]}
 # An HTML page gets .html in place of these, not after them (htsname.c:1200-1215, R14):
 # htsmime.c hts_ext_dynamic, htslib.c ishtml_ext, a bare trailing dot, and every extension
 # of htsmime.c hts_mime + hts_mime_modern (is_knowntype).
@@ -56,20 +56,9 @@ class NameRegistry:
                 return self._by_url[key]
             path = self._compute(parts, content_type)
             if path is not None:
-                path = self._dedupe(path)
-                self._used.add(path.casefold())
+                path = claim_unique(path, self._used)
             self._by_url[key] = path
             return path
-
-    def _dedupe(self, path: str) -> str:
-        # Case-insensitive, as htshash.c key_sav_equals (strcasecmp): on NTFS or APFS a
-        # case-only difference is the same file. casefold also folds non-ASCII (deviation).
-        base, ext = os.path.splitext(path)
-        n, cand = 1, path
-        while cand.casefold() in self._used:
-            n += 1
-            cand = f"{base}-{n}{ext}"
-        return cand
 
     def _compute(self, parts, content_type: str | None) -> str | None:
         host = parts.hostname
@@ -77,7 +66,7 @@ class NameRegistry:
             return None
         if ":" in host:  # IPv6 literal: HTTrack names the dir [addr], its colons then "_"
             host = f"[{host}]"
-        host = host.translate(_FORBIDDEN)
+        host = host.translate(FORBIDDEN)
         try:
             port = parts.port
         except ValueError:
@@ -89,7 +78,7 @@ class NameRegistry:
         decoded = unquote(parts.path)
         if "\x00" in decoded:
             return None
-        decoded = decoded.translate(_FORBIDDEN)
+        decoded = decoded.translate(FORBIDDEN)
         is_dir = decoded.rsplit("/", 1)[-1] in ("", ".", "..")
         segs: list[str] = []
         for seg in decoded.split("/"):
@@ -109,7 +98,4 @@ class NameRegistry:
             # shortcut: no htssniff.c magic check, so a real PDF served as text/html still
             # gets doc.html where HTTrack keeps doc.pdf; upgrade if mislabeled binaries matter.
             ext = ".html" if ext.lower() in _REPLACED_EXTS else ext + ".html"
-        full = os.path.realpath(os.path.join(self._root, host, *segs, stem + ext))
-        if os.path.commonpath([self._root, full]) != self._root:
-            return None
-        return full
+        return resolve_under(self._root, host, *segs, stem + ext)

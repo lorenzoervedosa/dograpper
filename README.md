@@ -213,7 +213,8 @@ dograpper download <url> -o <directory> [options]
 | `--headless` | — | `false` | Skip wget and use playwright directly |
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions (csv) |
-| `--manifest` | — | `.dograpper-manifest.json` | Cache file path |
+| `--manifest` | — | `.dograpper-manifest.json` | Manifest file for incremental downloads. A relative path resolves against `-o` (so the default lives in the output directory); an absolute path is used as is |
+| `--filter` | — | *(none)* | URL rule, repeatable: `+pattern` accepts, `-pattern` refuses, the last match wins (see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | Download backend: `wget` or `httrack` (see [Downloader profiles](#downloader-profiles)) |
 
 #### Discovery cascade (4 layers)
@@ -232,7 +233,8 @@ next one when the previous fails or returns fewer than 3 usable URLs
    The probe also tries `sitemap_index.xml` and `sitemap-index.xml`.
 3. **`wget --mirror`** — traditional link-graph crawl, `User-Agent` of
    Chrome/120 to avoid being blocked by edge WAFs (Cloudflare, Vercel).
-   Runs with `--no-parent`, `--timestamping` (always, enables incremental
+   Runs with `--no-parent` (lifted by a `+` [URL filter](#url-filters---filter)),
+   `--timestamping` (always, enables incremental
    mode via mtime diff), `--convert-links`, `--adjust-extension`,
    `--page-requisites`.
 4. **Playwright (bounded hydration)** — SPA fallback:
@@ -265,6 +267,60 @@ INFO: [cascade] layer-2 sitemap: raw=120 in-scope=120
 INFO: [cascade] layer-2 sitemap: WIN (>=3)
 INFO: [cascade] layer-3 wget -i: fetching 120 URLs from sitemap.xml
 ```
+
+#### URL filters (`--filter`)
+
+`--filter RULE` scopes a crawl with HTTrack's scan rules. It is repeatable, is
+read from `"filter": [...]` in `.dograpper.json` (a list; explicit flags replace
+it) and is forwarded by `sync`. It works with both downloaders and is applied to
+every discovered link before it is fetched: the llms.txt and sitemap lists,
+`wget --mirror`, the Playwright crawl, and the httrack profile's seeded list and
+redirect targets. The start URL itself is never filtered.
+
+- `+pattern` accepts the URLs it matches and `-pattern` refuses them. Rules are
+  read in order and the **last** matching rule decides.
+- A URL that no rule matches keeps the default scope: same host, under the start
+  URL's path, within `--depth`.
+- A `+` rule lifts the path limit (wget's `--no-parent`) for the URLs it
+  matches. Start with `-*` to make the `+` rules the whole scope.
+- Rules never leave the start URL's host. This is a deviation from HTTrack, where
+  `+other.host/*` widens the crawl to another site.
+
+Pattern syntax, as HTTrack's `strjoker` matcher implements it. Patterns are
+HTTrack wildcards, not regular expressions: `.`, `?` and `+` are literal
+characters.
+
+- A pattern is matched from the start of the URL. Write it with or without the
+  scheme (`example.com/docs/*` or `https://example.com/docs/*`); the first form
+  also ignores a `user:password@`. The fragment is ignored. The query string is
+  part of the URL, and the URL is matched as discovered, percent-encoding
+  unchanged.
+- Literal text ignores ASCII case: `+*/wiki/on*` matches `/wiki/OnTick`.
+- `*` matches any run of characters.
+- `*[file]` (or `*[name]`) matches a run without `/` or `?`, and `*[path]` a run
+  without `?`.
+- `*[param]` matches an optional query string (`?…`).
+- `*[a-z,0-9,_]` matches a run of the listed characters and ranges. It is
+  case-sensitive, and `\` escapes one character (`*[\*]`, `*[\[,\]]`).
+- `*[]` means the URL must end there.
+- A pattern that does not end in `*[]` also matches the same URL followed by a
+  query string: `-*/index.php` refuses `/index.php?action=edit` too, while
+  `-*.html*[]` leaves `page.html?x=1` alone.
+- Size rules (`*[<NN]`, `*[>NN]`), `mime:` rules and `*(...)` are not supported.
+  They, and a rule that starts with neither `+` nor `-`, are a usage error
+  (exit 2).
+
+Under `--downloader wget`, `wget --mirror` receives the rules as
+`--accept-regex` / `--reject-regex` (POSIX regex). These cannot let a `+` rule
+override an earlier `-` rule, so such a list is a usage error before anything
+is fetched: put the `-` rules after the `+` rules. Rules before a bare `-*` or
+`+*` never decide anything and do not count for this check. The httrack
+profile has no such limit.
+
+The summary counts the refused URLs as `Filtered by --filter: N`; URLs outside
+the default scope that no rule matched are not counted. Page requisites (CSS,
+images) that `wget -i` fetches for a listed page are scoped by
+`--include-extensions` only.
 
 #### Downloader profiles
 
@@ -331,16 +387,44 @@ httrack-fetched trees.
 #### Incremental
 
 A `.dograpper-manifest.json` manifest is generated after each download,
-recording mirrored files with SHA-256 hashes and mtimes. Future re-runs
+recording mirrored files with MD5 content hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
 changed on the server.
 
-Each entry's `url` is rebuilt from the saved path as
-`<scheme>://<host dir>/<path>`, with the scheme of the seed URL; `pack
---context-header` copies it into the chunks. A `.html` added by
-`--adjust-extension` stays in the URL (on disk it looks like a real `.html`
-page), and a saved name containing `?` (a query page) gets `"url": null`
-because wget decodes the query when it names the file.
+The manifest lives in the output directory: a relative `--manifest`
+resolves against `-o`, an absolute one is used as is, so a re-run from any
+directory finds it and two mirrors never share one. It never lists itself,
+`delta_manifest.json` or `pack_state.json`. `pack` reads it the same way,
+relative to `INPUT_DIR` (its `--manifest` row says how a subdirectory of a
+mirror finds the mirror's manifest). Up to 0.4.0 the default was relative to the current
+directory; a manifest left there is not read (it may belong to another
+mirror) and `download` says so in one line, then writes the new one in `-o`.
+wget's own timestamping keeps that first run cheap.
+
+Each entry's `url` is the URL dograpper requested for the file (the seed, a
+discovered or a listed URL), and `pack --context-header` copies it into the
+chunks. wget's log pairs each request with the file it saved or found up to
+date; the Playwright and httrack layers record the URL they requested for
+each file they write. After a redirect it is still the requested URL, never
+the one the server redirected to: that one can carry a secret (a presigned
+`X-Amz-Signature=...` link, a `token=`), and the manifest and every pack
+built from it are meant to be shared. When several httrack seeds redirect to
+one file, the one that needed no redirect wins, else the smallest URL.
+`user:password@` is dropped. A URL with a query is recorded only when every
+parameter name is a navigation name (`title`, `oldid`, `curid`, `diff`,
+`pagefrom`, `pageuntil`, `from`, `until`, `page`, `p`, `id`, `lang`,
+`uselang`, `hl`, `locale`, `v`, `version`, `section`, `tab`, `topic`, `view`,
+`ns`, `namespace`, `category`, `cat`, `tag`, `q`, `query`, `search`, any
+case); any other parameter gives `"url": null`. This fails closed on secrets
+at the cost of the URL of pages whose query has another parameter. Logs and
+failure reports keep such URLs but show the value of credential-like
+parameters (`token`, `secret`, `key`, `sig`, `jwt`, `X-Amz-*`, ...) as
+`REDACTED`.
+A file the current run did not fetch keeps the `url` recorded when it was; a
+file no run recorded gets `"url": null`. The saved path is never turned back
+into a URL: `--adjust-extension` adds `.html`, a directory URL is saved as
+`index.html`, and a query is decoded (wget), dropped (Playwright) or hashed
+(httrack) in the file name.
 
 #### Examples
 
@@ -356,6 +440,14 @@ dograpper download https://docs.python.org/3/ -o ./python-docs -d 3 --include-ex
 
 # Mintlify (layer 2 finds the sub-sitemap on CDN automatically)
 dograpper download https://mintlify.wiki/user/project -o ./project-docs
+
+# One MediaWiki category: the category page plus its member pages (/wiki/On*), nothing else
+dograpper download "https://pzwiki.net/w/index.php?title=Category:Current_Lua_events&pagefrom=OnLoadSoundBanks" \
+  -o ./lua-events -d 1 --filter '-*' --filter '+pzwiki.net/wiki/On*'
+
+# Crawl a wiki category but skip unrelated meta pages
+dograpper download https://pzwiki.net/wiki/Category:Lua_events -o ./lua-events -d 1 \
+  --filter '-*/wiki/Category:En' --filter '-*/wiki/PZwiki:*' --filter '-*/wiki/Special:*'
 ```
 
 ### `dograpper pack`
@@ -378,6 +470,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
 | `--format` | — | `md` | Output format: `txt`, `md`, `jsonl`, `xml` (deprecated — errors, use `md`) |
+| `--layout` | — | `chunk` | `chunk`: numbered chunk files. `page`: one file per page under `pages/` plus `INDEX.md` (see [Page layout](#page-layout---layout-page)) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
 | `--token-encoding` | — | `cl100k` | Tokenizer encoding: `cl100k`, `o200k`, `p50k` |
@@ -387,7 +480,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON), with the source `url` from the manifest or the page's HTTrack / saved-from marker |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` |
 | `--delta` | — | `false` | Skip the run entirely when nothing changed since the last pack; pack in full when something did |
-| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`; its entry wins over a page marker. Given explicitly, it must exist and load (exit 1 otherwise); at the default path a missing file is skipped and a broken one is skipped with a note |
+| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`; its entry wins over a page marker. A relative path resolves against `INPUT_DIR`, an absolute one is used as is. Given explicitly, it must exist and load (exit 1 otherwise). Not given (or set in `.dograpper.json`), it is looked for in `INPUT_DIR` and, when `INPUT_DIR` lies inside a mirror (`<root>/<host dir>/...`), in its parents up to that root, at most 8 levels up and never above: packing a subdirectory finds the manifest `download` left in `-o`, and one in `/tmp` or `$HOME` is never picked up. The nearest wins, and one found above `INPUT_DIR` is named in a note. None found is skipped; a broken one is skipped with a note |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
@@ -405,7 +498,8 @@ list files → apply .docsignore → skip bot-challenge pages
            → --score? compute readiness
            → --cross-refs? resolve links
            → --format (md|txt|jsonl) + --context-header? inject → write
-             (--cross-refs markers go into each page's content)
+             (--cross-refs markers go into each page's content;
+              --layout page: one file per page under pages/ + INDEX.md)
            → --bundle? generate guide
 ```
 
@@ -423,6 +517,16 @@ Blacklist removes: navigation, breadcrumbs, sidebars, table of
 contents, "copy to clipboard" buttons, version banners, cookie and
 announcement banners, feedback widgets, edit-on-github links. Use
 `--no-extract` to keep the full HTML.
+
+Code blocks (`<pre>`) keep their line breaks and indentation, with or
+without extraction. `md` writes each one as a fenced block whose language
+comes from a `mw-highlight-lang-*`, `language-*`, `lang-*` or Sphinx
+`highlight-*` class on the `<pre>`, a `<code>` inside it or the nearest
+enclosing `<div>` that names one (` ```lua `). A bare fence is written when
+none is declared or the class is a placeholder (`highlight-default`,
+`highlight-none`, `language-none`). The fence grows past any backtick run in
+the code. `txt` and `jsonl` carry the code without the fence. Dedup and
+chunking treat a code block as one unit, blank lines included.
 
 #### Deduplication (`--dedup`)
 
@@ -478,8 +582,13 @@ Injects structured metadata in the `dograpper-context-v1` format
 ```
 
 Optional fields (`url`, `llm_readiness`) are omitted when not available
-(they never appear as `null`). Full spec:
+(they never appear as `null`). A `>` in a value is written as `\u003e`, so a
+value holding `-->` cannot close the comment. Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
+
+In the page layout (`--layout page`) each page file gets exactly one header,
+at line 1, with the page `title` as its first field (the same title as in
+`INDEX.md`) and no `chunk_index`, `total_chunks` or `context_breadcrumb`.
 
 `url` comes from the file's entry in the download manifest (`--manifest`),
 matched on the file's path in the mirror (`local_path`). This also works when
@@ -665,6 +774,73 @@ policies — the CLI errors instead of silently overriding). Composes with
 `--delta`, `--dedup`, `--score`, `--context-header`, `--format jsonl`
 and `--bundle`.
 
+#### Page layout (`--layout page`)
+
+For readers that open files by name and `grep` them, such as Claude Code,
+`--layout page` writes one file per page instead of numbered chunks
+([ADR-0010](docs/adr/0010-per-page-pack-layout.md)):
+
+```
+out/
+├── INDEX.md
+└── pages/
+    ├── ActionGroup.md
+    ├── Help_Style_guide.md      # from Help:Style_guide.html
+    ├── Modding.md
+    └── Modding/
+        └── vi.md
+```
+
+- **Names.** A page keeps its path relative to `INPUT_DIR`, with the source
+  extension replaced by the `--format` one (`md` or `txt`), so
+  `Glob **/IsoPlayer.md` finds `zombie/characters/IsoPlayer.html`. The
+  characters HTTrack forbids (`\ : * ? " < > | ~`, control characters) become
+  `_`; a Windows reserved name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
+  `LPT1`–`LPT9`, any case) and a name ending in a dot or a space get a
+  trailing `_`. Names that differ only in case get `-2`, `-3`… in sorted
+  source order, so the same tree always gives the same names.
+- **`INDEX.md`.** Two header lines, then one line per page sorted by path,
+  so `grep -i term INDEX.md` answers "which page":
+
+  ```
+  # Index
+  167 pages. One line per page: - [title](<path>), N words, URL
+
+  - [ActionGroup](<pages/ActionGroup.md>), 599 words, https://pzwiki.net/wiki/ActionGroup
+  - [Help:Style guide](<pages/Help_Style_guide.md>), 4273 words, https://pzwiki.net/wiki/Help:Style_guide
+  ```
+
+  The title is the page's `<head>` `<title>` without the site suffix (the
+  text after the last ` - `, ` – `, ` — ` or ` | `) when that suffix ends
+  more than half of the run's titles; else the page's first `h1`, read before
+  extraction; else the file stem. Whitespace is collapsed, control characters
+  are neutralized and `\`, `[`, `]` are backslash-escaped. The URL comes from
+  the manifest or the page marker, as for `--context-header`, and is left out
+  when unknown. New fields are only ever appended to a line.
+- **Whole pages.** Pages are never split and lines never wrapped: a page
+  larger than one `Read` call takes stays reachable with `grep -n` plus a
+  `Read` with an offset. There is no word cap, no chunk cap and no size
+  warning. Without `--context-header` a page file holds only its content.
+- **Ownership.** Every run builds `pages/` in a temporary directory next to
+  it and swaps it in, so removed and renamed pages disappear and a failed run
+  keeps the previous pages. `pack` writes only `INDEX.md`, `pages/` and its
+  sidecars: any other file in the output directory, such as a `SKILL.md`,
+  survives every repack. A `pages/` without an `INDEX.md` next to it is not a
+  previous output, and the run exits 1 before writing anything.
+
+| Flag | With `--layout page` |
+|---|---|
+| `--max-words-per-chunk`, `--max-chunks`, `--strategy`, `--prefix`, `--with-index`/`--no-index` | usage error (exit 2) when set on the CLI or in `.dograpper.json`, even to the default value |
+| `--bundle`, `--for-queries`, `--format jsonl`, `--dedup exact\|fuzzy\|both` | usage error (exit 2) |
+| `--delta` | the [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md) gate is unchanged; a run that passes it rebuilds `pages/` in full |
+| `--context-header` | one header at line 1 of each page file: `title`, `source`, `url`, `word_count`, `llm_readiness`; no breadcrumb or outline |
+| `--cross-refs` | markers name the page from the output root, `[-> pages/Target.md]`; `cross_refs.json` is keyed by page path |
+| `--score`, `--report` | one score per page; `chunk_id` in `llm-readiness.json` is the page path, stable across runs |
+| `--dry-run` | projects the page count; never needs or touches `pages/` |
+
+`explain`, `serve`, `eval` and the GitHub Action read the chunk layout only.
+Do not mix layouts in one output directory: `pack` never deletes chunk files.
+
 #### Examples
 
 ```bash
@@ -691,6 +867,9 @@ dograpper pack ./docs -o ./chunks --delta
 
 # Co-locate content by expected user queries
 dograpper pack ./docs -o ./chunks --for-queries queries.txt
+
+# One file per page plus INDEX.md, for grep-and-Read readers
+dograpper pack ./docs -o ./wiki-ref --layout page --context-header
 ```
 
 ### `dograpper explain`
@@ -736,12 +915,14 @@ dograpper sync <url> -o <dir> [options]
 | `--headless` | — | `false` | Playwright direct (passed to `download`) |
 | `--delay` | — | `0` | Rate limiting in ms (passed to `download`) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
+| `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
 | `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
 | `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |
 | `--format` | — | `md` | `txt` \| `md` \| `jsonl` \| `xml` (deprecated) (passed to `pack`) |
+| `--layout` | — | `chunk` | `chunk` \| `page` (passed to `pack`) |
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` (passed to `pack`) |
@@ -850,10 +1031,11 @@ dograpper init --target rag --yes       # non-interactive
 
 | Option | Alias | Default | Description |
 |---|---|---|---|
-| `--target` | `-t` | *(prompted)* | `notebooklm` \| `rag` \| `claude-project` |
-| `--yes` | `-y` | `false` | Non-interactive mode (requires `--target`) |
+| `--target` | `-t` | *(prompted)* | `notebooklm` \| `rag` \| `claude-project` \| `claude-code` |
+| `--yes` | `-y` | `false` | Non-interactive mode (requires `--target`; exit 2 without it) |
 | `--output` | `-o` | global `--config` path | Where to write the config |
-| `--force` | `-f` | `false` | Overwrite an existing config file |
+| `--force` | `-f` | `false` | Overwrite an existing config file (never an existing `SKILL.md`) |
+| `--skill-dir` | — | `docs-skill` | `claude-code` only: the directory you will pack into; a `SKILL.md` stub is written there unless one exists |
 
 Targets:
 
@@ -861,8 +1043,39 @@ Targets:
   chunks), semantic strategy, context headers, readiness score, dedup.
 - **`rag`** — `jsonl` records with context headers, cross-references,
   readiness score and dedup.
-- **`claude-project`** — compact `md` chunks (≤100k words), semantic
-  strategy, context headers, readiness score and dedup.
+- **`claude-project`** — for a Claude Project (claude.ai Projects knowledge):
+  compact `md` chunks (≤100k words) to upload, semantic strategy, context
+  headers, readiness score and dedup.
+- **`claude-code`** — for Claude Code: the
+  [page layout](#page-layout---layout-page) (`layout: page`, `format: md`),
+  one context header per page and `dedup: off` (dedup keeps a repeated block
+  on one page only, #89). It sets no chunk-only key, so `pack` accepts it
+  without a warning. It also writes a `SKILL.md` stub into `--skill-dir`:
+  frontmatter `name` (from the directory name) and a `description` to fill
+  in, a link to `INDEX.md`, and the grep-then-Read lookup steps.
+
+A Claude Project and Claude Code are different targets. A Claude Project
+receives uploaded files whole, so it gets a few large chunks. Claude Code
+reads a local directory on demand: it finds a file by name or with `grep`
+and reads a bounded slice of it, so it gets one file per page, named after
+the page, plus an index.
+
+`init` writes `SKILL.md` once and never rewrites it, even with `--force`;
+`pack` never touches it either, so the description you write survives every
+repack. Pack into the skill directory, then register it:
+
+```bash
+dograpper init --target claude-code --yes --skill-dir ./pz-wiki
+dograpper download https://docs.example.com/ -o ./docs
+dograpper pack ./docs -o ./pz-wiki                 # INDEX.md + pages/, SKILL.md kept
+# edit the description in ./pz-wiki/SKILL.md, then, for every project:
+mkdir -p ~/.claude/skills && ln -s "$PWD/pz-wiki" ~/.claude/skills/pz-wiki
+# or for one project: ln -s "$PWD/pz-wiki" <project>/.claude/skills/pz-wiki
+```
+
+Keep the link name equal to the `name` in `SKILL.md`. `claude --add-dir
+<dir>` loads skills from `<dir>/.claude/skills/`; adding the pack directory
+itself only gives the session read access to its files.
 
 Writing to a non-default path prints the `--config <path>` invocation
 needed to consume it.
@@ -927,6 +1140,8 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
+| 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
+| 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
@@ -957,11 +1172,10 @@ deterministic, so no upstream change means an empty drift
 (see [ADR-0007](docs/adr/0007-freshness-action-and-drift-command.md)).
 
 It assumes **ubuntu runners** (python3, wget, `jq` and the `gh` CLI are
-preinstalled) and that the docs mirror, the chunks directory (with
-`llm-readiness.json`) and the repo-root `.dograpper-manifest.json`
-(written relative to the working directory, not inside `chunks-dir`)
-are **versioned in your repo**: that is what carries state across
-stateless CI runners (see
+preinstalled) and that the docs mirror (`input-dir`, which holds the
+`.dograpper-manifest.json` that `download` writes there) and the chunks
+directory (with `llm-readiness.json`) are **versioned in your repo**: that is
+what carries state across stateless CI runners (see
 [Incremental maintenance](#incremental-maintenance-cicd)).
 
 ```yaml
@@ -997,7 +1211,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ./docs ./chunks .dograpper-manifest.json
+          git add ./docs ./chunks
           git diff --cached --quiet || git commit -m "chore: refresh packed context"
           git push
 ```
@@ -1018,6 +1232,10 @@ Outputs: `drift` (`true`/`false`) and `report-path` (the markdown
 report). The PR comment is upserted by matching the
 `<!-- dograpper-drift -->` marker, so re-runs edit the same comment.
 
+The manifest is left out of the comment's source-file list (it changes on
+every download). Up to 0.4.0 it was written at the repo root; that file is no
+longer read and can be deleted once `input-dir` holds the new one.
+
 ---
 
 ## Generated artifacts
@@ -1026,13 +1244,15 @@ report). The PR comment is upserted by matching the
 |----------|------|-----------|
 | `docs_chunk_*.md` | (default) | Markdown chunks |
 | `docs_chunk_*.jsonl` | `--format jsonl` | One JSON line per source file |
+| `pages/**/*.md` | `--layout page` | One file per page, mirroring the input tree (`.txt` with `--format txt`) |
+| `INDEX.md` | `--layout page` | One line per page: title, path, word count, URL |
 | `cross_refs.json` | `--cross-refs` | Cross-reference graph between chunks |
 | `llm-readiness.json` | `--score` | Quality scores per chunk |
 | `readiness-report.html` | `--report` | Visual before/after report with penalty causes |
 | `IMPORT_GUIDE.md` | `--bundle` | Upload guide with recommended ordering (both `notebooklm` and `rag-standard`) |
 | `delta_manifest.json` | `--delta` | Mapping of changed files |
 | `pack_state.json` | `--delta` | Corpus state as of this pack; the next `--delta` run diffs against it |
-| `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes) |
+| `.dograpper-manifest.json` | `download` | Mirror manifest (hashes + mtimes), in the `-o` directory |
 
 ---
 
@@ -1135,7 +1355,8 @@ Conditional extra lines (per enabled flag):
 | `--bundle` | `Import guide: <path>` |
 | bot-challenge pages found | `Challenge pages: N` |
 | `--for-queries` | `Query packing: ...` |
-| `--context-header` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
+| `--context-header` or `--layout page` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
+| `--layout page` | `Pages written: N` and `Index: <path>` replace `Chunks generated` and `Words per chunk`; no chunk-limit warnings |
 
 Warnings appear when:
 - Input `.html`/`.htm` files are Cloudflare bot-challenge interstitials
