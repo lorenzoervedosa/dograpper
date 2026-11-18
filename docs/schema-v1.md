@@ -15,7 +15,7 @@ Each chunk begins with a metadata block in an HTML comment:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | source | string | yes | Relative path of the source file |
-| url | string | no | Original URL (from download manifest) |
+| url | string | no | Original URL: the download manifest entry, else the page's HTTrack or saved-from marker (validated). Omitted when neither yields one. |
 | chunk_index | int | no | Sub-chunk position (1-based). Omitted if file is not split. |
 | total_chunks | int | no | Total sub-chunks for this file. Omitted if file is not split. |
 | word_count | int | no | Word count of this chunk's content (excluding header) |
@@ -50,7 +50,7 @@ content.
 | breadcrumb | string[] | no | Heading hierarchy at this position. Present with `--context-header` or `--score`, only when the source file has headings. |
 | chunk_index | int | no | Sub-chunk position (1-based). Present only when heading-driven splitting produced more than one sub-chunk for this file. |
 | total_chunks | int | no | Total sub-chunks for this file. Same condition as `chunk_index`. |
-| url | string | no | Original URL. Present only with `--context-header` **and** a matching manifest entry — `--score` alone never populates it, even against a matching manifest. |
+| url | string | no | Original URL. Present only with `--context-header` **and** either a matching manifest entry that has a `url` or a valid HTTrack / saved-from marker in the page head — `--score` alone never populates it, even against a matching manifest. |
 | readiness_grade | string | no | Bare grade letter ("A"/"B"/"C"). Present with `--score`. Not the same shape as the header's `llm_readiness` object — see below. |
 
 ### Field names diverge from the header format

@@ -7,13 +7,14 @@ from typing import List, Tuple
 
 from ._httrack_profile import resolve_profile, run_httrack
 from ..lib.config_loader import load_config
+from ..lib.ignore_parser import normalize_extensions
 from ..lib.llms_txt_parser import fetch_llms_txt
 from ..lib.manifest import load_manifest, save_manifest, build_manifest, merge_manifests
 from ..lib.playwright_crawl import run_playwright_crawl
 from ..lib.sitemap_parser import fetch_sitemap
 from ..lib.spa_detector import is_spa
 from ..lib.url_filter import filter_urls
-from ..lib.wget_mirror import run_wget_mirror, run_wget_urls
+from ..lib.wget_mirror import format_failures, run_wget_mirror, run_wget_urls
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +64,6 @@ def _compute_stats(
         else:
             unchanged += 1
     return touched, unchanged
-
-
-def _normalize_extensions(value) -> str:
-    if isinstance(value, (list, tuple)):
-        return ",".join(str(x).strip().lstrip('.') for x in value if str(x).strip())
-    return str(value)
 
 
 def _discover_urls(url: str, depth: int, fetch=None,
@@ -125,8 +120,11 @@ def _run_download_cascade(
     include_extensions: str,
     manifest_data,
     headless: bool,
+    report_lines: List[str],
+    verbose: bool,
 ) -> Tuple[int, int]:
-    """Orchestrate the 4-layer cascade. Returns (downloaded, skipped) counts."""
+    """Orchestrate the 4-layer cascade. Returns (downloaded, skipped) counts;
+    wget's failed-URL summary lines are appended to `report_lines`."""
     is_incremental = bool(manifest_data)
 
     # Layers 1+2 — authoritative URL discovery (always, even under --headless).
@@ -163,6 +161,7 @@ def _run_download_cascade(
             raise click.ClickException(str(e))
         if not wget_res.success:
             raise click.ClickException("wget -i failed.")
+        report_lines.extend(format_failures(wget_res.failed, verbose))
 
         # Sanity: if the fetched pages are empty shells, fall through to
         # playwright with the discovered URLs as seeds (v2 Critic layer-1
@@ -212,6 +211,7 @@ def _run_download_cascade(
         )
     except RuntimeError as e:
         raise click.ClickException(str(e))
+    report_lines.extend(format_failures(wget_res.failed, verbose))
 
     touched, unchanged = _compute_stats(
         wget_res.files_downloaded, pre_snapshot, is_incremental
@@ -330,7 +330,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     depth = merged_params.get('depth', depth)
     headless = merged_params.get('headless', headless)
     delay = merged_params.get('delay', delay)
-    include_extensions = _normalize_extensions(
+    include_extensions = normalize_extensions(
         merged_params.get('include_extensions', include_extensions)
     )
     manifest_path = merged_params.get('manifest', manifest)
@@ -353,6 +353,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     else:
         files_downloaded, files_skipped = _run_download_cascade(
             url, output, depth, delay, include_extensions, manifest_data, headless,
+            report_lines, bool(ctx.obj.get('VERBOSE')),
         )
 
     new_manifest = build_manifest(url, output)

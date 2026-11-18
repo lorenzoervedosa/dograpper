@@ -531,6 +531,7 @@ def test_playwright_redownloads_missing():
 
 from click.testing import CliRunner
 from dograpper.commands.download import download
+from dograpper.cli import cli
 
 def test_download_wget_success():
     runner = CliRunner()
@@ -636,3 +637,92 @@ def test_download_wget_not_installed():
             res = runner.invoke(download, ['http://example.com', '-o', d])
             assert res.exit_code != 0
             assert "wget is required" in res.output
+
+
+# --- failed URLs on wget exit 8 (issue #97) ---
+
+WGET_STDERR_FIXTURE = os.path.join(
+    os.path.dirname(__file__), "fixtures", "wget_exit8_stderr.txt")
+
+
+def _wget_stderr():
+    with open(WGET_STDERR_FIXTURE, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_parse_failed_urls_extracts_url_and_status_skipping_robots():
+    from dograpper.lib.wget_mirror import parse_failed_urls
+    failed = parse_failed_urls(_wget_stderr())
+    assert [(f.url, f.status) for f in failed] == [
+        ("http://127.0.0.1:8765/missing.html", 404),
+        ("http://127.0.0.1:8765/gone2.html", 404),
+    ]
+
+
+def test_parse_failed_urls_ignores_success_only_output():
+    from dograpper.lib.wget_mirror import parse_failed_urls
+    assert parse_failed_urls("--2026-11-17 22:05:03--  http://h/ok\n200 OK\n") == []
+
+
+def _run_exit_8(fn, first_arg):
+    def side_effect(*args, **kwargs):
+        result = MagicMock()
+        result.returncode = 0 if "--version" in args[0] else 8
+        result.stdout = ""
+        result.stderr = _wget_stderr()
+        return result
+    with patch('subprocess.run', side_effect=side_effect), \
+            tempfile.TemporaryDirectory() as d:
+        return fn(first_arg, d)
+
+
+def test_both_wget_paths_record_failures_on_exit_8():
+    from dograpper.lib.wget_mirror import run_wget_mirror, run_wget_urls
+    for fn, arg in ((run_wget_mirror, "http://127.0.0.1:8765/"),
+                    (run_wget_urls, ["http://127.0.0.1:8765/"])):
+        res = _run_exit_8(fn, arg)
+        assert res.success is True
+        assert [f.status for f in res.failed] == [404, 404]
+
+
+def test_format_failures_caps_at_five_unless_verbose():
+    from dograpper.lib.wget_mirror import WgetFailure, format_failures
+    failed = [WgetFailure(f"http://h/p{i}", 404) for i in range(8)]
+    lines = format_failures(failed, verbose=False)
+    assert lines[0] == "Failed: 8 URLs (first 5 shown)"
+    assert sum("http://h/p" in l for l in lines) == 5
+    assert "http://h/p5" not in "\n".join(lines)
+    full = format_failures(failed, verbose=True)
+    assert full[0] == "Failed: 8 URLs"
+    assert sum("http://h/p" in l for l in full) == 8
+    assert format_failures([], verbose=False) == []
+
+
+def test_format_failures_redacts_userinfo():
+    from dograpper.lib.wget_mirror import WgetFailure, format_failures
+    lines = format_failures([WgetFailure("http://u:secret@h/p", 500)], verbose=False)
+    assert "secret" not in "\n".join(lines)
+
+
+def test_download_prints_failed_urls_summary():
+    from dograpper.lib.wget_mirror import WgetFailure, WgetResult
+    failed = [WgetFailure(f"http://x.io/p{i}", 404) for i in range(7)]
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as d, \
+            patch('dograpper.commands.download.run_wget_mirror') as mock_wget, \
+            patch('dograpper.commands.download._discover_urls', return_value=([], None)), \
+            patch('dograpper.commands.download.is_spa', return_value=False):
+        paths = [os.path.join(d, f"{n}.html") for n in "ab"]
+        for p in paths:
+            open(p, "w").write("c")
+        mock_wget.return_value = WgetResult(True, d, paths, [], 0, failed)
+        manifest_path = os.path.join(d, ".m.json")
+        res = runner.invoke(download, ['http://x.io', '-o', d, '--manifest', manifest_path])
+        assert res.exit_code == 0
+        assert "Failed: 7 URLs (first 5 shown)" in res.output
+        assert "http://x.io/p4: 404" in res.output
+        assert "http://x.io/p5" not in res.output
+        res = runner.invoke(cli, ['--verbose', 'download', 'http://x.io', '-o', d, '--manifest', manifest_path])
+        assert res.exit_code == 0
+        assert "Failed: 7 URLs" in res.output and "first 5" not in res.output
+        assert "http://x.io/p6: 404" in res.output

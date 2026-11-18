@@ -169,6 +169,39 @@ def test_https_referer_never_sent_to_http():
     assert got["Referer"] == "http://localhost/a"
 
 
+@pytest.mark.parametrize("page,want", [
+    ("https://u:pw@h.test/a b?q=é#frag", "https://h.test/a%20b?q=%c3%a9"),
+    ("https://user@h.test:8443", "https://h.test:8443/"),
+    ("https://h.test/%41#", "https://h.test/%41"),
+])
+def test_referer_is_sent_without_userinfo_or_fragment_and_escaped(page, want):
+    # htslib.c:1136-1163: scheme + escaped host past the userinfo + escaped path and query
+    got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
+                               scheme="https"))
+    assert got["Referer"] == want
+
+
+@pytest.mark.parametrize("page,site", [
+    ("https://h.test:99999/", "same-origin"),
+    ("https://h.test:x/", "same-origin"),
+    ("https://h.test:0/", "same-origin"),
+    ("https://docs.h.test:99999/", "same-site"),
+])
+def test_referer_with_unusable_port_keeps_the_scheme_default(page, site):
+    # htsfetch.c origin_of: "a port out of range keeps the scheme default"; never a ValueError
+    assert policy._fetch_site(page, "https", "h.test") == site
+    got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
+                               scheme="https"))
+    assert got["Sec-Fetch-Site"] == site and got["Referer"] == page
+
+
+@pytest.mark.parametrize("page", ["https://[bad/a", "https://h.test/\ud800"])
+def test_unusable_referer_is_dropped_not_raised(page):
+    got = dict(request_headers(build_policy(), "h.test", kind="linked", referer=page,
+                               scheme="https"))
+    assert "Referer" not in got and got["Sec-Fetch-Site"] == "none"
+
+
 @pytest.mark.parametrize("br,zstd,want", [
     (False, False, "gzip, deflate, identity;q=0.9"),
     (True, False, "gzip, deflate, br, identity;q=0.9"),

@@ -335,6 +335,13 @@ recording mirrored files with SHA-256 hashes and mtimes. Future re-runs
 use this manifest + `wget --timestamping` to fetch only files that
 changed on the server.
 
+Each entry's `url` is rebuilt from the saved path as
+`<scheme>://<host dir>/<path>`, with the scheme of the seed URL; `pack
+--context-header` copies it into the chunks. A `.html` added by
+`--adjust-extension` stays in the URL (on disk it looks like a real `.html`
+page), and a saved name containing `?` (a query page) gets `"url": null`
+because wget decodes the query when it names the file.
+
 #### Examples
 
 ```bash
@@ -367,6 +374,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--strategy` | — | `size` | Strategy: `size` or `semantic` |
 | `--ignore-file` | — | `./.docsignore` | Exclusion file (gitignore syntax) |
 | `--ignore` | — | *(none)* | Inline exclusion patterns (repeatable) |
+| `--include-extensions` | — | `html,htm,md,txt` | Extensions packed as documentation (csv). Other files are skipped and counted by extension in the summary. `robots.txt` and dograpper's own manifests are always skipped |
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
 | `--format` | — | `md` | Output format: `txt`, `md`, `jsonl`, `xml` (deprecated — errors, use `md`) |
@@ -376,10 +384,10 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--dry-run` | — | `false` | Simulate pack without writing; prints report |
 | `--dedup` | — | `off` | Block deduplication: `off`, `exact`, `fuzzy`, `both` |
 | `--dedup-threshold` | — | `3` | Maximum Hamming distance for fuzzy dedup (0-10) |
-| `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON) |
+| `--context-header` | — | `false` | Injects `dograpper-context-v1` header (structured JSON), with the source `url` from the manifest or the page's HTTrack / saved-from marker |
 | `--cross-refs` | — | `false` | Generates `cross_refs.json` and annotates chunks with `[-> chunk_id]` |
 | `--delta` | — | `false` | Skip the run entirely when nothing changed since the last pack; pack in full when something did |
-| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header` |
+| `--manifest` | — | `.dograpper-manifest.json` | Download manifest, used to resolve source URLs for `--context-header`; its entry wins over a page marker. Given explicitly, it must exist and load (exit 1 otherwise); at the default path a missing file is skipped and a broken one is skipped with a note |
 | `--bundle` | — | *(none)* | Preset: `notebooklm` or `rag-standard` |
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
@@ -390,12 +398,15 @@ dograpper pack <input_directory> -o <output_directory> [options]
 Operation order (each stage reads the output of the previous one):
 
 ```
-list files → apply .docsignore → --no-extract? yes: full HTML / no: extract
+list files → apply .docsignore → skip bot-challenge pages
+           → --no-extract? yes: full HTML / no: extract
            → --dedup → --bundle? cap max-chunks/max-words-per-chunk
            → --strategy (size|semantic) → boundary-aware chunking
            → --score? compute readiness
+           → --cross-refs? resolve links
            → --format (md|txt|jsonl) + --context-header? inject → write
-           → --cross-refs? annotate written chunks → --bundle? generate guide
+             (--cross-refs markers go into each page's content)
+           → --bundle? generate guide
 ```
 
 #### Smart extraction (on by default)
@@ -421,12 +432,30 @@ disclaimers, navigation). Three modes:
 - **`exact`** — MD5 hash of a normalized block (lowercase + collapsed
   whitespace). Zero false positives.
 - **`fuzzy`** — 64-bit SimHash + Hamming distance ≤ `--dedup-threshold`.
-  Detects trivial variations ("page X of Y", timestamps).
+  Detects trivial variations (a navigation box with one extra link).
 - **`both`** — exact first (cheap), then fuzzy on the remainder.
 
 Blocks with fewer than 10 words are ignored (prevents false positives
 on repeated `<h1>`). The first occurrence (alphabetical order) is
 always preserved.
+
+A match never removes a block when:
+
+- **it is on the same page** (any mode). A block repeated inside one
+  page, such as two parameters that share a description, is page
+  content, not boilerplate.
+- **it starts with a different token** (`fuzzy`). The leading token is
+  the first token holding a letter or digit, so list bullets are
+  skipped: `base:hardcover Book, …` and `base:hollowbook Book, …` are
+  different entries.
+- **only numbers differ** (`fuzzy`). Tokens holding digits (versions,
+  dates, counts) are the page's own data: `… build (42.5.1).` and
+  `… build (42.17.0).` are both kept.
+
+The summary's `Matches kept` line counts the blocks each rule kept. A
+block identical on several pages is still kept only on the first, even
+when it is per-page metadata such as a version banner with the same
+version.
 
 #### Context header (`--context-header`)
 
@@ -452,13 +481,48 @@ Optional fields (`url`, `llm_readiness`) are omitted when not available
 (they never appear as `null`). Full spec:
 [docs/schema-v1.md](docs/schema-v1.md).
 
+`url` comes from the file's entry in the download manifest (`--manifest`),
+matched on the file's path in the mirror (`local_path`). This also works when
+`INPUT_DIR` is a subdirectory of the download output; a file that matches
+several entries that way gets no `url` and is listed in the summary. Without
+an entry, an HTML page's URL is read from the marker an offline copy left
+in its head, so mirrors made by other tools get URLs too:
+
+- HTTrack: `<!-- Mirrored from <url> by HTTrack Website Copier/... -->`.
+  HTTrack 3.49 and older write the URL without its scheme; `http://` is
+  assumed, as HTTrack itself does for a bare host.
+- A browser's "Save page as": `<!-- saved from url=(NNNN)<url> -->`, where
+  `NNNN` must equal the URL's length. `saved from url=(0014)about:internet`,
+  the Windows zone marker many sites ship in their HTML, names no URL and is
+  ignored.
+
+Only the first 8 KiB of the page, up to `<body>`, is scanned. A marker is page
+content, so its URL is checked before use: `http` or `https`, at most 2,048
+characters, RFC 3986 characters only (no whitespace, control characters,
+quotes, angle brackets or non-ASCII), a hostname, no credentials, a numeric
+port. A rejected marker, or two markers that disagree, leave `url` out. The
+pack summary counts the URLs by source and lists the files left without one
+(the first 10; all of them with `--verbose`):
+
+```
+  Source URLs:     0 from manifest, 166 from page markers, 2 without
+  Rejected markers: 1 invalid, 0 conflicting
+    bad.html: invalid page marker
+    data.json: no manifest entry or page marker
+```
+
 #### Cross-references (`--cross-refs`)
 
 Extracts internal links from HTML, resolves relative paths, maps each
 target to the chunk where the file was packed, and generates
 `cross_refs.json` with `references_to`, `referenced_by`, and `links`
-lists per chunk. The text is annotated in-place with `[-> chunk_id]`
-markers, letting LLMs navigate between chunks.
+lists per chunk. As each chunk is written, every page's content (each of
+its records, when a long page is split) gets a `[-> chunk_id]` marker after
+the first whole-word occurrence of the text of each link that page holds
+(never inside a dotted identifier such as `pkg.Item.Item`), letting LLMs
+navigate between chunks. Record
+metadata (JSONL `id`/`source`, the file index, context headers) is never
+annotated.
 
 Links pointing to files excluded via `.docsignore` appear as
 `unresolved` (counted in the summary).
@@ -476,8 +540,9 @@ Schema (required fields in **bold**, optional in italics):
 - **`content`** — extracted text
 - **`schema_version`** — `"v1"`
 - *`breadcrumb`, `chunk_index`, `total_chunks`* (with `--context-header` or `--score`)
-- *`url`* (with `--context-header` **and** a matching manifest entry — `--score`
-  alone never populates it)
+- *`url`* (with `--context-header`, from a matching manifest entry that has a
+  `url` or the page's HTTrack / saved-from marker — `--score` alone never
+  populates it)
 - *`readiness_grade`* (with `--score`)
 
 Field names diverge from the header format for word count, breadcrumb and
@@ -498,6 +563,9 @@ Final grade:
 - **A** — score ≥ 0.8 (ready for direct use)
 - **B** — 0.5 ≤ score < 0.8 (usable, consider refining extraction)
 - **C** — score < 0.5 (review `.docsignore` or run `--dedup`)
+
+A chunk whose extracted content is empty (0 words) is always graded **C**
+with score 0, regardless of the other metrics.
 
 Results are saved to `llm-readiness.json`. When combined with
 `--context-header` or `--format jsonl`, the grade is injected into
@@ -858,6 +926,7 @@ the pipe. Status messages go to stderr; stdout carries only the protocol.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack | every seed refused/challenged | retry later, switch to `--downloader wget`, or change network |
+| 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
 | 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
@@ -1050,19 +1119,31 @@ Pack complete:
   Output:          ./chunks/
 ```
 
+Before the summary, when files outside `--include-extensions` were found, one
+line lists them: `Skipped non-documentation files: 15 (.css x1, .js x13, robots.txt x1)`.
+They are also counted in `Files excluded`.
+
 Conditional extra lines (per enabled flag):
 
 | Flag | Extra lines |
 |---|---|
 | `--show-tokens` | `Tokens per chunk`, `Total tokens`, `Encoding` |
-| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Words removed` |
+| `--dedup` | `Dedup mode`, `Blocks analyzed`, `Blocks removed`, `Matches kept`, `Words removed` |
 | `--cross-refs` | `Cross-refs: ./chunks/cross_refs.json (N links, M unresolved)` |
 | `--score` | `LLM Readiness: ./chunks/llm-readiness.json`, `Grade distribution` |
 | `--delta` | `Delta: N added, M modified, K removed`, `Delta manifest: ...` |
 | `--bundle` | `Import guide: <path>` |
+| bot-challenge pages found | `Challenge pages: N` |
 | `--for-queries` | `Query packing: ...` |
+| `--context-header` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
 
 Warnings appear when:
+- Input `.html`/`.htm` files are Cloudflare bot-challenge interstitials
+  (`<title>Just a moment...</title>`), typically saved by an external
+  mirroring tool that was blocked. They carry no content, so `pack` lists
+  them once on stderr, leaves them out of the chunks and counts them (also
+  in `--dry-run`); if every file is one, `pack` fails. A page that merely
+  mentions the phrase in its text is not affected.
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
   into a chunk, overshooting the stated limit).
 - Total chunks exceed `--max-chunks` (nothing is discarded — every
@@ -1129,7 +1210,11 @@ below the cap and combine with `--dedup both`.
 
 wget exit code 8 means "server error on some URLs" — treated as a
 partial success. The manifest only records files that were actually
-downloaded. Re-running (incremental) usually closes the gaps.
+downloaded. The failing URLs are listed at the end of the `Download complete`
+summary as `Failed: N URLs (first 5 shown)`, each with its HTTP status; add
+`--verbose` (before the subcommand) to list all of them. A missing
+`robots.txt` is not counted. Re-running (incremental) closes transient gaps,
+but a permanent 404 stays missing.
 
 ---
 

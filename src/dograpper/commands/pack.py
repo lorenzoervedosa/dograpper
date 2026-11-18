@@ -5,9 +5,10 @@ import click
 import logging
 from datetime import datetime, timezone
 
-from ..lib.config_loader import load_config
-from ..lib.ignore_parser import filter_files
-from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, read_source_text
+from ..lib.config_loader import is_explicit, load_config
+from ..lib.ignore_parser import filter_files, normalize_extensions, split_by_extension
+from ..utils.challenge import find_challenge_files
+from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, format_chunk_index, read_source_text
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,29 @@ def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
         click.echo("--report implies --score: enabling readiness scoring.")
 
     return query_list, is_score
+
+
+def _load_url_manifest(ctx, manifest_path):
+    """Download manifest for source URLs, or None.
+
+    A manifest named with --manifest must load. The default path is optional:
+    absent is the normal case for mirrors made by other tools, and a file
+    there that cannot be loaded is reported and skipped.
+    """
+    from ..lib.manifest import read_manifest
+
+    explicit = is_explicit(ctx, 'manifest')
+    if not os.path.exists(manifest_path):
+        if explicit:
+            raise click.ClickException(f"manifest not found: {manifest_path}")
+        return None
+    try:
+        return read_manifest(manifest_path)
+    except (OSError, ValueError, TypeError, AttributeError) as e:
+        if explicit:
+            raise click.ClickException(f"cannot load manifest {manifest_path}: {e}")
+        click.echo(f"Note: ignoring manifest {manifest_path}: {e}", err=True)
+        return None
 
 
 def _query_packing_summary(query_list, query_pack_result) -> str:
@@ -121,6 +145,9 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--delta', is_flag=True, default=False,
               help="Skip the run when nothing changed since the last pack; "
                    "pack in full when something did.")
+@click.option('--include-extensions', type=str, default="html,htm,md,txt", show_default=True,
+              help="Extensions packed as documentation, comma-separated. "
+                   "robots.txt and dograpper's own manifests are always skipped.")
 @click.option('--manifest', type=str, default=".dograpper-manifest.json",
               show_default=True,
               help="Download manifest, used to resolve source URLs for "
@@ -142,7 +169,7 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
 @click.pass_context
-def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
+def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool):
     """Process and group files into chunks optimized for LLM ingestion.
 
     Walks INPUT_DIR, extracts main content, removes boilerplate and
@@ -185,6 +212,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         'context_header': context_header,
         'cross_refs': cross_refs,
         'delta': delta,
+        'include_extensions': include_extensions,
         'manifest': manifest,
         'bundle': bundle,
         'score': score,
@@ -212,6 +240,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     ctx_header = merged_params.get('context_header', context_header)
     do_cross_refs = merged_params.get('cross_refs', cross_refs)
     is_delta = merged_params.get('delta', delta)
+    include_exts = normalize_extensions(
+        merged_params.get('include_extensions', include_extensions))
     manifest_path = merged_params.get('manifest', manifest)
     bundle_preset = merged_params.get('bundle', bundle)
     is_score = merged_params.get('score', score)
@@ -228,6 +258,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     # 2c-2e. Flag validation, fail fast and with no silent fallback
     query_list, is_score = _validate_flags(
         ctx, fmt, for_queries_path, strat, is_report, is_dry_run, is_score)
+    # 2f. Manifest for --context-header URLs, loaded before any page is read
+    manifest_data = _load_url_manifest(ctx, manifest_path) if ctx_header else None
 
     # 3. List all files
     # The queries file drives the ordering; it is never corpus content,
@@ -246,11 +278,29 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         raise click.ClickException(f"No files found in {input_dir}. Did you run `download` first?")
         
     # 5. Filter
-    filtered_paths = filter_files(all_files, ign_file, ign_inline, input_dir)
+    doc_files, skipped_types = split_by_extension(all_files, include_exts)
+    if skipped_types:
+        listing = ", ".join(f"{k} x{n}" for k, n in sorted(skipped_types.items()))
+        click.echo(f"Skipped non-documentation files: "
+                   f"{sum(skipped_types.values())} ({listing}). "
+                   f"Use --include-extensions to pack other extensions.")
+    filtered_paths = filter_files(doc_files, ign_file, ign_inline, input_dir)
     
     # 6. Check empty after filter
     if not filtered_paths:
         raise click.ClickException("All files were excluded by ignore rules. Check your .docsignore or --ignore flags.")
+
+    # 6a. Bot-challenge interstitials saved instead of the real page: no content, so keep them out
+    challenge_paths = find_challenge_files(filtered_paths)
+    if challenge_paths:
+        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
+                           for p in challenge_paths)
+        click.echo(f"Warning: {len(challenge_paths)} bot-challenge page(s) skipped "
+                   f"(the source is missing their real content):\n{listed}", err=True)
+        challenge_set = set(challenge_paths)
+        filtered_paths = [p for p in filtered_paths if p not in challenge_set]
+        if not filtered_paths:
+            raise click.ClickException("Every input file is a bot-challenge page; nothing to pack.")
 
     # 6b. Delta gate (opt-in, after filter, before dedup)
     #
@@ -334,23 +384,12 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             else:
                 heading_map[rel] = []
 
-    # 7c. Build url_map from manifest (for context-header URLs)
-    url_map = None
+    # 7c. Source URLs for --context-header: manifest entry, else page marker
+    url_resolution = None
     if ctx_header:
-        try:
-            from ..lib.manifest import load_manifest
-            manifest_data = load_manifest(manifest_path)
-            if manifest_data and manifest_data.files:
-                url_map = {}
-                for fpath in filtered_paths:
-                    rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
-                    for key, entry in manifest_data.files.items():
-                        local = entry.local_path or key
-                        if local == rel or key == rel:
-                            url_map[rel] = entry.url
-                            break
-        except Exception:
-            pass
+        from ..lib.source_urls import resolve_source_urls
+
+        url_resolution = resolve_source_urls(filtered_paths, input_dir, manifest_data)
 
     # 7d. Query-oriented ordering (opt-in, after delta/dedup, before chunking)
     query_pack_result = None
@@ -458,7 +497,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
             dr_scores = []
             for chunk in chunks:
-                chunk_id = f"{pref}{chunk.index:02d}"
+                chunk_id = f"{pref}{format_chunk_index(chunk.index, generated_chunk_count)}"
                 raw_total = 0
                 extracted_total = 0
                 headings_count = 0
@@ -516,19 +555,22 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         if ctx_header or fmt == 'jsonl':
             readiness_map = scoring.header_map()
 
-    # 10. Write outputs
-    write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_map, readiness_map=readiness_map)
-
-    # 10a. Cross-references (opt-in, after write)
+    # 9d. Cross-references (opt-in, before write: markers go into each page's
+    # content as it is serialized, never into record metadata — issue #67)
     cross_ref_total = 0
     cross_ref_unresolved = 0
+    annotate = None
     if do_cross_refs:
         from ..lib.pack_artifacts import write_cross_refs
 
-        cross_ref_stats = write_cross_refs(
-            chunks, filtered_paths, input_dir, output_dir, pref, fmt)
-        cross_ref_total = cross_ref_stats.total
-        cross_ref_unresolved = cross_ref_stats.unresolved
+        cross_ref_result = write_cross_refs(
+            chunks, filtered_paths, input_dir, output_dir, pref)
+        cross_ref_total = cross_ref_result.total
+        cross_ref_unresolved = cross_ref_result.unresolved
+        annotate = cross_ref_result.annotate
+
+    # 10. Write outputs
+    write_chunks(chunks, input_dir, output_dir, pref, fmt, w_index, generated_chunk_count, no_extract=no_ext, text_overrides=dedup_text_overrides, heading_map=heading_map, max_words=max_w, url_map=url_resolution.urls if url_resolution else None, readiness_map=readiness_map, annotate=annotate)
 
     # 10b. Delta report (opt-in, after write)
     if is_delta and diff is not None:
@@ -592,6 +634,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     click.echo("\nPack complete:")
     click.echo(f"  Files processed: {files_processed}")
     click.echo(f"  Files excluded:  {files_excluded}")
+    if challenge_paths:
+        click.echo(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
     click.echo(f"  Chunks generated: {generated_chunk_count} / {max_c} (max)")
     
     if generated_chunk_count > 0:
@@ -605,6 +649,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         click.echo(f"  Dedup mode:        {dedup_mode}")
         click.echo(f"  Blocks analyzed:   {dedup_stats.total_blocks}")
         click.echo(f"  Blocks removed:    {dedup_stats.blocks_removed} ({dedup_stats.blocks_removed_exact} exact + {dedup_stats.blocks_removed_fuzzy} fuzzy)")
+        click.echo(f"  Matches kept:      {dedup_stats.blocks_kept_same_page} same-page, "
+                   f"{dedup_stats.blocks_kept_leading_token} leading-token, "
+                   f"{dedup_stats.blocks_kept_numbers} numbers-only")
         if total_words + dedup_stats.words_removed > 0:
             pct = dedup_stats.words_removed * 100 // (total_words + dedup_stats.words_removed)
         else:
@@ -635,6 +682,11 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     if do_cross_refs:
         click.echo(f"  Cross-refs:        {output_dir}/cross_refs.json ({cross_ref_total} links, {cross_ref_unresolved} unresolved)")
+
+    if url_resolution is not None:
+        from ..lib.source_urls import format_url_summary
+        for line in format_url_summary(url_resolution, bool(ctx.obj.get('VERBOSE'))):
+            click.echo(f"  {line}")
 
     if token_counts:
         from ..utils.token_counter import format_token_summary

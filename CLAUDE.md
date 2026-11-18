@@ -42,17 +42,16 @@ src/dograpper/
 │   ├── eval_harness.py     # evaluate() — hit-rate@k e MRR sobre pares golden, com breakdown por readiness grade
 │   ├── golden_qa.py        # generate_golden_qa() — pares Q&A determinísticos a partir do breadcrumb de headings
 │   ├── httrack/
-│   │   ├── challenge.py    # is_challenge() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/)
 │   │   ├── crawl.py        # fetch_url_list() — lista semeada: cada URL é start URL (navigate), robots, /cdn-cgi/ fora de escopo, redirects same-host (até 5), só 2xx não-desafio é escrito (atômico), front_failed; ThreadPool com Fetcher e NameRegistry compartilhados
-│   │   ├── escape.py       # escape_unsafe()/request_target() — percent-escape do HTTrack (htslib.c escape_check_url); fonte única para o alvo no fio (fetcher) e as regras do robots.txt
+│   │   ├── escape.py       # escape_unsafe()/request_target() — percent-escape do HTTrack (htslib.c escape_check_url); fonte única para o alvo no fio (fetcher), o Referer (policy) e as regras do robots.txt
 │   │   ├── fetcher.py      # Fetcher.get()/robots_for() — conexão persistente por thread, pacing (conn-rate, banda, gap por host), retries, gate global de Retry-After relido após o sleep, decode de Content-Encoding limitado a MAX_BODY_BYTES, corpo curto = IncompleteRead retentado, alvo percent-encoded e Host IDNA como o HTTrack, robots com redirects same-host; same_host() — escopo de redirect (fonte única para robots, crawl e descoberta)
-│   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path>, index.html, .html por content-type (substitui extensão dinâmica .php/.cgi…, anexa às demais), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão, thread-safe; None se o caminho escapa de output_dir
-│   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA e referer) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
+│   │   ├── naming.py       # NameRegistry.assign() — nome local estilo HTTrack: <host>/<path> (IPv6 literal → [addr] com ':' → _), index.html, .html por content-type (substitui extensão conhecida pelo HTTrack — tabela MIME, dinâmica .php/.cgi…, .txt/.pdf —, anexa às desconhecidas), caracteres proibidos pelo HTTrack → _, hash md5[:4] da query, sufixo -N em colisão (comparação casefold, sem caixa), thread-safe; None se o caminho escapa de output_dir
+│   │   ├── policy.py       # build_policy() clamps e limites validados + request_headers() idênticos ao HTTrack 3.51 (por esquema, UA e referer; Referer sem userinfo nem fragmento, escapado como o alvo) + make_ssl_context() (perfil TLS) + accept_encoding()/decoder_module() (única fonte dos decoders br/zstd)
 │   │   ├── report.py       # RunReport (contagens por status, challenged, robots_blocked, out_of_scope, filtered, errors, partial) + format_report() — URLs já redigidas, caracteres de controle neutralizados via utils/redact.py
 │   │   └── robots.py       # parse_robots()/RobotsRules — RFC 9309 + semântica HTTrack (longest-match, Allow vence empate, Crawl-delay, Sitemap); regras percent-escapadas com escape.py, como o alvo no fio
 │   ├── ignore_parser.py    # filter_files() com pathspec
 │   ├── llms_txt_parser.py  # fetch_llms_txt() — parser do convention llmstxt.org (markdown links + bare URLs), stdlib-only
-│   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, load/save/build, diff e narrow_diff_to_paths
+│   ├── manifest.py         # Dataclasses Manifest/ManifestEntry, read (levanta erro)/load (tolerante)/save/build, diff e narrow_diff_to_paths
 │   ├── mcp_server.py       # Protocolo MCP stdlib-only: JSON-RPC 2.0 newline-delimited, tools/list, tools/call
 │   ├── pack_artifacts.py   # Sidecars do pack: cross_refs.json, delta_manifest.json, llm-readiness.json, report HTML, tokens
 │   ├── pack_reader.py      # load_chunks() — leitura tolerante dos chunks JSONL do pack em PackedChunk
@@ -62,11 +61,13 @@ src/dograpper/
 │   ├── readiness_diff.py   # compare_readiness() + render_markdown()/render_text() — diff de snapshots llm-readiness.json, stdlib-only
 │   ├── retrieval.py        # build_index()/BM25Index — retrieval determinístico stdlib-only (tie-break por doc_id)
 │   ├── sitemap_parser.py   # fetch_sitemap() — sitemap.xml + sitemapindex recursivo, gzip, same-netloc guard (SITEMAP_NS)
+│   ├── source_urls.py      # resolve_source_urls() — URL de origem por arquivo do pack: entrada do manifest (local_path casado também a partir de subdiretório do mirror; ambíguo = sem URL), senão marcador da página (HTTrack `Mirrored from`, `saved from url=(N)`) validado como entrada não confiável; format_url_summary()
 │   ├── spa_detector.py     # is_spa() via html.parser; small-sample branch (N<5) + errors='replace' encoding
 │   ├── url_filter.py       # filter_urls() — same-netloc + path-prefix canonicalizado (rstrip('/')+'/' nos dois lados) + depth
 │   └── wget_mirror.py      # run_wget_mirror() --mirror + run_wget_urls() -i; BROWSER_UA Chrome/120, --no-parent, --timestamping sempre
 └── utils/
     ├── atomic_write.py     # atomic_write_bytes() — arquivo temporário no mesmo diretório + os.replace; modo padrão do umask
+    ├── challenge.py        # is_challenge() / is_challenge_page() / find_challenge_files() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/); fonte única do fetcher httrack e do pack
     ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
     ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
     ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy)
@@ -77,13 +78,13 @@ src/dograpper/
     ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs()
     ├── logger.py           # setup_logger() com suporte a verbose/quiet
     ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
-    ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; neutralize_controls() — fonte única da neutralização C0/DEL/C1
+    ├── redact.py           # redact_url() — remove userinfo (user:senha@) e percent-encoda caracteres de controle antes de logar; drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
     ├── token_counter.py    # count_tokens() — tiktoken opcional, fallback estimativa palavras→tokens
     └── word_counter.py     # count_words() e count_words_file()
 tests/
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
-├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp
+├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
 ├── test_claude_md_inventory.py # Guard estrutural do CLAUDE.md: árvore completa e referências de caminho válidas
@@ -111,7 +112,7 @@ tests/
 ├── test_heading_extractor.py # Heading extraction, active headings, context header v1, CLI integration
 ├── test_httrack_crawl.py   # fetch_url_list: só 2xx não-desafio escrito, robots, redirects, front_failed, max_links, filtro de extensão, conflito de escrita, format_report
 ├── test_httrack_fetcher.py # Fetcher: retries, gate de Retry-After, pacing com relógio fake, decode gzip/deflate, ordem dos headers, robots_for, is_challenge
-├── test_httrack_naming.py  # NameRegistry: index.html, extensão .html, hash de query, colisão -N e estabilidade, traversal/symlink rejeitados, thread-safety
+├── test_httrack_naming.py  # NameRegistry: index.html, extensão .html, hash de query, colisão -N (inclusive só de caixa) e estabilidade, host IPv6, traversal/symlink rejeitados, thread-safety
 ├── test_httrack_policy.py  # Policy: clamps, headers vs fixture httrack_wire, Accept-Encoding, contexto TLS, ClientHello (OpenSSL >= 3.5)
 ├── test_httrack_robots.py  # parse_robots: grupos, longest-match, Allow vence empate, wildcard/$, Crawl-delay, Sitemap, caps, corpo HTML sem regras
 ├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo
@@ -120,6 +121,7 @@ tests/
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
 ├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
 ├── test_pack.py            # word_counter, ignore_parser, chunker, write_chunks, CLI integration
+├── test_pack_challenge.py  # Pack: páginas de challenge (Cloudflare) detectadas, avisadas e fora dos chunks; falso positivo em prosa
 ├── test_pack_artifacts.py  # Sidecars: cross-refs, delta manifest, snapshot de readiness, contagem de tokens
 ├── test_pack_reader.py     # load_chunks: campos, linhas malformadas, ordem determinística entre arquivos
 ├── test_pack_scoring.py    # score_chunks: ids, report pages, overrides de texto, tolerância a falha
@@ -129,6 +131,7 @@ tests/
 ├── test_retrieval.py       # BM25: tokenize, ranking, top-k, determinismo e tie-break por doc_id
 ├── test_scorer.py          # LLM Readiness Score: noise_ratio, boundary, context_depth, grades, CLI
 ├── test_sitemap_parser.py  # fetch_sitemap: namespace, urlset, gzip, sitemapindex recursivo, cross-host reject, 404, UA
+├── test_source_urls.py     # URLs de origem do pack --context-header: carga do manifest (explícito falha, default vira nota), marcadores HTTrack/saved-from, validação, precedência, resumo, pack de subdiretório do mirror
 ├── test_sync.py            # Pass-through de flags do sync para download/pack (sem precedência)
 ├── test_sync_precedence.py # Precedência de config através do ctx.invoke do sync (CLI explícita > JSON > defaults)
 ├── test_token_counter.py   # Token counting: fallback, tiktoken, format_summary, CLI integration
@@ -163,8 +166,10 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `.docsignore.example` | Ao mexer em `ignore_parser.py` |
 | `tests/test_pack.py` | Antes de alterar qualquer coisa em `lib/chunker.py` ou `commands/pack.py` |
 | `tests/test_query_packer.py` | Antes de alterar `lib/query_packer.py` ou a integração `--for-queries` em `commands/pack.py` |
+| `tests/test_pack_challenge.py` | Antes de alterar `utils/challenge.py` ou a etapa 6a de `commands/pack.py` |
 | `tests/test_pack_scoring.py` | Antes de alterar `lib/pack_scoring.py` ou a etapa 9c de `commands/pack.py` |
 | `tests/test_pack_artifacts.py` | Antes de alterar `lib/pack_artifacts.py` ou as escritas de sidecar (10a-10e) de `commands/pack.py` |
+| `tests/test_source_urls.py` | Antes de alterar `lib/source_urls.py`, a carga do manifest (`_load_url_manifest`) ou o passo 7c de `commands/pack.py` |
 | `tests/test_sync_precedence.py` | Antes de alterar `commands/sync.py` ou `lib/config_loader.py` (mecanismo CLI_EXPLICIT_PARAMS) |
 | `tests/test_download.py` | Antes de alterar qualquer coisa em `lib/wget_mirror.py`, `lib/spa_detector.py`, `lib/playwright_crawl.py` ou `commands/download.py` |
 | `tests/test_download_cascade.py` | Antes de alterar a orquestração de `commands/download.py` ou o threshold `MIN_URLS_TO_CONSIDER_DISCOVERED` |
@@ -178,7 +183,7 @@ uv run dograpper pack ./test-docs -o ./chunks
 | `tests/test_dry_run.py` | Antes de alterar `utils/dry_run_report.py` ou a lógica de dry-run em `commands/pack.py` |
 | `tests/test_heading_extractor.py` | Antes de alterar `utils/heading_extractor.py` ou a lógica de context-header em `commands/pack.py` |
 | `tests/test_httrack_crawl.py` | Antes de alterar `lib/httrack/crawl.py` ou `lib/httrack/report.py` |
-| `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py`, `lib/httrack/challenge.py` ou `lib/httrack/escape.py` |
+| `tests/test_httrack_fetcher.py` | Antes de alterar `lib/httrack/fetcher.py`, `utils/challenge.py` ou `lib/httrack/escape.py` |
 | `tests/test_httrack_naming.py` | Antes de alterar `lib/httrack/naming.py` |
 | `tests/test_httrack_policy.py` | Antes de alterar `lib/httrack/policy.py` |
 | `tests/test_httrack_robots.py` | Antes de alterar `lib/httrack/robots.py` |

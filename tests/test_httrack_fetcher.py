@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from dograpper.lib.httrack.challenge import is_challenge
+from dograpper.utils.challenge import is_challenge
 from dograpper.lib.httrack import fetcher as fetcher_mod, policy as policy_mod
 from dograpper.lib.httrack.crawl import fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher

@@ -124,7 +124,9 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
   - `Accept: text/html,image/png,image/jpeg,image/pjpeg,image/x-xbitmap,image/svg+xml,image/gif;q=0.9,*/*;q=0.1`;
   - `Accept-Language: en, *`;
   - `Connection: keep-alive`;
-  - `Referer` (never https→http).
+  - `Referer` (never https→http), built as HTTrack builds it
+    (`src/htslib.c:1136-1163`): no userinfo, no fragment, host, path and query
+    escaped like the request target. One that does not parse is dropped.
   - `Sec-Fetch-Site/Mode/User/Dest` and `Upgrade-Insecure-Requests` on
     navigations, over HTTPS, exactly when HTTrack's `fetch_meta_sent` would
     send them (`src/htslib.c:873-884`, `1240-1297`). This includes the
@@ -285,9 +287,25 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 
 ### 5.6 Storage and incremental runs (DL-11, DL-12, DL-13)
 
-- **Layout:** as in §3.
+- **Layout:** as in §3. An IPv6 literal host keeps its brackets and its colons
+  become `_`, as in HTTrack (`src/htsname.c:1436`, `1579-1600`; `[` and `]` are
+  legal on NTFS, APFS and ext4). A non-default port is appended as for any
+  host: `http://[::1]:8080/a` → `[__1]:8080/a.html`.
 - **Naming:** a query string adds 4 hex digits of its MD5 to the filename
   (`page.html?x=1` → `page4B54.html`). Collisions get a `-2`, `-3` suffix.
+  Names are compared case-insensitively, as HTTrack's save-name hash does
+  (`src/htshash.c:65-78`, `strcasecmp`), so `/Page` and `/page` never share
+  a file on NTFS or default APFS. **Deviation:** the fold is Unicode
+  (`str.casefold`), not ASCII-only, so `/Été` and `/été` collide too; both
+  filesystems fold them, and an overwrite spoils the corpus.
+- **HTML extension:** an HTML response replaces any extension HTTrack knows
+  (its MIME table, a dynamic or an HTML-family type: `notes.txt` →
+  `notes.html`) and is appended to an unknown one (`article-1.884291` →
+  `article-1.884291.html`), as `src/htsname.c:1200-1215` does.
+  **Deviation (shortcut):** HTTrack keeps a contested extension when the body's
+  magic bytes prove it (`src/htsname.c:289-321`, `src/htssniff.c`): a real PDF
+  at `/doc.pdf` served as `text/html` stays `doc.pdf`. dograpper does not sniff
+  and names it `doc.html`.
 - **Manifest:** written from the engine's own per-URL records (real URL, final
   URL, status, content-type, ETag, Last-Modified), not derived from disk
   paths. `ManifestEntry` gains the missing fields in a backward-compatible

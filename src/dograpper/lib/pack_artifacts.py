@@ -1,10 +1,11 @@
 """Sidecar artifacts a pack run writes next to the chunks.
 
-Everything here runs after ``write_chunks`` and touches the output directory
-only: cross-reference index, delta manifest, readiness JSON, readiness HTML
-report, and the token count of each written chunk. Keeping them out of the
-``pack`` orchestrator leaves it wiring steps together instead of formatting
-files.
+Everything here touches the output directory only: cross-reference index,
+delta manifest, readiness JSON, readiness HTML report, and the token count of
+each written chunk. All of it runs after ``write_chunks`` except
+``write_cross_refs``, which runs before so its markers go into each page's
+content as it is serialized. Keeping them out of the ``pack`` orchestrator
+leaves it wiring steps together instead of formatting files.
 """
 
 import json
@@ -13,29 +14,44 @@ import os
 from dataclasses import dataclass
 from typing import Dict, List
 
-from ..utils.link_extractor import annotate_cross_refs, build_cross_ref_index, extract_links
+from .chunker import format_chunk_index
+from ..utils.link_extractor import LinkRef, annotate_cross_refs, build_cross_ref_index, extract_links
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class CrossRefStats:
-    total: int = 0
-    unresolved: int = 0
+class CrossRefs:
+    total: int
+    unresolved: int
+    links_by_source: Dict[str, List[LinkRef]]
+    file_to_chunk: Dict[str, str]
+
+    def annotate(self, source_path: str, content: str) -> str:
+        """Mark the links *source_path* holds in that page's own content."""
+        links = self.links_by_source.get(source_path)
+        if not links:
+            return content
+        return annotate_cross_refs(content, links, self.file_to_chunk)
 
 
-def _chunk_id(prefix: str, chunk) -> str:
-    return f"{prefix}{chunk.index:02d}"
+def _chunk_id(prefix: str, chunk, total_chunks: int) -> str:
+    return f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
 
 
 def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
-                     output_dir: str, prefix: str, fmt: str) -> CrossRefStats:
-    """Write ``cross_refs.json`` and annotate the chunk files in place."""
+                     output_dir: str, prefix: str) -> CrossRefs:
+    """Write ``cross_refs.json`` and return the resolved links.
+
+    Runs before ``write_chunks``, which passes each page's content through
+    ``CrossRefs.annotate`` as it serializes it, so markers never land in
+    record metadata or in another page's content.
+    """
     # Map each source file to its chunk, including the normalized form of
     # index.html so links resolved by extract_links can match.
     file_to_chunk = {}
     for chunk in chunks:
-        cid = _chunk_id(prefix, chunk)
+        cid = _chunk_id(prefix, chunk, len(chunks))
         for cf in chunk.files:
             file_to_chunk[cf.relative_path] = cid
             rp = cf.relative_path
@@ -44,7 +60,7 @@ def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
             elif rp == "index.html":
                 file_to_chunk[""] = cid
 
-    all_links = []
+    links_by_source = {}
     for fpath in filtered_paths:
         if not fpath.lower().endswith(('.html', '.htm')):
             continue
@@ -54,37 +70,22 @@ def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
         except Exception:
             continue
         rel = os.path.relpath(fpath, input_dir).replace(os.sep, '/')
-        all_links.extend(extract_links(raw_html, rel))
+        links_by_source[rel] = extract_links(raw_html, rel)
 
+    all_links = [lnk for links in links_by_source.values() for lnk in links]
     cross_index = build_cross_ref_index(all_links, file_to_chunk)
-    stats = CrossRefStats(
-        total=sum(len(entry.get("links", []))
-                  for key, entry in cross_index.items() if key != "unresolved"),
-        unresolved=len(cross_index.get("unresolved", [])),
-    )
 
+    os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "cross_refs.json"), 'w', encoding='utf-8') as jf:
         json.dump(cross_index, jf, indent=2, ensure_ascii=False)
 
-    for chunk in chunks:
-        cid = _chunk_id(prefix, chunk)
-        chunk_filename = f"{cid}.{fmt}"
-        chunk_filepath = os.path.join(output_dir, chunk_filename)
-        chunk_links = [lnk for lnk in all_links
-                       if file_to_chunk.get(lnk.source_path) == cid]
-        if not chunk_links:
-            continue
-        try:
-            with open(chunk_filepath, 'r', encoding='utf-8', errors='replace') as cf:
-                chunk_text = cf.read()
-            annotated = annotate_cross_refs(chunk_text, chunk_links, file_to_chunk)
-            if annotated != chunk_text:
-                with open(chunk_filepath, 'w', encoding='utf-8') as cf:
-                    cf.write(annotated)
-        except Exception as e:
-            logger.warning(f"Failed to annotate cross-refs for {chunk_filename}: {e}")
-
-    return stats
+    return CrossRefs(
+        total=sum(len(entry.get("links", []))
+                  for key, entry in cross_index.items() if key != "unresolved"),
+        unresolved=len(cross_index.get("unresolved", [])),
+        links_by_source=links_by_source,
+        file_to_chunk=file_to_chunk,
+    )
 
 
 def write_delta_manifest(diff, chunks, output_dir: str, prefix: str,
@@ -97,7 +98,7 @@ def write_delta_manifest(diff, chunks, output_dir: str, prefix: str,
         "removed": diff.removed,
         "chunks_generated": [
             {
-                "chunk": _chunk_id(prefix, c),
+                "chunk": _chunk_id(prefix, c, len(chunks)),
                 "files": [cf.relative_path for cf in c.files],
             }
             for c in chunks
@@ -161,7 +162,7 @@ def count_chunk_tokens(chunks, output_dir: str, prefix: str, fmt: str,
 
     token_counts = []
     for chunk in chunks:
-        chunk_filename = f"{_chunk_id(prefix, chunk)}.{fmt}"
+        chunk_filename = f"{_chunk_id(prefix, chunk, len(chunks))}.{fmt}"
         chunk_filepath = os.path.join(output_dir, chunk_filename)
         try:
             with open(chunk_filepath, 'r', encoding='utf-8', errors='replace') as cf:

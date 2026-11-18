@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit
 
-from ...utils.redact import redact_url
-from .challenge import is_challenge
+from ...utils.challenge import is_challenge
+from ...utils.redact import drop_userinfo, redact_url
 from .escape import request_target
 from .policy import ZSTD_MAX_WINDOW, HttrackPolicy, decoder_module, make_ssl_context, request_headers
 from .robots import NO_RULES, RobotsRules, parse_robots
@@ -157,7 +157,7 @@ def same_host(a: str, b: str) -> bool:
 def _wire_host(parts) -> str:
     """Host header value: netloc without userinfo, a non-ASCII name IDNA-encoded
     (UnicodeError, a ValueError, when IDNA cannot encode it)."""
-    host = parts.netloc.rpartition("@")[2]
+    host = drop_userinfo(parts).netloc
     if host.isascii():
         return host
     name, sep, port = host.partition(":")  # a non-ASCII host is never an IPv6 literal

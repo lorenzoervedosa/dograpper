@@ -5,6 +5,7 @@ mapping chunks to their outgoing/incoming references, and optionally
 annotates plain text with chunk pointers.
 """
 
+import functools
 import json
 import logging
 import posixpath
@@ -158,6 +159,23 @@ def build_cross_ref_index(
     return result
 
 
+@functools.lru_cache(maxsize=None)
+def _link_text_pattern(link_text: str) -> re.Pattern:
+    """Compile the match for *link_text* once per run: a large corpus repeats
+    the same link texts across thousands of records, past ``re``'s own cache.
+
+    The text matches only when not adjacent to a word character on either
+    side, nor joined to one by a dot, so a marker never lands inside a word
+    ("Installation") or a dotted identifier ("pkg.Items.Items"); a plain \\b
+    fails here because link text often starts/ends in punctuation, e.g.
+    "C++". The left checks are lookbehinds placed *after* the literal, so the
+    pattern starts with the literal and the regex engine scans for it as a
+    prefix instead of testing every position.
+    """
+    lt = re.escape(link_text)
+    return re.compile(lt + r"(?<!\w" + lt + r")(?<!\w\." + lt + r")(?!\w)(?!\.\w)")
+
+
 def annotate_cross_refs(
     text: str,
     links: List[LinkRef],
@@ -171,9 +189,10 @@ def annotate_cross_refs(
     avoid false positives.  Unresolved links are skipped.
 
     The match is word-boundary-aware: ``link_text`` is only annotated
-    when it is not adjacent to a word character, so short link text
-    (e.g. "Install") does not corrupt an unrelated word that merely
-    contains it as a substring (e.g. "Installation").
+    when it is not adjacent to a word character, nor joined to one by a
+    dot, so short link text (e.g. "Install") does not corrupt an unrelated
+    word that merely contains it as a substring (e.g. "Installation") or
+    a dotted identifier (e.g. "pkg.AttachedItems.AttachedItems").
     """
     annotated = set()  # link_text values already processed
 
@@ -187,11 +206,7 @@ def annotate_cross_refs(
             continue
 
         marker = f"{lt} [-> {target_chunk}]"
-        # Replace only the first occurrence, and only when not adjacent to
-        # a word character on either side (a plain \b fails here because
-        # link text often starts/ends in punctuation, e.g. "C++").
-        pattern = re.compile(r"(?<!\w)" + re.escape(lt) + r"(?!\w)")
-        new_text = pattern.sub(lambda m: marker, text, count=1)
+        new_text = _link_text_pattern(lt).sub(lambda m: marker, text, count=1)
         if new_text != text:
             text = new_text
             annotated.add(lt)

@@ -6,6 +6,7 @@ informative text reaches the chunker.
 """
 
 import logging
+from html import escape
 from html.parser import HTMLParser
 from typing import Optional
 
@@ -150,13 +151,16 @@ def _last_index(stack, tag):
 
 
 def _rebuild_tag(tag, attrs):
-    """Reconstruct an opening HTML tag string from parsed components."""
+    """Reconstruct an opening HTML tag string from parsed components.
+
+    The parser hands back decoded attribute values, so they are re-escaped.
+    """
     parts = [f"<{tag}"]
     for name, value in attrs:
         if value is None:
             parts.append(f" {name}")
         else:
-            parts.append(f' {name}="{value}"')
+            parts.append(f' {name}="{escape(value)}"')
     parts.append(">")
     return "".join(parts)
 
@@ -220,7 +224,7 @@ class _SemanticFinderParser(HTMLParser):
 
     def handle_data(self, data):
         if self._capturing:
-            self._cap_parts.append(data)
+            self._cap_parts.append(escape(data, quote=False))
 
     def get_result(self) -> Optional[str]:
         return self.best_match[1] if self.best_match else None
@@ -304,7 +308,7 @@ class _DensityScorerParser(HTMLParser):
     def handle_data(self, data):
         for b in self.block_stack:
             b["text_parts"].append(data)
-            b["html_parts"].append(data)
+            b["html_parts"].append(escape(data, quote=False))
 
     def get_result(self) -> Optional[str]:
         return self.best[1] if self.best else None
@@ -366,7 +370,7 @@ class _BlacklistRemoverParser(HTMLParser):
 
     def handle_data(self, data):
         if not self._skip_stack:
-            self.output.append(data)
+            self.output.append(escape(data, quote=False))
 
     def get_output(self) -> str:
         return "".join(self.output)

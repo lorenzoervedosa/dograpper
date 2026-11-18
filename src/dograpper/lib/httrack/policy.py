@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from urllib.parse import urlsplit
 
+from ...utils.redact import drop_userinfo
+from .escape import escape_unsafe, request_target
+
 logger = logging.getLogger(__name__)
 
 # Deliberate second copy of cli.py's version lookup: lib must not import the CLI layer.
@@ -151,6 +154,30 @@ def _site_key(host: str) -> str:
     return ".".join(labels[-2:]) + host[len(name):]
 
 
+def _referer_value(page: str | None) -> str | None:
+    """Referer for a request from `page`, built as htslib.c:1136-1163 builds it: scheme, the
+    escaped host past any user:password, then the escaped path and query (no fragment).
+    None when `page` is empty, does not parse or cannot be escaped: it is dropped, never
+    raised."""
+    if not page:
+        return None
+    try:
+        p = drop_userinfo(urlsplit(page))
+        return f"{p.scheme}://{escape_unsafe(p.netloc)}{request_target(p)}"
+    except ValueError:  # "https://[bad/"; a lone surrogate UTF-8 cannot encode
+        return None
+
+
+def _port(parts) -> int:
+    """htsfetch.c origin_of: the explicit port, else the scheme default, which is also what a
+    port out of range (1-65535) or not a number gets; never a ValueError."""
+    default = 443 if parts.scheme == "https" else 80
+    try:
+        return parts.port or default
+    except ValueError:
+        return default
+
+
 def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
     """Sec-Fetch-Site of a request from page `referer` (R16, htsfetch.c hts_fetch_site_of)."""
     if not referer:
@@ -159,8 +186,7 @@ def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
     if (a.scheme == "https") != (b.scheme == "https"):
         return "cross-site"
     if a.hostname == b.hostname:
-        default = 443 if b.scheme == "https" else 80
-        return "same-origin" if (a.port or default) == (b.port or default) else "same-site"
+        return "same-origin" if _port(a) == _port(b) else "same-site"
     return "same-site" if _site_key(a.hostname or "") == _site_key(b.hostname or "") \
         else "cross-site"
 
@@ -174,6 +200,7 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
     # htslib.c fetch_meta_sent: navigations only, to a trustworthy origin, with a browser UA
     meta = (kind != "robots" and _trustworthy(scheme, host)
             and policy.user_agent.startswith("Mozilla/5.0 "))
+    referer = _referer_value(referer)
     h: list[tuple[str, str]] = []
     if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
         h.append(("Referer", referer))  # never an https referer to an http URL

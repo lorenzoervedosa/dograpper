@@ -397,3 +397,99 @@ def test_build_manifest_populates_content_hash():
         manifest = build_manifest(base_url="", output_dir=tmpdir)
         entry = list(manifest.files.values())[0]
         assert entry.content_hash == hashlib.md5(b"content").hexdigest()
+
+
+# --- build_manifest URL rebuild (#94) ---
+#
+# Fixtures reproduce wget 1.21.4 --mirror --adjust-extension layouts: the
+# saved path is <host>[:port]/<decoded path>, a query string stays in the
+# file name after "?", and ".html" is appended to HTML without that suffix.
+
+SPHINX_SEED = "https://pz-wiki-modding.github.io/PZ-API-Docs/"
+QUERY_SEED = ("https://pzwiki.net/w/index.php"
+              "?title=Category:Current_Lua_events&pagefrom=OnLoadSoundBanks")
+
+
+def _urls(base_url, tmp_path, rel_paths):
+    _make_test_dir(str(tmp_path), {rel: "<p>x</p>" for rel in rel_paths})
+    manifest = build_manifest(base_url, str(tmp_path))
+    return {e.local_path: e.url for e in manifest.files.values()}
+
+
+def test_build_manifest_url_does_not_repeat_the_seed_path(tmp_path):
+    urls = _urls(SPHINX_SEED, tmp_path, [
+        "pz-wiki-modding.github.io/PZ-API-Docs/index.html",
+        "pz-wiki-modding.github.io/PZ-API-Docs/api/zombie.html",
+    ])
+    assert urls == {
+        "pz-wiki-modding.github.io/PZ-API-Docs/index.html":
+            "https://pz-wiki-modding.github.io/PZ-API-Docs/index.html",
+        "pz-wiki-modding.github.io/PZ-API-Docs/api/zombie.html":
+            "https://pz-wiki-modding.github.io/PZ-API-Docs/api/zombie.html",
+    }
+
+
+def test_build_manifest_url_is_not_appended_to_a_page_seed(tmp_path):
+    urls = _urls(QUERY_SEED, tmp_path, ["pzwiki.net/robots.txt"])
+    assert urls == {"pzwiki.net/robots.txt": "https://pzwiki.net/robots.txt"}
+
+
+def test_build_manifest_omits_url_for_a_query_in_the_saved_name(tmp_path):
+    """wget decodes the query (``%26`` and ``&`` both save as ``&``) and may or
+    may not have appended ``.html``, so no URL is better than a guessed one."""
+    urls = _urls(QUERY_SEED, tmp_path, [
+        "pzwiki.net/w/index.php?title=Category:Current_Lua_events"
+        "&pagefrom=OnLoadSoundBanks.html",
+        "pzwiki.net/w/q?x=a&b.html",
+    ])
+    assert set(urls.values()) == {None}
+
+
+def test_build_manifest_url_keeps_port_and_escapes_decoded_path(tmp_path):
+    """The scheme comes from the seed. wget saves ``a%20b.html`` decoded, the
+    Playwright layer saves the path still escaped: both give the same URL."""
+    urls = _urls("http://127.0.0.1:8765/docs/", tmp_path,
+                 ["127.0.0.1:8765/docs/a b.html", "127.0.0.1:8765/docs/c%20d.html",
+                  "127.0.0.1:8765/wiki/Category:En.txt"])
+    assert urls == {
+        "127.0.0.1:8765/docs/a b.html": "http://127.0.0.1:8765/docs/a%20b.html",
+        "127.0.0.1:8765/docs/c%20d.html": "http://127.0.0.1:8765/docs/c%20d.html",
+        "127.0.0.1:8765/wiki/Category:En.txt":
+            "http://127.0.0.1:8765/wiki/Category:En.txt",
+    }
+
+
+def test_build_manifest_omits_url_without_scheme_or_host_dir(tmp_path):
+    assert _urls("", tmp_path / "a", ["site.com/a.html"]) == {"site.com/a.html": None}
+    assert _urls(SPHINX_SEED, tmp_path / "b", ["loose.html"]) == {"loose.html": None}
+
+
+def test_context_header_uses_rebuilt_urls_and_skips_missing_ones(tmp_path):
+    """pack step 7c: correct URLs reach the chunks; a missing one is left out."""
+    input_dir = str(tmp_path / "mirror")
+    _make_test_dir(input_dir, {
+        "pz-wiki-modding.github.io/PZ-API-Docs/index.html":
+            "<html><body><h1>API</h1><p>alpha beta gamma</p></body></html>",
+        "pz-wiki-modding.github.io/PZ-API-Docs/q?x=1.html":
+            "<html><body><h1>Query</h1><p>delta epsilon zeta</p></body></html>",
+    })
+    manifest_path = str(tmp_path / "manifest.json")
+    save_manifest(build_manifest(SPHINX_SEED, input_dir), manifest_path)
+    output_dir = str(tmp_path / "chunks")
+
+    result = CliRunner().invoke(pack, [
+        input_dir, '-o', output_dir, '--format', 'jsonl', '--context-header',
+        '--manifest', manifest_path,
+    ], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    records = {}
+    for name in os.listdir(output_dir):
+        if name.endswith(".jsonl"):
+            with open(os.path.join(output_dir, name), encoding="utf-8") as f:
+                for line in f:
+                    rec = json.loads(line)
+                    records[rec["source"]] = rec
+    assert records["pz-wiki-modding.github.io/PZ-API-Docs/index.html"]["url"] == \
+        "https://pz-wiki-modding.github.io/PZ-API-Docs/index.html"
+    assert "url" not in records["pz-wiki-modding.github.io/PZ-API-Docs/q?x=1.html"]

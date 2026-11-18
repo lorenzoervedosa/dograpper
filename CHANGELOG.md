@@ -48,6 +48,10 @@ and fixes alone are a PATCH bump.
 
 ### Added
 
+- `pack` detects bot-challenge interstitial pages (Cloudflare "Just a
+  moment..." title) in its input, warns once with the affected files, keeps
+  them out of the chunks and reports `Challenge pages: N` in the summary; it
+  fails if every input file is one. ([#69])
 - `download --downloader httrack` (and the same flags on `sync`): a pure-Python
   fetcher that mirrors HTTrack 3.51's request identity, with `[httrack]` flags
   (`--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`,
@@ -56,12 +60,44 @@ and fixes alone are a PATCH bump.
   Playwright fallback fail loud under this profile for now.
 - `httrack` install extra (`brotli`, `zstandard`) enabling `br` / `zstd`
   response decoding for the httrack profile.
+- `download` (wget paths) lists the URLs behind a wget exit code 8 in the
+  summary as `Failed: N URLs (first 5 shown)` with each URL and HTTP status;
+  `--verbose` lists them all ([#97](https://github.com/lorenzoervedosa/dograpper/issues/97)).
+
+### Changed
+
+- `pack` now packs documentation formats only by default (`.html`, `.htm`,
+  `.md`, `.txt`). `.js`, `.css`, `.json` and other text files are skipped and
+  listed by extension in one summary line; `robots.txt`,
+  `.dograpper-manifest.json`, `delta_manifest.json` and `pack_state.json` are
+  always skipped. `--include-extensions` (config key `include-extensions`)
+  brings other extensions back. Corpora that relied on packing e.g. `.json`
+  or extensionless files must now opt in. ([#91])
+- `pack --context-header` fills `url` for pages without a manifest entry from
+  the marker in the page head: HTTrack's `Mirrored from <url>` footer or a
+  browser's `saved from url=(N)<url>`. The value is validated (http/https,
+  length, characters, host) and the manifest still wins. The pack summary gains
+  a `Source URLs` line counting URLs by source and listing files left without
+  one, including rejected or conflicting markers. ([#90])
 
 ### Fixed
 
+- `pack` zero-pads chunk file names, JSONL ids, `Chunk N of M` headers and sidecar
+  chunk ids to one width per run (`max(2, digits of the chunk count)`), so
+  100 or more chunks sort numerically; packs under 100 chunks keep their names
+  ([#92](https://github.com/lorenzoervedosa/dograpper/issues/92)).
+- `pack --score` no longer grades a chunk with empty extracted content as `A`;
+  it is graded `C` with score 0. ([#69])
+- `download` manifest entries record `url` as `<scheme>://<host dir>/<saved
+  path>` instead of appending the path to the seed URL, which doubled a seed's
+  path segment (`.../PZ-API-Docs/PZ-API-Docs/index.html`) or glued paths onto a
+  page seed. A saved name with `?` (wget query pages) now gets `"url": null`,
+  and `pack --context-header` leaves `url` out for such sources. ([#94])
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.
+- `download` llms.txt discovery no longer crashes on a truncated or corrupt
+  gzip body; the candidate is logged and skipped. ([#77])
 - `pack --cross-refs` no longer corrupts words where a link's text is a
   substring of an unrelated word in the chunk (e.g. link text "Install"
   inside the word "Installation"). `annotate_cross_refs` now matches on
@@ -72,6 +108,33 @@ and fixes alone are a PATCH bump.
   size matches but mtime disagrees, instead of trusting mtime alone; the
   mtime match itself remains a fast path that skips hashing. Manifests
   written before this change still load and compare correctly. ([#56])
+- `pack` no longer drops HTML-escaped angle brackets (`&lt;T&gt;`, escaped
+  markup in code blocks) during content extraction; default output now keeps
+  `List<T>` and `<div>` examples, matching `--no-extract`. ([#66])
+- `pack --dedup` no longer deletes a page's own content. A block is never
+  removed against another block of the same page, in any mode, and `fuzzy`
+  keeps a near-duplicate that starts with a different token (a key, tag or
+  parameter name) or differs only in numbers (a version banner, a date). The
+  summary and the `--dry-run` report gain a `Matches kept` line counting the
+  blocks each rule kept. A block identical on several pages, an identical
+  version banner included, is still kept only on the first. ([#89])
+- `pack --cross-refs` annotates each page's own content, for the links that
+  page holds, as the chunk is written, instead of the first occurrence of the
+  link text anywhere in the written chunk file. Markers no longer rewrite
+  JSONL `id`/`source` values, md/txt file indexes or context headers, land in
+  another page that merely mentions the link text, or split a dotted
+  identifier (`pkg.AttachedItems [-> docs_chunk_01].AttachedItems`), and
+  large corpora no longer stall (each link text's pattern is compiled once
+  per run). ([#67])
+- `pack --context-header --manifest PATH` exits 1 with a clear message when
+  PATH is missing or cannot be loaded, instead of silently packing without
+  URLs. A broken file at the default manifest path is reported as a note and
+  skipped. ([#90])
+- `pack --context-header` resolves manifest URLs when `INPUT_DIR` is a
+  subdirectory of the download output, instead of matching nothing. Files are
+  matched on their path in the mirror, so a page in a subdirectory no longer
+  takes the URL of a same-named page at the site root; a file that matches
+  several entries gets no `url` and is listed in the summary. ([#90])
 
 ### Security
 
@@ -147,3 +210,11 @@ and fixes alone are a PATCH bump.
 [#42]: https://github.com/lorenzoervedosa/dograpper/issues/42
 [#55]: https://github.com/lorenzoervedosa/dograpper/issues/55
 [#56]: https://github.com/lorenzoervedosa/dograpper/issues/56
+[#66]: https://github.com/lorenzoervedosa/dograpper/issues/66
+[#77]: https://github.com/lorenzoervedosa/dograpper/issues/77
+[#91]: https://github.com/lorenzoervedosa/dograpper/issues/91
+[#69]: https://github.com/lorenzoervedosa/dograpper/issues/69
+[#89]: https://github.com/lorenzoervedosa/dograpper/issues/89
+[#67]: https://github.com/lorenzoervedosa/dograpper/issues/67
+[#94]: https://github.com/lorenzoervedosa/dograpper/issues/94
+[#90]: https://github.com/lorenzoervedosa/dograpper/issues/90
