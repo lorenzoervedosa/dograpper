@@ -12,6 +12,11 @@ from ..utils.content_extractor import extract_content
 
 logger = logging.getLogger(__name__)
 
+def format_chunk_index(index: int, total_chunks: int) -> str:
+    """Zero-pad a chunk index to one width per run (>= 2 digits) so names sort numerically."""
+    return f"{index:0{max(2, len(str(total_chunks)))}d}"
+
+
 @dataclass
 class ChunkFile:
     relative_path: str
@@ -227,7 +232,7 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
         lines.append("|---|------|-------|----------------|")
 
         for c in chunks:
-            chunk_name = f"docs_chunk_{c.index:02d}.md"
+            chunk_name = f"docs_chunk_{format_chunk_index(c.index, len(chunks))}.md"
             words_fmt = f"{c.total_words:,}"
 
             # Derive section from heading_map or directory
@@ -260,7 +265,7 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
         lines.append("|---|------|-------|----------------|")
 
         for c in chunks:
-            chunk_name = f"docs_chunk_{c.index:02d}.md"
+            chunk_name = f"docs_chunk_{format_chunk_index(c.index, len(chunks))}.md"
             words_fmt = f"{c.total_words:,}"
             section = ""
             if c.files:
@@ -465,7 +470,7 @@ def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index
     """Write a chunk as plain text (no markdown or HTML markup)."""
     with open(out_filepath, 'w', encoding='utf-8') as f:
         if with_index:
-            f.write(f"Chunk {chunk.index:02d} of {total_chunks:02d}\n")
+            f.write(f"Chunk {format_chunk_index(chunk.index, total_chunks)} of {format_chunk_index(total_chunks, total_chunks)}\n")
             f.write(f"Files in this chunk ({len(chunk.files)} files, ~{chunk.total_words} words):\n")
             for cf in chunk.files:
                 f.write(f"- {cf.relative_path} ({cf.word_count} words)\n")
@@ -477,7 +482,7 @@ def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index
             content = _read_source_content(base_dir, cf, no_extract=no_extract, text_overrides=text_overrides)
 
             if heading_map is not None and cf.relative_path in heading_map:
-                chunk_id = f"{prefix}{chunk.index:02d}"
+                chunk_id = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
                 _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id)
             else:
                 f.write(f"=== SOURCE: {cf.relative_path} ===\n\n")
@@ -487,7 +492,7 @@ def _write_chunk_text(chunk: Chunk, base_dir: str, out_filepath: str, with_index
 def _write_chunk_markdown(chunk: Chunk, base_dir: str, out_filepath: str, with_index: bool, total_chunks: int, no_extract: bool = False, text_overrides: Dict[str, str] = None, heading_map: Dict = None, max_words: int = 0, url_map: Dict[str, str] = None, readiness_map: Dict[str, dict] = None, prefix: str = "docs_chunk_"):
     with open(out_filepath, 'w', encoding='utf-8') as f:
         if with_index:
-            f.write(f"# Chunk {chunk.index:02d} of {total_chunks:02d}\n\n")
+            f.write(f"# Chunk {format_chunk_index(chunk.index, total_chunks)} of {format_chunk_index(total_chunks, total_chunks)}\n\n")
             f.write(f"## Files in this chunk ({len(chunk.files)} files, ~{chunk.total_words} words):\n")
             for cf in chunk.files:
                 f.write(f"- {cf.relative_path} ({cf.word_count} words)\n")
@@ -499,7 +504,7 @@ def _write_chunk_markdown(chunk: Chunk, base_dir: str, out_filepath: str, with_i
             content = _read_source_content(base_dir, cf, no_extract=no_extract, text_overrides=text_overrides)
 
             if heading_map is not None and cf.relative_path in heading_map:
-                chunk_id = f"{prefix}{chunk.index:02d}"
+                chunk_id = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
                 _write_file_with_context(f, cf, content, heading_map[cf.relative_path], max_words, url_map=url_map, readiness_map=readiness_map, chunk_id=chunk_id)
             else:
                 f.write(f"<!-- SOURCE: {cf.relative_path} -->\n\n")
@@ -538,7 +543,7 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
                     active = get_active_headings(headings, headings[0].char_offset)
 
                 record = {
-                    "id": f"{chunk.index:02d}_{cf.relative_path}",
+                    "id": f"{format_chunk_index(chunk.index, total_chunks)}_{cf.relative_path}",
                     "source": cf.relative_path,
                     "words": len(sub_text.split()),
                     "content": sub_text,
@@ -549,18 +554,18 @@ def _write_chunk_jsonl(chunk: Chunk, base_dir: str, out_filepath: str,
                 if total_sub > 1:
                     record["chunk_index"] = j + 1
                     record["total_chunks"] = total_sub
-                    record["id"] = f"{chunk.index:02d}_{j+1}_{cf.relative_path}"
+                    record["id"] = f"{format_chunk_index(chunk.index, total_chunks)}_{j+1}_{cf.relative_path}"
                 if url_map and cf.relative_path in url_map:
                     record["url"] = url_map[cf.relative_path]
                 if readiness_map:
-                    chunk_id = f"{prefix}{chunk.index:02d}"
+                    chunk_id = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
                     if chunk_id in readiness_map:
                         record["readiness_grade"] = readiness_map[chunk_id]["grade"]
 
                 lines.append(json.dumps(record, ensure_ascii=False))
         else:
             record = {
-                "id": f"{chunk.index:02d}_{cf.relative_path}",
+                "id": f"{format_chunk_index(chunk.index, total_chunks)}_{cf.relative_path}",
                 "source": cf.relative_path,
                 "words": len(content.split()),
                 "content": content,
@@ -581,7 +586,7 @@ def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: st
 
     fmt = format.lower()
     for chunk in chunks:
-        out_filename = f"{prefix}{chunk.index:02d}.{format}"
+        out_filename = f"{prefix}{format_chunk_index(chunk.index, total_chunks)}.{format}"
         out_filepath = os.path.join(output_dir, out_filename)
         generated_paths.append(out_filepath)
 

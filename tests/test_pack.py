@@ -618,3 +618,47 @@ def test_pack_for_queries_dry_run_shows_summary():
         assert "2 queries, 2 files matched, 0 unmatched" in result.output
         # dry-run must not write anything
         assert not os.path.exists(out)
+
+
+# --- Chunk index width (issue #92) ---
+
+def _pack_n_pages(tmp_path, n, *extra):
+    src = tmp_path / "src"
+    src.mkdir()
+    for i in range(n):
+        (src / f"p{i:03d}.html").write_text(f"<html><body><h1>T{i}</h1><p>w{i}</p></body></html>")
+    out = tmp_path / "out"
+    result = CliRunner().invoke(pack, [
+        str(src), "-o", str(out), "--max-words-per-chunk", "1",
+        "--max-chunks", "100000", "--format", "jsonl", "--score", "--delta", "--manifest", str(tmp_path / "m.json"), *extra])
+    assert result.exit_code == 0, result.output
+    return out
+
+
+def test_chunk_names_sort_numerically_past_99(tmp_path):
+    out = _pack_n_pages(tmp_path, 101)
+    names = sorted(p.name for p in out.glob("docs_chunk_*.jsonl"))
+    assert len(names) == 101
+    assert names[0] == "docs_chunk_001.jsonl" and names[-1] == "docs_chunk_101.jsonl"
+
+    import json
+    from dograpper.lib.pack_reader import load_chunks
+    ids = [c.id.split("_", 1)[0] for c in load_chunks(str(out))]
+    assert list(dict.fromkeys(ids)) == [f"{i:03d}" for i in range(1, 102)]
+
+    readiness = json.loads((out / "llm-readiness.json").read_text())
+    assert all(len(c["chunk_id"].rsplit("_", 1)[1]) == 3 for c in readiness["chunks"])
+    delta = json.loads((out / "delta_manifest.json").read_text())
+    assert "docs_chunk_101" in json.dumps(delta)
+
+
+def test_chunk_headers_use_run_width_past_99(tmp_path):
+    out = _pack_n_pages(tmp_path, 101, "--format", "md")
+    assert (out / "docs_chunk_101.md").read_text().startswith("# Chunk 101 of 101")
+    assert (out / "docs_chunk_001.md").read_text().startswith("# Chunk 001 of 101")
+
+
+def test_chunk_names_keep_two_digits_below_100(tmp_path):
+    out = _pack_n_pages(tmp_path, 12)
+    names = sorted(p.name for p in out.glob("docs_chunk_*.jsonl"))
+    assert names[0] == "docs_chunk_01.jsonl" and names[-1] == "docs_chunk_12.jsonl"

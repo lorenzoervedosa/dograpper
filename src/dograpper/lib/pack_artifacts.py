@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass
 from typing import Dict, List
 
+from .chunker import format_chunk_index
 from ..utils.link_extractor import annotate_cross_refs, build_cross_ref_index, extract_links
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,8 @@ class CrossRefStats:
     unresolved: int = 0
 
 
-def _chunk_id(prefix: str, chunk) -> str:
-    return f"{prefix}{chunk.index:02d}"
+def _chunk_id(prefix: str, chunk, total_chunks: int) -> str:
+    return f"{prefix}{format_chunk_index(chunk.index, total_chunks)}"
 
 
 def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
@@ -35,7 +36,7 @@ def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
     # index.html so links resolved by extract_links can match.
     file_to_chunk = {}
     for chunk in chunks:
-        cid = _chunk_id(prefix, chunk)
+        cid = _chunk_id(prefix, chunk, len(chunks))
         for cf in chunk.files:
             file_to_chunk[cf.relative_path] = cid
             rp = cf.relative_path
@@ -67,7 +68,7 @@ def write_cross_refs(chunks, filtered_paths: List[str], input_dir: str,
         json.dump(cross_index, jf, indent=2, ensure_ascii=False)
 
     for chunk in chunks:
-        cid = _chunk_id(prefix, chunk)
+        cid = _chunk_id(prefix, chunk, len(chunks))
         chunk_filename = f"{cid}.{fmt}"
         chunk_filepath = os.path.join(output_dir, chunk_filename)
         chunk_links = [lnk for lnk in all_links
@@ -97,7 +98,7 @@ def write_delta_manifest(diff, chunks, output_dir: str, prefix: str,
         "removed": diff.removed,
         "chunks_generated": [
             {
-                "chunk": _chunk_id(prefix, c),
+                "chunk": _chunk_id(prefix, c, len(chunks)),
                 "files": [cf.relative_path for cf in c.files],
             }
             for c in chunks
@@ -161,7 +162,7 @@ def count_chunk_tokens(chunks, output_dir: str, prefix: str, fmt: str,
 
     token_counts = []
     for chunk in chunks:
-        chunk_filename = f"{_chunk_id(prefix, chunk)}.{fmt}"
+        chunk_filename = f"{_chunk_id(prefix, chunk, len(chunks))}.{fmt}"
         chunk_filepath = os.path.join(output_dir, chunk_filename)
         try:
             with open(chunk_filepath, 'r', encoding='utf-8', errors='replace') as cf:

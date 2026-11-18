@@ -59,6 +59,10 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack` zero-pads chunk file names, JSONL ids, `Chunk N of M` headers and sidecar
+  chunk ids to one width per run (`max(2, digits of the chunk count)`), so
+  100 or more chunks sort numerically; packs under 100 chunks keep their names
+  ([#92](https://github.com/lorenzoervedosa/dograpper/issues/92)).
 - `download` sitemap discovery no longer crashes on a truncated or corrupt
   gzip sitemap or on a malformed URL in a sitemap index; the bad entry is
   skipped.

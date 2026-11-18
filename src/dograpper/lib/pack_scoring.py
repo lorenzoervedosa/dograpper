@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from .chunker import format_chunk_index
 from ..utils.content_extractor import extract_content
 from ..utils.html_stripper import strip_html
 from ..utils.readiness_report import PageReadiness, find_removed_blocks
@@ -83,7 +84,7 @@ def score_chunks(
     result = ScoringResult()
 
     for chunk in chunks:
-        chunk_id = f"{prefix}{chunk.index:02d}"
+        chunk_id = f"{prefix}{format_chunk_index(chunk.index, len(chunks))}"
 
         raw_total = 0
         extracted_total = 0
