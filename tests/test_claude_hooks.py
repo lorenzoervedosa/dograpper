@@ -264,6 +264,7 @@ def test_reminder_names_the_docs_of_a_contract_file(rel, doc, tmp_path):
     assert doc in context
     assert f"you edited {rel}," in context
     assert "docs/DECISIONS.md, docs/DEBT.md" in context
+    assert "the nearest CLAUDE.md above the file" in context
 
 
 def test_reminder_covers_edits_inside_a_worktree(tmp_path):
@@ -332,6 +333,7 @@ def test_doc_check_reminds_only_the_changelog_for_a_fix_outside_contracts(commit
 
 @pytest.mark.parametrize("subject, files", [
     ("chore(harness): wire hooks", ("src/dograpper/cli.py", "CLAUDE.md")),
+    ("docs(claude-md): describe the step", ("src/dograpper/commands/pack.py", "src/dograpper/commands/CLAUDE.md")),
     ("test: cover the hooks", ("tests/test_claude_hooks.py",)),
     ("fixup! test: cover the hooks", ("tests/test_claude_hooks.py",)),
 ])

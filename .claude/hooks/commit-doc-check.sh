@@ -27,8 +27,8 @@ notes=""
 
 # Contract set mirrored from the case map in harness-reminder.sh; keep both in sync.
 if printf '%s\n' "$files" | grep -qE '^(src/dograpper/(cli\.py|commands/|lib/(chunker|config_loader|manifest|pack_artifacts|page_layout|mcp_server)\.py|lib/httrack/|utils/heading_extractor\.py|utils/api_reference/)|action\.yml$)'; then
-  if ! printf '%s\n' "$files" | grep -qE '^(docs/|README\.md$|CLAUDE\.md$|GLOSSARY\.md$|\.dograpper\.json\.example$)'; then
-    notes="Harness: the HEAD commit touched contract files (CLI, pack formats, config, manifest, httrack, Action) without any change in docs/ (ADRs, schema-v1, DECISIONS.md, DEBT.md), README.md, CLAUDE.md or GLOSSARY.md. If it changes a contract or a decision, make the matching docs commit NOW; if not, go on."
+  if ! printf '%s\n' "$files" | grep -qE '^(docs/|README\.md$|(.+/)?CLAUDE\.md$|GLOSSARY\.md$|\.dograpper\.json\.example$)'; then
+    notes="Harness: the HEAD commit touched contract files (CLI, pack formats, config, manifest, httrack, Action) without any change in docs/ (ADRs, schema-v1, DECISIONS.md, DEBT.md), README.md, a CLAUDE.md (root or nested) or GLOSSARY.md. If it changes a contract or a decision, make the matching docs commit NOW; if not, go on."
   fi
 fi
 
