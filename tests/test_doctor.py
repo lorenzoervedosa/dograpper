@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from dograpper.cli import cli
+from dograpper.commands import doctor as doctor_mod
 
 
 def _make_executable(path: Path) -> None:
@@ -265,3 +266,43 @@ def test_doctor_install_lock_concurrency(tmp_path, monkeypatch):
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()
+
+
+# ---------------------------------------------------------------------------
+# libasound package name per release (#145) and --install + --check-system-libs (#146)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("os_release,expected", [
+    ('ID=ubuntu\nVERSION_ID="24.04"\n', "libasound2t64"),
+    ('ID=ubuntu\nVERSION_ID="22.04"\n', "libasound2"),
+    ('ID=debian\nVERSION_ID="13"\n', "libasound2t64"),
+    ('ID=debian\nVERSION_ID="12"\n', "libasound2"),
+    ('ID=linuxmint\nVERSION_ID="22"\n', None),
+    ('ID=debian\n', None),
+])
+def test_asound_pkg_follows_the_release(tmp_path, monkeypatch, os_release, expected):
+    f = tmp_path / "os-release"
+    f.write_text(os_release)
+    real_open = open
+    monkeypatch.setattr("builtins.open", lambda p, *a, **k: real_open(f if p == "/etc/os-release" else p, *a, **k))
+    assert doctor_mod._asound_pkg() == expected
+
+
+@pytest.mark.parametrize("asound,shown", [("libasound2t64", "libasound2t64"), ("libasound2", "libasound2")])
+def test_check_system_libs_names_the_release_package(asound, shown):
+    with patch("dograpper.commands.doctor._find_chromium", return_value="/fake/chromium"), \
+         patch("subprocess.check_output", return_value="\tlibasound.so.2 => not found\n"), \
+         patch("dograpper.commands.doctor._detect_distro", return_value="apt"), \
+         patch("dograpper.commands.doctor._asound_pkg", return_value=asound):
+        result = CliRunner().invoke(cli, ["doctor", "--check-system-libs"])
+    assert result.exit_code == 2
+    assert f"sudo apt install -y {shown}\n" in result.output
+
+
+def test_check_system_libs_names_both_when_release_unknown():
+    with patch("dograpper.commands.doctor._find_chromium", return_value="/fake/chromium"), \
+         patch("subprocess.check_output", return_value="\tlibasound.so.2 => not found\n"), \
+         patch("dograpper.commands.doctor._detect_distro", return_value="apt"), \
+         patch("dograpper.commands.doctor._asound_pkg", return_value=None):
+        result = CliRunner().invoke(cli, ["doctor", "--check-system-libs"])
+    assert "libasound2" in result.output and "libasound2t64" in result.output

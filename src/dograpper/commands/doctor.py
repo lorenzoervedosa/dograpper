@@ -107,6 +107,24 @@ def _detect_distro() -> str:
     return "apt"
 
 
+def _asound_pkg() -> str | None:
+    """apt name of libasound for this release: t64 on Ubuntu >= 24.04 / Debian >= 13.
+
+    None when /etc/os-release cannot tell (derivatives, unreadable file).
+    """
+    try:
+        with open("/etc/os-release", errors="replace") as f:
+            kv = dict(l.split("=", 1) for l in f.read().splitlines() if "=" in l)
+        distro = kv.get("ID", "").strip().strip('"').lower()
+        version = float(kv.get("VERSION_ID", "").strip().strip('"'))
+    except (OSError, ValueError):
+        return None
+    cutoff = {"ubuntu": 24.04, "debian": 13.0}.get(distro)
+    if cutoff is None:
+        return None
+    return "libasound2t64" if version >= cutoff else "libasound2"
+
+
 def _install_wget(force: bool) -> bool:
     """Download busybox-wget to USER_BIN_DIR/wget. Returns True if installed."""
     dest = USER_BIN_DIR / "wget"
@@ -228,6 +246,14 @@ def doctor(do_install: bool, force: bool, check_system_libs: bool) -> None:
             sys.exit(0)
 
         pkg_manager = _detect_distro()
+        note = ""
+        if pkg_manager == "apt" and "libasound2" in missing_libs:
+            asound = _asound_pkg()
+            if asound:
+                missing_libs[missing_libs.index("libasound2")] = asound
+            else:
+                note = ("\nNote: libasound2 is named libasound2t64 on Ubuntu 24.04+ / "
+                        "Debian 13+; use the one your release ships.")
         if pkg_manager == "apt":
             cmd = f"sudo apt install -y {' '.join(missing_libs)}"
         elif pkg_manager == "dnf":
@@ -235,7 +261,7 @@ def doctor(do_install: bool, force: bool, check_system_libs: bool) -> None:
         else:
             cmd = f"sudo pacman -S {' '.join(missing_libs)}"
 
-        click.echo(f"Missing system libraries detected. Run:\n  {cmd}")
+        click.echo(f"Missing system libraries detected. Run:\n  {cmd}{note}")
         sys.exit(2)
 
     if do_install:

@@ -247,6 +247,10 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `doctor --check-system-libs` suggests `libasound2t64` on Ubuntu 24.04+ / Debian 13+
+  and `libasound2` on older releases, as the README lists them; where
+  `/etc/os-release` cannot tell, it keeps `libasound2` and adds a note naming the
+  `t64` package (#145).
 - `download --help` and `sync --help`: `--depth` now says what it limits in each
   case (link hops for the wget, Playwright and httrack crawls; extra path segments
   below the start URL for llms.txt and sitemap URL lists) (#140).

@@ -133,7 +133,9 @@ sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
 ```
 
 On Ubuntu 22.04 / Debian 12 and older the package is called `libasound2`
-(without the `t64` suffix).
+(without the `t64` suffix). `doctor --check-system-libs` reads
+`/etc/os-release` and prints the name of your release; on a derivative it
+cannot classify, it prints `libasound2` and a note about the `t64` name.
 
 ---
 
