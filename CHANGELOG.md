@@ -247,6 +247,9 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `doctor --check-system-libs --install` no longer drops `--install`: the install
+  runs first, then the library check, so a machine without chromium no longer
+  exits 3 asking for the `--install` that was passed (#146).
 - `doctor --check-system-libs` suggests `libasound2t64` on Ubuntu 24.04+ / Debian 13+
   and `libasound2` on older releases, as the README lists them; where
   `/etc/os-release` cannot tell, it keeps `libasound2` and adds a note naming the

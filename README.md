@@ -184,7 +184,7 @@ dograpper doctor [options]
 |---|---|---|
 | `--install` | `false` | Download and install missing dependencies (wget, chromium) |
 | `--force` | `false` | Re-install even if already present |
-| `--check-system-libs` | `false` | Diagnose missing chromium system libraries via `ldd`; suggests the install command |
+| `--check-system-libs` | `false` | Diagnose missing chromium system libraries via `ldd`; suggests the install command. Combined with `--install`, the install runs first and the check after it |
 
 Without flags, prints a status table (`WGET`/`CHROMIUM`, path, version) and
 exits 0 if both are present, 1 if either is missing.
@@ -198,6 +198,7 @@ dograpper doctor
 dograpper doctor --install
 dograpper doctor --install --force
 dograpper doctor --check-system-libs
+dograpper doctor --install --check-system-libs   # install, then check
 ```
 
 ### `dograpper download`
@@ -1615,7 +1616,7 @@ Stop the server with Ctrl+C.
 | 2 | init | `--yes` without `--target`, or `--skill-dir` with a target other than `claude-code` | add `--target`; drop `--skill-dir` |
 | 1 | docs | the port is in use | pick another `--port` |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
-| 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
+| 3 | doctor --check-system-libs | chromium not installed (with `--install`, the install ran first and did not leave one) | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
 | 10 | install.sh | SHA256 mismatch | retry install, report issue |
 | 20 | install.sh | unsupported architecture | — |

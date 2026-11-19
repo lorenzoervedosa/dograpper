@@ -306,3 +306,14 @@ def test_check_system_libs_names_both_when_release_unknown():
          patch("dograpper.commands.doctor._asound_pkg", return_value=None):
         result = CliRunner().invoke(cli, ["doctor", "--check-system-libs"])
     assert "libasound2" in result.output and "libasound2t64" in result.output
+
+
+def test_install_runs_before_check_system_libs(tmp_path, monkeypatch):
+    monkeypatch.setattr("dograpper.commands.doctor.USER_BIN_DIR", tmp_path / "bin")
+    monkeypatch.setattr("dograpper.commands.doctor.ensure_dirs", lambda: (tmp_path / "bin").mkdir(exist_ok=True))
+    calls = []
+    with patch("dograpper.commands.doctor._run_install", side_effect=lambda f: calls.append("install")), \
+         patch("dograpper.commands.doctor._find_chromium", side_effect=lambda: calls.append("check") or None):
+        result = CliRunner().invoke(cli, ["doctor", "--install", "--check-system-libs"])
+    assert calls == ["install", "check"]
+    assert result.exit_code == 3

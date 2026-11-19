@@ -189,13 +189,49 @@ def _install_chromium() -> None:
                     f.chmod(f.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _run_install(force: bool) -> None:
+    """Install the missing wget/chromium under a lock."""
+    ensure_dirs()
+    lock_path = USER_BIN_DIR / ".lock"
+    try:
+        lock_fd = open(lock_path, "w")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        click.echo("another doctor --install in progress", err=True)
+        sys.exit(4)
+
+    try:
+        wget_path, _ = _get_wget_info()
+        wget_missing = wget_path == "MISSING"
+        chromium_path = _find_chromium()
+        chromium_missing = chromium_path is None
+
+        if not wget_missing and not chromium_missing and not force:
+            click.echo("ok, nothing to do")
+            return
+
+        if wget_missing or force:
+            _install_wget(force)
+
+        if chromium_missing or force:
+            click.echo("Installing chromium via playwright...")
+            _install_chromium()
+            click.echo("chromium installed.")
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
+        except Exception:
+            pass
+
+
 @click.command("doctor")
 @click.option("--install", "do_install", is_flag=True, default=False,
               help="Download and install the missing dependencies into DOGRAPPER_HOME instead of only reporting them.")
 @click.option("--force", is_flag=True, default=False,
               help="With --install, reinstall dependencies that are already present.")
 @click.option("--check-system-libs", "check_system_libs", is_flag=True, default=False,
-              help="Check system libraries required by chromium and suggest install command.")
+              help="Check system libraries required by chromium and suggest install command. With --install, the install runs first and the check after it.")
 def doctor(do_install: bool, force: bool, check_system_libs: bool) -> None:
     """Detect, report, and install heavy dependencies (wget, chromium).
 
@@ -207,7 +243,11 @@ def doctor(do_install: bool, force: bool, check_system_libs: bool) -> None:
       dograpper doctor --install
       dograpper doctor --install --force
       dograpper doctor --check-system-libs
+      dograpper doctor --install --check-system-libs
     """
+    if do_install:
+        _run_install(force)
+
     if check_system_libs:
         chromium_path = _find_chromium()
         if not chromium_path:
@@ -265,38 +305,6 @@ def doctor(do_install: bool, force: bool, check_system_libs: bool) -> None:
         sys.exit(2)
 
     if do_install:
-        ensure_dirs()
-        lock_path = USER_BIN_DIR / ".lock"
-        try:
-            lock_fd = open(lock_path, "w")
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            click.echo("another doctor --install in progress", err=True)
-            sys.exit(4)
-
-        try:
-            wget_path, _ = _get_wget_info()
-            wget_missing = wget_path == "MISSING"
-            chromium_path = _find_chromium()
-            chromium_missing = chromium_path is None
-
-            if not wget_missing and not chromium_missing and not force:
-                click.echo("ok, nothing to do")
-                return
-
-            if wget_missing or force:
-                _install_wget(force)
-
-            if chromium_missing or force:
-                click.echo("Installing chromium via playwright...")
-                _install_chromium()
-                click.echo("chromium installed.")
-        finally:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                lock_fd.close()
-            except Exception:
-                pass
         return
 
     # Default: status table
