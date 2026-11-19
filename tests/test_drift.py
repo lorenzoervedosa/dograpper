@@ -489,3 +489,15 @@ def test_drift_cli_delta_manifest_not_a_dict_errors():
         assert result.exit_code == 1
         assert "delta.json" in result.output
         assert "Traceback" not in result.output
+
+
+def test_drift_cli_output_unwritable_is_one_line_error():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_json("new.json", NEW)
+        open("blocker", "w").close()  # a file where the parent directory should be
+        result = runner.invoke(cli, ["drift", "--new", "new.json", "-o", "blocker/x.md"])
+        assert result.exit_code == 1
+        assert "cannot write blocker/x.md" in result.output
+        assert "Traceback" not in result.output
+        assert isinstance(result.exception, SystemExit)

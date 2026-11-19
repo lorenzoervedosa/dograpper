@@ -32,3 +32,10 @@ Entradas abaixo, uma seção `##` por termo.
 **Onde apareceu:** o perfil `httrack` passou a pôr no arquivo salvo a data `Last-Modified` do servidor, como o HTTrack (#132, 2026-11-18); por isso o `pack --delta` passou a decidir pelo hash do conteúdo, não pela data.
 **Por que importa pra decisão:** atalho por data é rápido mas falha quando a data não acompanha o conteúdo; comparar o hash custa ler o arquivo, e é o que garante não perder nem inventar mudança.
 **Nível:** 🆕 novo
+
+## Low-speed limit do libcurl (`LOW_SPEED_LIMIT` / `LOW_SPEED_TIME`)
+**Em uma frase:** o jeito do curl desistir de uma conexão parada: se a taxa ficar abaixo de X bytes/s por Y segundos, ele aborta (`curl: (28) Operation too slow`); só que ele mede a taxa em "fotos" de 1 s, então um byte que acabou de chegar só conta na foto seguinte.
+**Analogia:** um fiscal que olha a esteira uma vez por segundo: se olhou um instante antes de a caixa passar, anota "nada passou" e pode parar uma fábrica que estava funcionando.
+**Onde apareceu:** `--timeout` do perfil `--downloader fire-engine` (#154, 2026-11-19): com `LOW_SPEED_TIME` igual ao `--timeout`, transferências vivas abortavam; a janela passou a ser `--timeout` + 1 s.
+**Por que importa pra decisão:** ele não reproduz o timeout de socket da stdlib (que zera a cada byte recebido): ou se aceita abortar conexão viva, ou se aceita esperar mais por um servidor morto; aqui a escolha foi esperar mais.
+**Nível:** 🆕 novo

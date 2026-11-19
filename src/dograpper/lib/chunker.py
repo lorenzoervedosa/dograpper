@@ -222,8 +222,12 @@ def balance_chunks(chunks: List[Chunk], target_chunks: int, max_words: int) -> L
 
 
 def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
-                          total_words: int, heading_map: Dict = None) -> str:
-    """Generate IMPORT_GUIDE.md with upload instructions for the preset."""
+                          total_words: int, heading_map: Dict = None,
+                          prefix: str = "docs_chunk_", fmt: str = "md") -> str:
+    """Generate IMPORT_GUIDE.md with upload instructions for the preset.
+
+    ``prefix`` and ``fmt`` are the run's, so the guide lists the files write_chunks wrote.
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     lines = []
@@ -240,7 +244,7 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
         lines.append("|---|------|-------|----------------|")
 
         for c in chunks:
-            chunk_name = f"docs_chunk_{format_chunk_index(c.index, len(chunks))}.md"
+            chunk_name = f"{chunk_id(prefix, c, len(chunks))}.{fmt}"
             words_fmt = f"{c.total_words:,}"
 
             # Derive section from heading_map or directory
@@ -273,7 +277,7 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
         lines.append("|---|------|-------|----------------|")
 
         for c in chunks:
-            chunk_name = f"docs_chunk_{format_chunk_index(c.index, len(chunks))}.md"
+            chunk_name = f"{chunk_id(prefix, c, len(chunks))}.{fmt}"
             words_fmt = f"{c.total_words:,}"
             section = ""
             if c.files:
@@ -650,11 +654,7 @@ def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: st
         out_filepath = os.path.join(output_dir, out_filename)
         generated_paths.append(out_filepath)
 
-        if fmt == "xml":
-            raise ValueError(
-                "XML format is deprecated. Use 'md' (default) or 'jsonl'."
-            )
-        elif fmt == "jsonl":
+        if fmt == "jsonl":
             _write_chunk_jsonl(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate, api_records=api_records, page_meta=page_meta)
         elif fmt == "txt":
             _write_chunk_text(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate, page_meta=page_meta)

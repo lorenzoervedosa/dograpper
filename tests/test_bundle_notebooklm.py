@@ -230,3 +230,37 @@ class TestBundleCLI:
             assert os.path.exists(guide_path)
             content = open(guide_path).read()
             assert "Audio Overview" not in content
+
+
+class TestImportGuideNames:
+    """IMPORT_GUIDE.md lists the files the run wrote (#143)."""
+
+    @staticmethod
+    def _pack(tmp_path, *extra):
+        src = tmp_path / "in"
+        src.mkdir()
+        (src / "a.md").write_text("alpha " * 20)
+        out = tmp_path / "out"
+        result = CliRunner().invoke(pack, [str(src), "-o", str(out), "--bundle", "notebooklm", *extra])
+        assert result.exit_code == 0, result.output
+        return out
+
+    def test_default_run_keeps_the_default_names(self, tmp_path):
+        out = self._pack(tmp_path)
+        assert "| 1 | docs_chunk_01.md |" in (out / "IMPORT_GUIDE.md").read_text()
+
+    def test_custom_prefix_and_format(self, tmp_path):
+        for fmt in ("jsonl", "txt"):
+            sub = tmp_path / fmt
+            sub.mkdir()
+            out = self._pack(sub, "--format", fmt, "--prefix", "foo_")
+            guide = (out / "IMPORT_GUIDE.md").read_text()
+            written = sorted(p.name for p in out.glob(f"foo_*.{fmt}"))
+            assert written == [f"foo_01.{fmt}"]
+            assert f"| 1 | foo_01.{fmt} |" in guide
+            assert "docs_chunk_" not in guide
+
+    def test_rag_standard_guide_uses_run_names(self, tmp_path):
+        chunks = [Chunk(index=1, files=[ChunkFile("a.html", 10)], total_words=10)]
+        path = generate_import_guide(chunks, str(tmp_path), "rag-standard", 10, prefix="p_", fmt="jsonl")
+        assert "| 1 | p_01.jsonl |" in open(path).read()

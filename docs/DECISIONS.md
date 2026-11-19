@@ -22,6 +22,29 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-19 — fire-engine low-speed window is `--timeout` + 1 s (#154)
+
+- **Decision:** the fix for the flaky
+  `test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout` goes in
+  `lib/fire_engine/fetcher.py`, not in the test: `LOW_SPEED_TIME` is
+  `ceil(--timeout) + 1`, and a second smoke test pins a 1.5 s silence passing
+  `--timeout 2`.
+- **Why:** the issue's open question, answered by measurement (curl_cffi
+  0.17.0, libcurl 8.23.0): it is not test margin. libcurl recomputes the rate
+  only when it takes a new one-second record, so a received byte reaches the
+  low-speed check up to a second late. With `LOW_SPEED_TIME` 1, a body
+  streaming 100 bytes every 50 ms aborted 6/25 times at 1.0 s (stdlib path
+  0/25), with no CPU load needed; with `LOW_SPEED_TIME` 2, a body whose first
+  byte came at 1.5 s and was still arriving at 2 s aborted 9/10 times. With the
+  extra second: 0/25 and 0/30; the issue's test under 4 CPU-bound processes
+  went from 5/30 to 0/30.
+- **Rejected:** widening the test's gap/timeout ratio (hides a false abort
+  that `--timeout 1` users hit about one transfer in five);
+  `max(2, ceil(--timeout))` (removes the one-second case, keeps the late first
+  byte at every `--timeout`); an exact idle timer (needs `XFERINFOFUNCTION`,
+  which curl_cffi does not expose; see `docs/DEBT.md`).
+- **Pending:** none.
+
 ## 2026-11-18 — Root CLAUDE.md split into nested files
 
 - **Decision:** the module tree, the "Arquivos de contexto" rows and

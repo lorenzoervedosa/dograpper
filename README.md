@@ -133,7 +133,9 @@ sudo apt install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
 ```
 
 On Ubuntu 22.04 / Debian 12 and older the package is called `libasound2`
-(without the `t64` suffix).
+(without the `t64` suffix). `doctor --check-system-libs` reads
+`/etc/os-release` and prints the name of your release; on a derivative it
+cannot classify, it prints `libasound2` and a note about the `t64` name.
 
 ---
 
@@ -182,7 +184,7 @@ dograpper doctor [options]
 |---|---|---|
 | `--install` | `false` | Download and install missing dependencies (wget, chromium) |
 | `--force` | `false` | Re-install even if already present |
-| `--check-system-libs` | `false` | Diagnose missing chromium system libraries via `ldd`; suggests the install command |
+| `--check-system-libs` | `false` | Diagnose missing chromium system libraries via `ldd`; suggests the install command. Combined with `--install`, the install runs first and the check after it |
 
 Without flags, prints a status table (`WGET`/`CHROMIUM`, path, version) and
 exits 0 if both are present, 1 if either is missing.
@@ -196,6 +198,7 @@ dograpper doctor
 dograpper doctor --install
 dograpper doctor --install --force
 dograpper doctor --check-system-libs
+dograpper doctor --install --check-system-libs   # install, then check
 ```
 
 ### `dograpper download`
@@ -535,7 +538,7 @@ again: a missing one is created empty, and its URL is listed under `Errors` as
 stylesheet is fetched again in full (HTTrack restores it from the body its
 cache holds).
 
-`[httrack]` flags (an error under `--downloader wget` when given on the
+`[httrack, fire-engine]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
 `.dograpper.json` keys get the same type and range checks as the flags, so
 `"no-robots": "false"` means false and `"retries": 1.5` is rejected:
@@ -620,7 +623,7 @@ saved at most one HTML page) ends the run with the same message. Use
 `--downloader fire-engine` runs the `httrack` crawl with its wire client
 replaced by `curl_cffi`, which sends a real browser's TLS/HTTP-2 fingerprint so
 a WAF that checks the handshake (common in front of public docs) accepts the
-request. All `[httrack]` flags above apply, plus:
+request. All `[httrack, fire-engine]` flags above apply, plus:
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -632,7 +635,12 @@ Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
 decoders of the `httrack` extra: curl hands the body over as it came, and the
 profile decodes it with the `httrack` decoder, under the same size and zstd
 window limits. `--timeout` is the time to connect, then the longest silence
-while receiving, as under `httrack`. Without the extra, the
+while receiving, as under `httrack`, but measured by libcurl's low-speed check,
+which counts bytes in one-second records: a silence shorter than `--timeout`
+never aborts the transfer, a server that sends nothing is given up one to two
+seconds after `--timeout` (rounded up to whole seconds), and a silence after
+data has arrived can run up to about nine seconds longer, since libcurl
+averages the rate over its last few records. Without the extra, the
 profile fails loud with an install hint; the release binary does not bundle
 this extra, so `fire-engine` needs a source install. `--headless` is rejected
 (the profile has its own transport), and a result that looks client-rendered
@@ -749,11 +757,11 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--include-extensions` | — | `html,htm,md,txt` | Extensions packed as documentation (csv). Other files are skipped and counted by extension in the summary. `robots.txt` and dograpper's own manifests are always skipped |
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
-| `--format` | — | `md` | Output format: `md` (Markdown: `#` headings, `[text](target)` links, `-` / `N.` lists, pipe tables, fenced code; see [Markdown structure](#markdown-structure-md)), `txt` (plain text), `jsonl` (plain text records), `xml` (deprecated — errors, use `md`) |
+| `--format` | — | `md` | Output format: `md` (Markdown: `#` headings, `[text](target)` links, `-` / `N.` lists, pipe tables, fenced code; see [Markdown structure](#markdown-structure-md)), `txt` (plain text), `jsonl` (plain text records) |
 | `--layout` | — | `chunk` | `chunk`: numbered chunk files. `page`: one file per page under `pages/` plus `INDEX.md` (see [Page layout](#page-layout---layout-page)) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
-| `--token-encoding` | — | `cl100k` | Tokenizer encoding: `cl100k`, `o200k`, `p50k` |
+| `--token-encoding` | — | `cl100k` | Tokenizer encoding: `cl100k`, `o200k`, `p50k` or a full tiktoken name; an unknown one is a usage error (exit 2) |
 | `--dry-run` | — | `false` | Simulate pack without writing; prints report |
 | `--dedup` | — | `off` | Block deduplication: `off`, `exact`, `fuzzy`, `both` |
 | `--dedup-threshold` | — | `3` | Maximum Hamming distance for fuzzy dedup (0-10) |
@@ -1351,12 +1359,12 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
+| `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
 | `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |
-| `--format` | — | `md` | `txt` \| `md` \| `jsonl` \| `xml` (deprecated) (passed to `pack`) |
+| `--format` | — | `md` | `txt` \| `md` \| `jsonl` (passed to `pack`) |
 | `--layout` | — | `chunk` | `chunk` \| `page` (passed to `pack`) |
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |
@@ -1598,14 +1606,15 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl, refused/challenged; `--headless`; a result that looks client-rendered; `fire-engine` without its extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | a `[httrack]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
 | 2 | pack --api-records | `--format` other than `jsonl`, or `--bundle notebooklm` | use `--format jsonl`; drop the bundle |
-| 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge or saved error page; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run`; `--format xml` (deprecated) | fix the input or the flags |
+| 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge or saved error page; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run` | fix the input or the flags |
 | 1 | download | the manifest cannot be written | fix permissions or free space in `--output`; the mirror itself is complete |
 | 1 | pack --delta | `pack_state.json` cannot be written | fix permissions or free space in `--output`; the chunks are complete, the next `--delta` run packs in full |
+| 2 | pack | `--dedup-threshold` outside 0 to 10, or an unknown `--token-encoding` (command line or config) | use a value in range; `cl100k`, `o200k`, `p50k` or a full tiktoken name |
 | 2 | pack | `--output` is the same directory as `INPUT_DIR` | use a subdirectory or another path |
 | 1 | explain / eval / serve | no chunk file matches `--prefix` (JSONL for `eval` and `serve`); `explain`: unknown chunk id; `eval`: no record carries a heading breadcrumb | re-run `pack` with the format and flags the command needs |
 | 1 | drift | a snapshot or the delta manifest is unreadable or malformed; with `--fail-on-drift`, drift was found | fix the file; with `--fail-on-drift` the exit is the signal asked for |
@@ -1613,7 +1622,7 @@ Stop the server with Ctrl+C.
 | 2 | init | `--yes` without `--target`, or `--skill-dir` with a target other than `claude-code` | add `--target`; drop `--skill-dir` |
 | 1 | docs | the port is in use | pick another `--port` |
 | 2 | doctor --check-system-libs | system libs missing | run suggested `apt install ...` |
-| 3 | doctor --check-system-libs | chromium not installed | run `dograpper doctor --install` |
+| 3 | doctor --check-system-libs | chromium not installed (with `--install`, the install ran first and did not leave one) | run `dograpper doctor --install` |
 | 4 | doctor --install | concurrent install lock held | wait for other install, retry |
 | 10 | install.sh | SHA256 mismatch | retry install, report issue |
 | 20 | install.sh | unsupported architecture | — |

@@ -20,6 +20,20 @@ logger = logging.getLogger(__name__)
 # would report "nothing changed" on the very run that needs packing.
 PACK_STATE_FILENAME = "pack_state.json"
 
+FORMATS = ['txt', 'md', 'jsonl']
+
+
+def _validate_values(dedup_threshold, token_encoding):
+    """Range checks for values that can arrive from .dograpper.json, where click's own checks do not run."""
+    if not isinstance(dedup_threshold, int) or isinstance(dedup_threshold, bool) or not 0 <= dedup_threshold <= 10:
+        raise click.UsageError(
+            f"Invalid value for --dedup-threshold: {dedup_threshold} is not an integer in the range 0 to 10.")
+    from ..utils.token_counter import check_encoding
+    try:
+        check_encoding(token_encoding)
+    except ValueError as e:
+        raise click.UsageError(f"Invalid value for --token-encoding: {e}")
+
 
 def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
                     is_dry_run, is_score, api_records, bundle_preset):
@@ -35,10 +49,9 @@ def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
         raise click.UsageError(
             "--api-records cannot be combined with --bundle notebooklm, which shapes "
             "whole pages into NotebookLM sources")
-    if fmt == 'xml':
-        raise click.ClickException(
-            "XML format is deprecated since v1.x. Use 'md' (default) or 'jsonl'."
-        )
+    if fmt not in FORMATS:
+        raise click.UsageError(
+            f"Invalid value for --format: {fmt!r} is not one of {', '.join(FORMATS)}.")
 
     query_list = None
     if for_queries_path:
@@ -137,8 +150,8 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Filename prefix of every chunk file (default docs_chunk_ gives docs_chunk_01.md). explain, serve and eval look chunks up by this prefix.")
 @click.option('--with-index/--no-index', default=True, show_default=True,
               help="Put a list of the source files in the header of each chunk (default). --no-index leaves the list out.")
-@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True,
-              help="Chunk output format. 'xml' is deprecated.")
+@click.option('--format', type=click.Choice(FORMATS), default='md', show_default=True,
+              help="Chunk output format.")
 @click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
               help="chunk: numbered chunk files. page: one md/txt file per page "
                    "under pages/, mirroring INPUT_DIR, plus INDEX.md.")
@@ -147,7 +160,7 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--show-tokens', is_flag=True, default=False,
               help="Show per-chunk and total token count in the final summary.")
 @click.option('--token-encoding', type=str, default="cl100k", show_default=True,
-              help="Tokenizer encoding (cl100k, o200k, p50k). Requires --show-tokens.")
+              help="Tokenizer encoding (cl100k, o200k, p50k, or a full tiktoken name); an unknown name is a usage error. Requires --show-tokens.")
 @click.option('--dry-run', is_flag=True, default=False,
               help="Run the whole pipeline but write no files; print the compression report and the projected chunks instead.")
 @click.option('--dedup', type=click.Choice(['off', 'exact', 'fuzzy', 'both'], case_sensitive=False),
@@ -155,7 +168,7 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Cross-file block deduplication. "
                    "'exact' removes identical blocks, 'fuzzy' removes near-identical ones, "
                    "'both' applies both.")
-@click.option('--dedup-threshold', type=int, default=3, show_default=True,
+@click.option('--dedup-threshold', type=click.IntRange(0, 10), default=3, show_default=True,
               help="Maximum Hamming distance for fuzzy dedup (0-10). Lower = more conservative.")
 @click.option('--context-header', is_flag=True, default=False,
               help="Inject a context header (source, heading breadcrumb) "
@@ -192,8 +205,9 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
 @click.option('--api-records', is_flag=True, default=False,
-              help="Split API reference pages (Javadoc) into one container record "
-                   "and one record per member. Requires --format jsonl.")
+              help="Split API reference pages into one container record and one "
+                   "record per member, for the documentation generators listed in "
+                   "the README ('API reference records'). Requires --format jsonl.")
 @click.pass_context
 def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, layout: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool, api_records: bool):
     """Process and group files into chunks optimized for LLM ingestion.
@@ -284,6 +298,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     for_queries_path = merged_params.get('for_queries', for_queries)
     is_report = merged_params.get('report', report)
     is_api_records = merged_params.get('api_records', api_records)
+
+    # 2-pre. Config values click never saw: same errors as the command line
+    _validate_values(dedup_thresh, t_encoding)
 
     # 2a. Page layout (ADR-0010): reject chunk-only settings, never touch a pages/ we did not write
     if page_layout:
@@ -709,7 +726,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         total_words_for_guide = sum(c.total_words for c in chunks)
         guide_path = generate_import_guide(
             chunks, output_dir, bundle_preset, total_words_for_guide,
-            heading_map=heading_map
+            heading_map=heading_map, prefix=pref, fmt=fmt
         )
 
     # 10d. LLM Readiness — write JSON (scoring already done in step 9c)
