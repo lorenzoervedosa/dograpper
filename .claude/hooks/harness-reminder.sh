@@ -14,6 +14,7 @@ except Exception:
     pass' 2>/dev/null) || exit 0
 
 case "$file" in
+  */CLAUDE.md) exit 0 ;;  # a nested CLAUDE.md is the doc, not the contract (commands/, lib/httrack/ ...)
   *src/dograpper/utils/heading_extractor.py|*src/dograpper/lib/chunker.py|*src/dograpper/utils/api_reference/*)
     docs="docs/schema-v1.md (dograpper-context-v1 header and JSONL record fields) and README.md" ;;
   *src/dograpper/lib/config_loader.py|*src/dograpper/commands/sync.py)
@@ -32,7 +33,7 @@ case "$file" in
 esac
 
 rel=${file#"${CLAUDE_PROJECT_DIR:-}"/}
-msg="Harness: you edited $rel, which carries a project contract. Before committing, evaluate $docs, plus docs/adr/, docs/DECISIONS.md, docs/DEBT.md and CLAUDE.md (section \"Manutenção do harness\"). If none needs a change, say why and go on."
+msg="Harness: you edited $rel, which carries a project contract. Before committing, evaluate $docs, plus docs/adr/, docs/DECISIONS.md, docs/DEBT.md, the nearest CLAUDE.md above the file (its tree line and context-file rows) and the root CLAUDE.md (section \"Manutenção do harness\"). If none needs a change, say why and go on."
 python3 -c 'import json, sys
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": sys.argv[1]}}))' "$msg" 2>/dev/null
 exit 0

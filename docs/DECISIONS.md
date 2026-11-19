@@ -22,6 +22,54 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — Root CLAUDE.md split into nested files
+
+- **Decision:** the module tree, the "Arquivos de contexto" rows and
+  "Comandos úteis" move verbatim into nested CLAUDE.md files under
+  `src/dograpper/{,commands,lib,lib/httrack,lib/fire_engine,utils}/` and
+  `tests/`. The root keeps the contracts (numbering unchanged), gates,
+  parallel-session flow, harness maintenance, environment pitfalls, the rows
+  about root files and one pointer per nested file. A row goes to the lowest
+  directory that holds all the code it protects, so the 33 rows that span
+  directories sit in `src/dograpper/CLAUDE.md`.
+- **Why:** measured with `claude -p "/context"`. The root cost 29.1k tokens in
+  every session (cl100k said 19.0k: Claude's tokenizer counts this text about
+  1.5× higher). A session in `.claude/worktrees/<name>` loads only the
+  worktree's copy, not the main checkout's as an ancestor. A probe with
+  marker files showed that a nested file loads on the first Read (or Edit)
+  of a file below it, together with those of the directories in between.
+  Grep does not load it, and after compaction it comes back on the next Read,
+  so anything that must hold for the whole session stays in the root. After
+  the split the root measures 8.9k. Reading code in one area adds about
+  2.5–3.7k per nested file, and tests/ adds 6.2k. A session that reads every
+  directory costs about 31k, 2k more than before. sdist, wheel and the
+  PyInstaller binary built with nested CLAUDE.md files present ship none of
+  them. Probes outside the project directory (for example the scratchpad) load
+  no project CLAUDE.md at all, so measure inside `.claude/worktrees/`.
+- **Rejected:**
+  - Spanning rows only in their main directory: an edit of
+    `commands/pack.py` would miss the dedup row.
+  - Spanning rows at the root: +2.4k in every session.
+  - `.claude/rules/` with `paths:`: a second mechanism, not tried.
+  - `claudeMdExcludes`: there is no double load to exclude.
+- **Pending:** none.
+
+## 2026-11-18 — Existing text keeps its words (#153)
+
+Supersedes the "Pending" of the entry below.
+
+- **Decision:** the confirmed glossary terms are not applied to text and
+  identifiers that already exist. The README section "Downloader profiles",
+  the `[httrack]` help labels, `PROFILE_OPTIONS` / `run_profile` and the
+  `Files skipped: N (cached)` summary line keep their words; new text uses
+  the terms.
+- **Why:** the maintainer decided it when asked, after #153 was merged.
+  Renaming the summary line or the help labels is an observable change, and
+  renaming identifiers changes no behaviour.
+- **Rejected:** a rename pass over the README, the help labels and the
+  identifiers.
+- **Pending:** none.
+
 ## 2026-11-18 — Glossary terms confirmed by the maintainer (#138)
 
 Supersedes the "Pending" of the entry below.
