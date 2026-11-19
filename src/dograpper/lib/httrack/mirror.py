@@ -88,12 +88,26 @@ def _kept_links(read, url: str, path: str, root: str, url_of: dict[str, str],
     return links
 
 
-def _start_rule(url: str) -> UrlFilters:
+def start_rule(url: str) -> UrlFilters:
     """HTTrack's implicit first rule, +<host>/<directory of url>* (htswizard.c), as
     wget_mirror.url_filter_args first wrote it: /docs/a.html -> /docs/, /docs -> /."""
     parts = urlsplit(url)
     directory = parts.path[:parts.path.rfind("/") + 1] or "/"
     return UrlFilters([f"+{parts.netloc.rpartition('@')[2]}{directory}*"])
+
+
+def outside(u: str, start: str, rule: UrlFilters, filters: UrlFilters | None) -> str | None:
+    """Why `u` is out of the crawl scope of `start` ("host" | "cdn-cgi" | "rule" |
+    "directory") or None: the start host, never /cdn-cgi/, then --filter, whose verdict
+    beats `rule` (start_rule of the start URL, or of where it was re-based)."""
+    if urlsplit(u).scheme not in ("http", "https") or not same_host(start, u):
+        return "host"
+    if urlsplit(u).path.startswith("/cdn-cgi/"):
+        return "cdn-cgi"
+    verdict = filters.decide(u) if filters is not None else None
+    if verdict is False:
+        return "rule"
+    return "directory" if verdict is None and not rule.decide(u) else None
 
 
 def _skipped_by_extension(url: str, exts: set) -> bool:
@@ -124,7 +138,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
     exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
     report, lock = RunReport(), threading.Lock()
-    scope = [_start_rule(url)]
+    scope = [start_rule(url)]
     own, carry = _revalidates(prev.get(url_key(url)), None, False)
     queue = [_Entry(url, 0, front=True, prev=own, carry=carry)]
     entry_of = {url_key(url): url}       # url_key -> URL queued for it
@@ -136,17 +150,6 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     progress = ProgressReporter("httrack crawl")
     state = {"bytes": 0, "front_ok": False, "front_failed": False}
 
-    def outside(u: str) -> str | None:
-        """Why `u` is out of scope ("host" | "cdn-cgi" | "rule" | "directory") or None."""
-        if urlsplit(u).scheme not in ("http", "https") or not same_host(url, u):
-            return "host"
-        if urlsplit(u).path.startswith("/cdn-cgi/"):
-            return "cdn-cgi"
-        verdict = filters.decide(u) if filters is not None else None
-        if verdict is False:
-            return "rule"
-        return "directory" if verdict is None and not scope[0].decide(u) else None
-
     def enqueue(u: str, *, hop: int, referer: str | None, meta: FetchMeta,
                 front: bool = False, redirects: int = 0, initiator: str | None = None,
                 carried: Previous | None = None) -> str:
@@ -156,11 +159,11 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         if k in entry_of:
             return "known"
         entry_of[k] = u
-        why = outside(u)
+        why = outside(u, url, scope[0], filters)
         if why == "directory" and front:  # deviation (spec 5.5): re-base, not an empty mirror
             logger.info("start URL redirected to %s; the crawl scope follows it",
                         redact_url(u))
-            scope[0], why = _start_rule(u), None
+            scope[0], why = start_rule(u), None
         if why == "rule":
             return "refused"
         if why is not None:
