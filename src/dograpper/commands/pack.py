@@ -23,6 +23,13 @@ PACK_STATE_FILENAME = "pack_state.json"
 FORMATS = ['txt', 'md', 'jsonl']
 
 
+def _validate_values(dedup_threshold):
+    """Range checks for values that can arrive from .dograpper.json, where click's own checks do not run."""
+    if not 0 <= dedup_threshold <= 10:
+        raise click.UsageError(
+            f"Invalid value for --dedup-threshold: {dedup_threshold} is not in the range 0 to 10.")
+
+
 def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
                     is_dry_run, is_score, api_records, bundle_preset):
     """Reject unusable flag combinations before any file is read.
@@ -156,7 +163,7 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Cross-file block deduplication. "
                    "'exact' removes identical blocks, 'fuzzy' removes near-identical ones, "
                    "'both' applies both.")
-@click.option('--dedup-threshold', type=int, default=3, show_default=True,
+@click.option('--dedup-threshold', type=click.IntRange(0, 10), default=3, show_default=True,
               help="Maximum Hamming distance for fuzzy dedup (0-10). Lower = more conservative.")
 @click.option('--context-header', is_flag=True, default=False,
               help="Inject a context header (source, heading breadcrumb) "
@@ -286,6 +293,9 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     for_queries_path = merged_params.get('for_queries', for_queries)
     is_report = merged_params.get('report', report)
     is_api_records = merged_params.get('api_records', api_records)
+
+    # 2-pre. Config values click never saw: same errors as the command line
+    _validate_values(dedup_thresh)
 
     # 2a. Page layout (ADR-0010): reject chunk-only settings, never touch a pages/ we did not write
     if page_layout:
