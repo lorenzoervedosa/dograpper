@@ -684,7 +684,7 @@ class TestDedupThresholdRange:
             assert "0<=x<=10" in result.output.replace(" ", "")
             assert not os.path.exists(out)
 
-    @pytest.mark.parametrize("value", [99, -5])
+    @pytest.mark.parametrize("value", [99, -5, "x", 2.5])
     def test_config_out_of_range(self, value):
         import json
         from dograpper.cli import cli

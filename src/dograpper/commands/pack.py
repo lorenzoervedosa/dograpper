@@ -25,9 +25,9 @@ FORMATS = ['txt', 'md', 'jsonl']
 
 def _validate_values(dedup_threshold, token_encoding):
     """Range checks for values that can arrive from .dograpper.json, where click's own checks do not run."""
-    if not 0 <= dedup_threshold <= 10:
+    if not isinstance(dedup_threshold, int) or isinstance(dedup_threshold, bool) or not 0 <= dedup_threshold <= 10:
         raise click.UsageError(
-            f"Invalid value for --dedup-threshold: {dedup_threshold} is not in the range 0 to 10.")
+            f"Invalid value for --dedup-threshold: {dedup_threshold} is not an integer in the range 0 to 10.")
     from ..utils.token_counter import check_encoding
     try:
         check_encoding(token_encoding)
