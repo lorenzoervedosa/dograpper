@@ -66,7 +66,7 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     if downloader == 'wget':
         for param in params:
             if param.name not in from_config or values[param.name] != param.default:
-                raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack")
+                raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack or fire-engine")
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     return policy_kw, from_config
 

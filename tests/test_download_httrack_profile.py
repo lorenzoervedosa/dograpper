@@ -107,7 +107,7 @@ def test_default_downloader_is_wget_unchanged(tmp_path):
 def test_profile_options_tuple_matches_download_and_sync():
     from dograpper.commands.sync import sync
     tagged = {p.name for p in download.params
-              if (getattr(p, "help", None) or "").startswith("[httrack]")}
+              if (getattr(p, "help", None) or "").startswith("[httrack, fire-engine]")}
     assert tagged == set(PROFILE_OPTIONS)
     assert set(PROFILE_OPTIONS) <= {p.name for p in sync.params}
 

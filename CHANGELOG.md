@@ -247,6 +247,12 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `download --help` and `sync --help`: `--depth` now says what it limits in each
+  case (link hops for the wget, Playwright and httrack crawls; extra path segments
+  below the start URL for llms.txt and sitemap URL lists) (#140).
+- The `[httrack]` flags are labelled `[httrack, fire-engine]` in the help, and
+  using one under the default downloader now says `requires --downloader httrack
+  or fire-engine`; the `--user-agent` help states its default under each (#149).
 - `pack --delta` no longer reports "no files changed" when a file was rewritten
   with other bytes of the same size and the same modification time, as a
   downloader that stamps files with the server's time can leave it: the
