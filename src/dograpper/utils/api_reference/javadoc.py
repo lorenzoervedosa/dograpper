@@ -144,7 +144,7 @@ def records(html: str, generator: str) -> List[ApiRecord]:
     for inherited in page.inherited:
         heading, *listed = inherited.final() or [""]
         lines.append(f"{heading}: {' '.join(listed)}" if listed else heading)
-    container = ApiRecord(text="\n".join(line for line in lines if line), symbol=qualified,
+    container = ApiRecord(text="\n".join(ln for ln in lines if ln), symbol=qualified,
                           kind="container", symbol_kind=kind, breadcrumb=[qualified],
                           generator=GENERATOR)
     return [container] + members
