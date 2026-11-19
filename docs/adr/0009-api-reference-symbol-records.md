@@ -87,6 +87,7 @@ The member-record p99 bound in the acceptance bar is now set per generator:
 |---|---|
 | Javadoc | ≤ 100 words |
 | Sphinx autodoc | ≤ 300 words |
+| rustdoc | ≤ 300 words |
 
 Every other criterion still applies to every generator:
 
@@ -115,3 +116,39 @@ evidence for that bound:
 
 - the measured size distribution on its acceptance corpus;
 - the lookup results showing that the bound does not hurt retrieval.
+
+## Amendment (2026-11-19): rustdoc
+
+The rustdoc adapter ([#75](https://github.com/lorenzoervedosa/dograpper/issues/75),
+phase 3) reads rustdoc 1.96 pages only: rustdoc's markup changes between
+releases, so a page whose `data-rustdoc-version` is another one keeps one
+record. rustdoc writes one page per symbol, so two points of the decision
+read differently for it:
+
+- **Pages with no container.** A function, constant, static or macro page
+  documents one member and nothing else. Its one record is a member record,
+  with the page's own id `NN_path` (decision 5 gives that id to a page's main
+  container) and `container` set to the module.
+- **Implementations.** A container record keeps the `impl` headers of its
+  trait implementations, auto trait implementations and, on a trait page,
+  implementations on foreign types and implementors. This is rustdoc's form
+  of the implemented interfaces in decision 4. The members of those
+  implementations are dropped, and so are the blanket implementations
+  (`impl<T> Any for T`, …). Their documentation is usually the trait's,
+  repeated on every implementing type, as summary tables repeat member
+  names. Each member of an inherent `impl` block starts with that block's
+  header, so the bounds it adds (`impl<T: Ord> Boxed<T>`) reach the member.
+
+The member record p99 bound for rustdoc is 300 words (table above). The
+evidence comes from the acceptance run
+([case study](../discovery/rustdoc-api-records-acceptance.md)) on `itertools`
+0.14.0, documented locally, with 316 member records:
+
+- Member p99 was 226 words and the largest member had 419. The largest are
+  doc comments with runnable examples, as in Python docstrings.
+- The larger records did not hurt retrieval. All 22 curated lookups had the
+  declaring member in the top 5. On the same corpus without `--api-records`,
+  the declaring page was in the top 5 for 18 of them.
+- All 263 member signatures with type parameters kept them; the largest
+  container had 2,545 words; the pack took 1.9 s against 12.1 s without
+  `--api-records`.

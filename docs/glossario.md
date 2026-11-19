@@ -60,3 +60,10 @@ Entradas abaixo, uma seção `##` por termo.
 **Onde apareceu:** `lib/playwright_crawl.py`, com hidratação limitada (domcontentloaded 10 s + espera por `a[href]` 5 s + 500 ms); o fallback para Playwright quando `is_spa()` vê cascas vazias; o Playwright sob o perfil `httrack` (#78 PR 4, 2026-11-19).
 **Por que importa pra decisão:** quem baixa só o HTML (wget, o motor do `httrack`) recebe a casca vazia de uma SPA, e por isso a cascata cai para um navegador. Esperar a hidratação custa tempo por página, e o limite dessa espera decide entre salvar uma página incompleta e travar o crawl.
 **Nível:** 🆕 novo
+
+## blanket implementation (Rust)
+**Em uma frase:** uma implementação de trait escrita uma vez para todos os tipos que cumprem uma condição (`impl<T: Iterator> Itertools for T`), em vez de uma por tipo; o rustdoc a mostra na página de cada tipo coberto, com a documentação inteira dos métodos do trait.
+**Analogia:** uma regra do condomínio que vale para "todo apartamento com varanda": o síndico cola a mesma folha em todas as portas com varanda.
+**Onde apareceu:** adaptador rustdoc do `pack --api-records` (#75 fase 3, 2026-11-19): no corpus `itertools`, cada struct repete a doc de `Itertools` inteira por causa da blanket implementation (e a de `Iterator` pela implementação de trait); o adaptador descarta as blanket implementations e os itens das implementações de trait, e guarda só o cabeçalho `impl` de cada implementação de trait.
+**Por que importa pra decisão:** manter essas cópias infla cada registro e faz a mesma doc concorrer na busca em dezenas de páginas; descartar perde só texto que já está, uma vez, na página do trait.
+**Nível:** 🆕 novo

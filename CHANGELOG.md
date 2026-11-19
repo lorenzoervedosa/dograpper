@@ -212,6 +212,24 @@ and fixes alone are a PATCH bump.
   Playwright files, elapsed time, queue size and the last URL. They are INFO
   lines, so `--quiet` hides them. The Playwright crawl's per-page
   `Downloading: <url>` line moves to `--verbose`. ([#98])
+- `pack --api-records` also splits rustdoc pages (rustdoc 1.96, `<meta
+  name="generator" content="rustdoc">`; a page from another rustdoc version
+  keeps one record). A struct, enum, union, trait or type alias page becomes
+  a container record (declaration, doc comment, member names, the `impl`
+  headers of its trait and auto trait implementations; neither the members
+  of those implementations nor the blanket implementations) plus one member
+  record per field, variant, member of an inherent `impl` block and trait
+  member (`itertools::Itertools::interleave`: its `impl` block's header,
+  signature, deprecation note and doc comment),
+  anchored at the rustdoc id (`#method.interleave`). A crate or module page
+  is a container record naming its symbols; a function, constant, static or
+  macro page is one member record with id `NN_path`. `symbol_kind` gains
+  `crate`, `struct`, `union`, `trait`, `type_alias`, `variant`,
+  `associated_constant`, `associated_type`, `constant`, `static` and `macro`;
+  `generator` is `rustdoc`. `all.html`, source pages, redirect stubs and
+  unmeasured markup (such as `Methods from Deref`) keep one record.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
 
 ### Changed
 

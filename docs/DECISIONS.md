@@ -22,6 +22,45 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-19 — rustdoc pages are split only from rustdoc 1.96 (#75)
+
+- **Decision:** the rustdoc adapter reads `data-rustdoc-version` and keeps
+  any page whose version is not 1.96.x as one record, with the version in
+  the warning.
+- **Why:** ADR-0009 says each adapter "supports only the markup versions that
+  were measured", and rustdoc's markup changes between releases. Its
+  structural checks catch a missing section or an unknown heading, but not a
+  doc comment that moved, which would land in the wrong record silently.
+- **Rejected:** structural checks only, as the Javadoc and Sphinx adapters
+  do; a range of versions nobody measured.
+- **Pending:** docs.rs builds with nightly rustdoc, so a docs.rs mirror keeps
+  every page whole until a nightly corpus is measured and the accepted
+  versions widen.
+
+## 2026-11-19 — rustdoc adapter: corpus, test file, shared helpers (#75)
+
+- **Decision:** the acceptance corpus is `itertools` 0.14.0 from the local
+  Cargo registry, documented with `rustdoc` directly (its one dependency
+  compiled to metadata first). The adapter's tests live in their own file,
+  `tests/test_api_reference_rustdoc.py`. Before the third adapter, the
+  helpers Javadoc and Sphinx both carried moved to shared places:
+  `declared()` and `check_anchor()` to `utils/api_reference/__init__.py`,
+  `line()` and `Regions.set_until_end()` to `_html.py`.
+- **Why:** the `rust-docs` component is not installed, so the standard
+  library's docs were not available offline. `cargo doc --offline` fails on
+  dev-dependencies that are not in the registry, and running `rustdoc` on the
+  crate needs no crawl and no build script. `test_api_reference.py` already
+  has 702 lines and the TypeDoc lane adds to the same area in parallel. The
+  repeated-anchor check guards unique record ids, so it is not copied a third
+  time.
+- **Rejected:** installing `rust-docs` (changes the machine's toolchain);
+  crawling docs.rs (a public site when a local corpus exists); copying the
+  helpers into `rustdoc.py`. The two-line `_unsupported()` message factory
+  stays per adapter: it holds no logic.
+- **Pending:** redirect stubs take top-5 slots in name lookups, and
+  `Methods from Deref` sections keep a page whole
+  ([case study](discovery/rustdoc-api-records-acceptance.md)).
+
 ## 2026-11-19 — fire-engine low-speed window is `--timeout` + 1 s (#154)
 
 - **Decision:** the fix for the flaky

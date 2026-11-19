@@ -814,7 +814,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
-| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
+| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc, rustdoc) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
 
 #### Pack internal pipeline
 
@@ -1106,16 +1106,40 @@ dograpper serve ./pack   # search_chunks now ranks member records
   annotations, overloads included, then the docstring and its fields). The
   anchor is the object's HTML id (`#packaging.version.parse`). A page with a
   `:no-index:` object or an object type outside those keeps one record.
+- **rustdoc**: rustdoc 1.96 pages (`<meta name="generator" content="rustdoc">`
+  and `data-rustdoc-version="1.96.…"`; the page kind comes from
+  `<body class="rustdoc struct">`). rustdoc writes one page per symbol:
+  - A struct, enum, union, trait or type alias page is a container record:
+    the declaration, the doc comment, the member names, then the `impl`
+    headers of its trait implementations, auto trait implementations and, on
+    a trait, implementations on foreign types and implementors. The members
+    of those implementations and the blanket implementations are dropped,
+    since their docs usually repeat the trait's.
+  - Each field, variant, member of an inherent `impl` block (method,
+    associated constant or type) and trait member gets a member record
+    (`itertools::Itertools::interleave`):
+    the `impl` block's header with its bounds (`impl<T: Ord> Boxed<T>`), the
+    signature, the deprecation note and the doc comment. The anchor is the
+    rustdoc id (`#method.interleave`, `#structfield.items`, `#variant.Both`).
+  - A crate or module page is a container record: its doc comment and its
+    symbols' names by section (`Structs: Boxed`), without the descriptions.
+  - A function, constant, static or macro page is one member record, under
+    the page's own id (`NN_path`), with the module as its container.
+  - `all.html`, help and source pages, redirect stubs (no generator meta),
+    pages from another rustdoc version and other page kinds (primitive,
+    keyword, derive or attribute macro) keep one record, as does a page with
+    a section that was not measured, such as `Methods from Deref<Target = …>`.
 - **Container record** (`id` `NN_path` for the page's main container,
   `NN_path#anchor` for a Sphinx class or exception): qualified name and kind,
   inheritance, implemented interfaces and known subclasses, signature,
   description, the declared member names, and the "inherited from" lists.
   Summary tables are dropped.
-- **Member record** (`id` `NN_path#anchor`): the qualified name
+- **Member record** (`id` `NN_path#anchor`; `NN_path` for a rustdoc
+  function, constant, static or macro page): the qualified name
   (`zombie.characters.IsoGameCharacter#getInventory()`,
-  `packaging.version.parse`), the full signature with its type parameters,
-  the doc comment and the notes (Overrides, Specified by, Parameters,
-  Returns, Throws). `url` ends with the member's anchor; `breadcrumb` is
+  `packaging.version.parse`, `itertools::Itertools::interleave`), the full
+  signature with its type parameters, the doc comment and the notes
+  (Overrides, Specified by, Parameters, Returns, Throws). `url` ends with the member's anchor; `breadcrumb` is
   `[container, member]`.
 - **Other pages** (prose, package summaries, other generators, or a type page
   whose markup differs from the measured one) keep one record each. They are
