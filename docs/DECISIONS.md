@@ -22,6 +22,23 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-19 — TypeDoc adapter: tests, corpus and version gate (#75)
+
+- **Decision:** the TypeDoc tests live in their own file,
+  `tests/test_api_reference_typedoc.py`, instead of growing
+  `tests/test_api_reference.py`. The acceptance corpus was generated locally
+  with TypeDoc from the npm sources of `@tanstack/query-core`, so no site was
+  crawled. Pages without an `aria-current` crumb are kept whole, which
+  rejects TypeDoc 0.25 to 0.27.
+- **Why:** `tests/test_api_reference.py` already has 702 lines for two
+  generators, and the structural audit flags test files over 1,000 lines. The
+  brief preferred a local corpus. Without the gate, function and variable
+  pages from 0.25 to 0.27 split under wrong qualified names
+  (`fixture.shapes.apply`), while their class pages were kept whole.
+- **Rejected:** appending to `tests/test_api_reference.py`; crawling a public
+  TypeDoc site; supporting 0.25 to 0.27, which have no measured corpus.
+- **Pending:** none.
+
 ## 2026-11-19 — rustdoc pages are split only from rustdoc 1.96 (#75)
 
 - **Decision:** the rustdoc adapter reads `data-rustdoc-version` and keeps

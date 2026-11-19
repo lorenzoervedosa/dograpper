@@ -77,21 +77,21 @@ content.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| id | string | yes | Unique record identifier: `NN_path`, the chunk number (zero-padded to one width per run, at least two digits) and the source path; `NN_J_path` for sub-chunk `J` of a file that heading-driven splitting divided. With `--api-records`: `NN_path` for a page's main container record (on a rustdoc function, constant, static or macro page, its one member record), `NN_path#anchor` for its other records (see below). |
+| id | string | yes | Unique record identifier: `NN_path`, the chunk number (zero-padded to one width per run, at least two digits) and the source path; `NN_J_path` for sub-chunk `J` of a file that heading-driven splitting divided. With `--api-records`: `NN_path` for a page's main container record (on a rustdoc function, constant, static or macro page, or a TypeDoc function, variable or type alias page, its one member record), `NN_path#anchor` for its other records (see below). |
 | source | string | yes | Relative path of the source file |
 | words | int | yes | Word count of `content` |
 | content | string | yes | Extracted text |
 | schema_version | string | yes | Always "v1" |
-| breadcrumb | string[] | no | Heading hierarchy at this position. Present with `--context-header` or `--score`, only when the source file has headings. API records always carry it: `[container]`, or `[container, member]` for a member record. |
+| breadcrumb | string[] | no | Heading hierarchy at this position. Present with `--context-header` or `--score`, only when the source file has headings. API records always carry it: `[container]`, or `[container, member]` for a member record (`[member]` for a TypeDoc member with no container). |
 | chunk_index | int | no | Sub-chunk position (1-based). Present only when heading-driven splitting produced more than one sub-chunk for this file. |
 | total_chunks | int | no | Total sub-chunks for this file. Same condition as `chunk_index`. |
 | url | string | no | Original URL. Present only with `--context-header` **and** either a matching manifest entry that has a `url` or a valid HTTrack / saved-from marker in the page head — `--score` alone never populates it, even against a matching manifest. On a member record it ends with the member's anchor, percent-encoded as the generator links it (`#%3Cinit%3E(int)`). |
 | readiness_grade | string | no | Bare grade letter ("A"/"B"/"C"). Present with `--score`. Not the same shape as the header's `llm_readiness` object — see below. |
 | symbol | string | no | API records only. Qualified name of the record's symbol, e.g. `zombie.characters.IsoGameCharacter#getInventory()` (Javadoc), `packaging.version.Version.is_prerelease` (Sphinx), `itertools::Itertools::interleave` (rustdoc). |
 | kind | string | no | API records only. `container` or `member`. |
-| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). Sphinx containers: `module`, `class`, `exception`; members: `function`, `method` (classmethods and staticmethods too; the signature says which), `property`, `attribute`, `data` (module-level variable). rustdoc containers: `crate`, `module`, `struct`, `enum`, `union`, `trait`, `type_alias`; members: `field` (a tuple field is `0`, `1`, …), `variant`, `method` (associated functions and required trait methods too; the signature says which), `associated_constant`, `associated_type`, and the one-symbol pages `function`, `constant`, `static`, `macro`. |
-| container | string | no | Member records only. Qualified name of the container that declares the member. |
-| generator | string | no | API records only. The adapter that split the page: `javadoc`, `sphinx` or `rustdoc`. |
+| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). Sphinx containers: `module`, `class`, `exception`; members: `function`, `method` (classmethods and staticmethods too; the signature says which), `property`, `attribute`, `data` (module-level variable). rustdoc containers: `crate`, `module`, `struct`, `enum`, `union`, `trait`, `type_alias`; members: `field` (a tuple field is `0`, `1`, …), `variant`, `method` (associated functions and required trait methods too; the signature says which), `associated_constant`, `associated_type`, and the one-symbol pages `function`, `constant`, `static`, `macro`. TypeDoc containers: `module`, `namespace`, `class`, `interface`, `enum`, `type_alias` (a type alias whose type has members); members: `constructor`, `property`, `method`, `accessor`, `enum_member`, and on their own pages `function`, `variable`, `type_alias`. |
+| container | string | no | Member records only. Qualified name of the container that declares the member. Absent on a TypeDoc function, variable or type alias page whose breadcrumb starts at the symbol. |
+| generator | string | no | API records only. The adapter that split the page: `javadoc`, `sphinx`, `rustdoc` or `typedoc`. |
 | version | string | no | Page metadata of a MediaWiki page, as in the header above. Present with `--context-header` or `--score`, only when the page states its version. |
 | version_status | string | no | As in the header above. Same condition as `version`, and only when the version comes from the banner. |
 
@@ -137,6 +137,18 @@ keep the plain record above, without the API fields.
   signature, the deprecation note and the doc comment. A rustdoc function,
   constant, static or macro page is one member record with `id` `NN_path`
   and the module as `container`.
+- **TypeDoc page**: one page per symbol, the qualified name being its
+  breadcrumb path (`QueryClient.invalidateQueries`, `shapes.Box`). A
+  module, namespace, class, interface or enum page (or a type alias page
+  whose type has members) starts with its container record
+  (`QueryClient (class)`, then the title with its type parameters, the
+  comment, hierarchy, member names by group and inherited members by
+  base); each own member record is anchored at the member's HTML id
+  (`invalidatequeries`) and holds its flags (`Static Readonly`), every
+  signature with its type parameters, the doc comment and the notes. A
+  function, variable or type alias page is one member record, `id`
+  `NN_path`, whose `container` is the module or namespace above it (absent
+  when there is none).
 
 ```json
 {"id": "01_fixture/api/Box.html#of(U)", "source": "fixture/api/Box.html", "words": 37,

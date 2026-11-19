@@ -1,0 +1,11 @@
+{
+  "entryPoints": ["src/shapes.ts", "src/tools.ts"],
+  "tsconfig": "tsconfig.json",
+  "readme": "src/README.md",
+  "name": "fixture",
+  "disableGit": true,
+  "excludeExternals": true,
+  "sourceLinkTemplate": "https://example.com/fixture/{path}#L{line}",
+  "githubPages": false,
+  "treatWarningsAsErrors": true
+}

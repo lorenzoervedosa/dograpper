@@ -88,6 +88,7 @@ The member-record p99 bound in the acceptance bar is now set per generator:
 | Javadoc | ≤ 100 words |
 | Sphinx autodoc | ≤ 300 words |
 | rustdoc | ≤ 300 words |
+| TypeDoc | ≤ 250 words |
 
 Every other criterion still applies to every generator:
 
@@ -152,3 +153,40 @@ evidence comes from the acceptance run
 - All 263 member signatures with type parameters kept them; the largest
   container had 2,545 words; the pack took 1.9 s against 12.1 s without
   `--api-records`.
+
+## Amendment (2026-11-19): TypeDoc
+
+The member record p99 bound for TypeDoc
+([#75](https://github.com/lorenzoervedosa/dograpper/issues/75), phase 4) is
+250 words (table above). The evidence comes from the acceptance run
+([the TypeDoc acceptance doc](../discovery/typedoc-api-records-acceptance.md))
+on `@tanstack/query-core` 5.108.1, generated locally with TypeDoc 0.28.20, with
+585 member records:
+
+- Member p99 was 216 words and the largest member had 301.
+- TypeDoc repeats each type parameter and parameter of a signature in the
+  doc comment's lists, with their defaults and docs. Generic TypeScript APIs
+  have many type parameters.
+- 22 of 24 lookups hit the declaring member or its container record in the
+  top 5. 14 of the targets are member records over 100 words, and for 12 of
+  them the member record itself was in the top 5.
+
+TypeDoc writes one page per symbol, so two record rules are specific to
+it:
+
+- A function, variable or type alias page has no container on it. The page
+  is one member record with id `NN_path`, the page's id, instead of
+  `NN_path#anchor`. Its `container` is the module or namespace in the
+  breadcrumb. When the breadcrumb starts at the symbol, as in a
+  single-entry-point project, there is no container: `container` is absent
+  and the breadcrumb is `[member]` instead of `[container, member]`.
+- Inherited members are rendered in full on each subclass page. They get no
+  member records; the container record lists their names by base
+  (`Inherited from Box: put, map`), like Javadoc's "inherited from" lists.
+
+The adapter supports only TypeDoc 0.28: the fixture and the corpus were
+measured on 0.28.20, and 0.28.0 was checked on the fixture. Pages from 0.25 to
+0.27 are kept whole. They put member anchors outside the `h3`, start the
+breadcrumb at the project and mark no current page in it. The "Defined in"
+source locations, which TypeDoc writes by default, are dropped from the records,
+like Sphinx's `[source]` links.

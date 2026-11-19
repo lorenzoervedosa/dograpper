@@ -191,6 +191,20 @@ and fixes alone are a PATCH bump.
   record and is listed in the warning.
   ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
   [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
+- `pack --api-records` also splits TypeDoc 0.28 pages (default theme,
+  recognised by their page title block since TypeDoc writes no generator
+  meta): a module, namespace, class, interface or enum page, or a type alias
+  page with members, becomes a container record (title with its type
+  parameters, comment, hierarchy, member names by group, inherited members by
+  base) plus one member record per own member (`QueryClient.invalidateQueries`,
+  every signature with its type parameters, doc comment, notes), anchored at
+  the member's HTML id; a function, variable or type alias page becomes one
+  member record with id `NN_path`. `symbol_kind` gains `namespace`,
+  `enum_member`, `variable`, `type_alias` and `accessor`; `generator` is
+  `typedoc`. Pages from TypeDoc 0.25-0.27
+  and other unmeasured markup keep one record and are listed in the warning.
+  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
 - `pack` cleans MediaWiki pages (detected by their `<meta name="generator">`)
   before extraction: navigation boxes (`navbox`), section edit links
   (`mw-editsection`) and maintenance boxes (stub, outdated, "help update"
