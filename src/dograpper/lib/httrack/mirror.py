@@ -26,8 +26,9 @@ from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .changes import Changes
-from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, moved_request,
-                    previous_files, record_of, relink, reserve_names, sends, stamp, uncached)
+from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, extension_set, fetch_page,
+                    moved_request, previous_files, record_of, relink, reserve_names, sends,
+                    stamp, uncached)
 from .fetcher import Fetcher, same_host
 from .links import JS_MIMES, css_links, page_links, script_links, url_key
 from .naming import NameRegistry, no_page, url_extension
@@ -136,7 +137,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
               if e.url}
     kept: set[str] = set()
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
-    exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
+    exts = extension_set(include_extensions)
     report, lock = RunReport(), threading.Lock()
     scope = [start_rule(url)]
     own, carry = _revalidates(prev.get(url_key(url)), None, False)

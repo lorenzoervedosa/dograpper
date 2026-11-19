@@ -119,6 +119,13 @@ def uncached(records: dict[str, dict], urls: Mapping[str, str], previous: Manife
     return {f: kept(f) for f in records}
 
 
+def extension_set(include_extensions: str) -> set[str]:
+    """--include-extensions as the dotted, lower-case extensions it keeps; empty keeps all.
+    (lib/ignore_parser.split_by_extension parses the same flag for pack.)"""
+    return {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",")
+            if e.strip()}
+
+
 def _fsize(path: str) -> int:
     """htslib.c fsize: the file's size, -1 when it cannot be read."""
     try:
@@ -425,7 +432,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     changes = Changes(output_dir, previous, policy.cache) if policy.changes else None
     kept: set[str] = set()
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
-    exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
+    exts = extension_set(include_extensions)
     report, lock, written = RunReport(), threading.Lock(), set()
     # written file -> (redirected?, seed): of several seeds reaching one file, the one
     # that needed no redirect, else the smallest, whichever thread wrote first
