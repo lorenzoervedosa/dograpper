@@ -1,0 +1,50 @@
+# `src/dograpper/utils/`
+
+Helpers sem orquestração e `utils/api_reference/`. Contratos, gates e fluxo de sessão: `CLAUDE.md` da raiz.
+
+## Módulos
+
+```
+src/dograpper/utils/
+    ├── api_reference/      # Registros de referência de API (ADR-0009), opt-in via `pack --api-records`
+    │   ├── __init__.py     # split_api_pages()/split_page(): detecção (meta generator via utils/generator.py para Javadoc; markup `<dt class="sig sig-object py"` para Sphinx, que não escreve meta) e despacho ao adaptador; ApiRecord (url() com âncora percent-encoded), NotSplit, check_symbol() (nome qualificado até MAX_SYMBOL = 1.000 caracteres, limite comum aos adaptadores contra saída quadrática), aviso das páginas mantidas inteiras e linha do resumo
+    │   ├── _html.py        # Regions/Text — leitura linear de HTML dos adaptadores: texto por região em linhas, pilha com contagem por tag (tag de fechamento solta em O(1)); fonte única da garantia de tempo linear
+    │   ├── javadoc.py      # records(): página de tipo javadoc 25 (javadoc/ClassWriter) → 1 registro contêiner + 1 por membro (section.detail); só a markup medida, senão NotSplit; leitura linear via _html.py
+    │   └── sphinx.py       # records(): página Sphinx autodoc (domínio Python, Sphinx 9.1/9.2, alabaster/furo; região role="main") → registro contêiner do módulo (texto fora dos objetos + nomes de topo) + 1 contêiner por class/exception + 1 membro por function/method/property/attribute/data (dl.py + dt.sig-object[id]); :no-index:, tipo desconhecido ou outra markup = NotSplit; leitura linear via _html.py
+    ├── atomic_write.py     # atomic_write_bytes() — arquivo temporário no mesmo diretório + os.replace; modo padrão do umask
+    ├── challenge.py        # is_challenge() / is_challenge_page() / find_challenge_files() — interstitial Cloudflare por cf-mitigated ou <title> "Just a moment..." (nunca pelo beacon /cdn-cgi/); fonte única do fetcher httrack e do pack
+    ├── chunk_inspector.py  # Parsing read-only de chunks empacotados: seções v1, sidecars (readiness, cross-refs)
+    ├── code_fence.py       # fence() / code_span() / split_blocks() / sub_closed_fences() / unfence() — bloco de código cercado (CommonMark): fonte única para o stripper (escreve), dedup e chunker (nunca partem um bloco em linha em branco), scorer e word_counter (deixam de fora o conteúdo dos blocos fechados) e writers txt/jsonl (tiram a cerca)
+    ├── content_extractor.py # extract_content() — extração inteligente de HTML (semantic containers, density scoring, blacklist)
+    ├── error_page.py       # is_error_page() / find_error_page_files() — página de erro HTTP salva (<title> `404 Not Found` + ≤ 40 palavras de texto visível, arquivo ≤ 16 KiB; leitura linear); mesmo tratamento das páginas de challenge na etapa 6a-1 de pack (#121)
+    ├── dedup.py            # deduplicate() — dedup cross-file via MD5 (exact) e SimHash (fuzzy); bloco repetido na mesma página, com 1º token diferente ou só com números diferentes é mantido (_keep_reason), e blocos abaixo de MIN_BLOCK_WORDS não entram; nunca remove as definições de link do md e compara blocos pelo destino do link, não pelo número
+    ├── dep_resolver.py     # resolve_wget()/resolve_browser_dir() — deps em DOGRAPPER_HOME (env lido no import)
+    ├── dry_run_report.py   # generate_report() — relatório formatado para --dry-run
+    ├── generator.py        # page_generator() — conteúdo do <meta name="generator"> (javadoc/…, MediaWiki …) nos primeiros 64 KiB; fonte única da detecção de gerador dos adaptadores (ADR-0009)
+    ├── heading_extractor.py # extract_with_headings(), get_active_headings(), format_context_header() — formato dograpper-context-v1 (`title` só no layout page; metadata da página, ex. `version`, após `url`; `>` escrito como \u003e)
+    ├── html_stripper.py    # strip_html() via html.parser, descarta script/style, emite \n\n entre blocos HTML e uma tabulação entre as células de uma linha de tabela (só no texto puro, #125); <pre> verbatim em bloco cercado com a linguagem das classes mw-highlight-lang-*/language-*/lang-*/highlight-* do <pre>, <code> ou div mais próxima que declare (PreCapture, render_text() compartilhados com heading_extractor); markdown=True (md): MarkdownStripper/render_markdown() escrevem títulos #, links de referência [texto][n] com um bloco `[n]: href` no fim da página, numerado por primeiro uso (sem âncora da própria página nem esquema fora de http/https/mailto; link dentro de <code>/<pre>/div.member-signature sai só como texto), listas -/N. aninhadas (item com bloco sai sem marcador) e tabelas pipe uma linha por linha (inclui a grade `div.summary-table` do Javadoc 25: divs filhas são as células, N por linha), em tempo linear; escape_link_text() compartilhado com o INDEX.md; split_definitions()/definitions_used() (DEFINITION, REFERENCE) leem o bloco de definições para word_counter, dedup, chunker, link_extractor e page_layout
+    ├── link_extractor.py   # extract_links(), build_cross_ref_index(), annotate_cross_refs() (marcador depois de um link Markdown [texto](url) ou [texto][n], nunca no destino nem numa linha de definição)
+    ├── logger.py           # setup_logger() com suporte a verbose/quiet
+    ├── mediawiki.py        # is_mediawiki() (meta generator via generator.py), clean(), page_metadata() e find_redirect_aliases() — limpeza por página de MediaWiki antes do extrator genérico: corta do fonte navbox, mw-editsection e caixas de manutenção (mbox com toggle mw-customtoggle-mbox-*); link vermelho (a.new, redlink=1/action=edit) vira texto puro e título cuja seção ficou vazia após um corte sai junto; o banner de versão vira version/version_status do header e do registro JSONL (senão a 1ª categoria oculta Version X); banner de redação desconhecida fica no texto; alias de redirect (wgRedirectedFrom) cujo alvo (mesmo wgPageName) está no run é pulado pelo pack; página não-MediaWiki volta intacta; page_config() — wgPageName/wgRedirectedFrom do head, lido também pelo layout por página
+    ├── portable_names.py   # FORBIDDEN (caracteres proibidos pelo HTTrack → _), claim_unique() (colisão casefold → -N), resolve_under() (caminho real contido na raiz) — regras de nome compartilhadas por lib/httrack/naming.py e o layout por página do pack (ADR-0010); resolve_under() guarda também as escritas de lib/httrack/crawl.py, lib/httrack/changes.py e commands/_httrack_profile.py
+    ├── progress.py         # ProgressReporter — linhas [progress] com throttle (≤1 a cada 5 s, só quando muda, final no finish()), forma lista fixa (N/M URLs, %, ETA após 10) ou total crescente (files, queued, last redigida); um reporter por etapa de fetch do download (#98, #78)
+    ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
+    ├── redact.py           # redact_url() — remove userinfo (user:senha@), mascara o valor de parâmetros de query com cara de credencial (mask_secret_params()) e percent-encoda caracteres de controle antes de logar; recordable_url()/NAVIGATION_PARAMS — URL que pode ir para o manifest e o hts-changes.json (None se algum parâmetro da query está fora da allowlist de navegação); drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
+    ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
+    ├── token_counter.py    # count_tokens() via tiktoken (dependência obrigatória, sem fallback; aliases cl100k/o200k/p50k, encoding desconhecido levanta ValueError), count_tokens_file() (leitura tolerante), format_token_summary()
+    └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora, bloco de definições de link no fim) e count_words_file()
+```
+
+## Arquivos de contexto
+
+| Arquivo | Quando ler |
+|---|---|
+| `tests/test_progress.py` | Antes de alterar `utils/progress.py` (formato e throttle das linhas `[progress]`) |
+| `tests/test_content_extractor.py` | Antes de alterar `utils/content_extractor.py` ou o tratamento de `<pre>` em `utils/html_stripper.py` |
+| `tests/test_mediawiki.py` | Antes de alterar `utils/mediawiki.py` ou o gancho MediaWiki de `extract_content()` em `utils/content_extractor.py` |
+| `tests/test_token_counter.py` | Antes de alterar `utils/token_counter.py` |
+| `tests/test_context_v1.py` | Antes de alterar o formato `dograpper-context-v1` em `utils/heading_extractor.py` |
+| `tests/test_redact.py` | Antes de alterar `utils/redact.py` (usado por todo log que imprime URL) |
+| `tests/test_generator.py` | Antes de alterar `utils/generator.py` (detecção de gerador usada pelos adaptadores) |
+| `tests/test_atomic_write.py` | Antes de alterar `utils/atomic_write.py` |
+| `tests/test_dep_resolver.py` | Antes de alterar `utils/dep_resolver.py` ou a semântica de `DOGRAPPER_HOME` |
