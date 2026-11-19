@@ -113,8 +113,9 @@ def _asound_pkg() -> str | None:
     None when /etc/os-release cannot tell (derivatives, unreadable file).
     """
     try:
+        # second reader of /etc/os-release, after _detect_distro(): a third one shares a parser
         with open("/etc/os-release", errors="replace") as f:
-            kv = dict(l.split("=", 1) for l in f.read().splitlines() if "=" in l)
+            kv = dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line)
         distro = kv.get("ID", "").strip().strip('"').lower()
         version = float(kv.get("VERSION_ID", "").strip().strip('"'))
     except (OSError, ValueError):
