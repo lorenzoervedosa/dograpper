@@ -275,7 +275,7 @@ def _run_download_cascade(
 @click.option('--output', '-o', required=True, type=click.Path(),
               help="Directory the site is mirrored into; created if missing. Also the default home of the manifest.")
 @click.option('--depth', '-d', type=int, default=0, show_default=True,
-              help="Maximum number of links to follow from the start URL. 0 (default) follows links without a depth limit.")
+              help="Depth limit; 0 (default) means no limit. wget, Playwright and httrack crawls: maximum link hops from the start URL. URL lists from llms.txt and sitemap (any downloader): maximum extra path segments below the start URL.")
 @click.option('--headless', is_flag=True, default=False, show_default=True,
               help="Skip wget and crawl directly with Playwright, which runs the page JavaScript. Use for single-page apps whose HTML is empty without it.")
 @click.option('--delay', type=int, default=0, show_default=True,
@@ -298,49 +298,49 @@ def _run_download_cascade(
 @click.option('--impersonate', type=str, default='chrome', show_default=True,
               help="[fire-engine] curl_cffi browser profile to impersonate (e.g. chrome124)")
 @click.option('--user-agent', type=str, default=None,
-              help="[httrack] User-Agent header (default: dograpper identifier)")
+              help="[httrack, fire-engine] User-Agent header. Default: the dograpper identifier under httrack; the impersonated browser profile's own User-Agent under fire-engine. A value given here replaces it.")
 @click.option('--no-robots', is_flag=True, default=False,
-              help="[httrack] Ignore robots.txt")
+              help="[httrack, fire-engine] Ignore robots.txt")
 @click.option('--connections', type=click.IntRange(min=1), default=4, show_default=True,
-              help="[httrack] Parallel connections (clamped to 8 unless --disable-security-limits)")
+              help="[httrack, fire-engine] Parallel connections (clamped to 8 unless --disable-security-limits)")
 @click.option('--max-conn-rate', type=click.FloatRange(min=0, min_open=True), default=5.0,
               show_default=True,
-              help="[httrack] Max connections opened per second")
+              help="[httrack, fire-engine] Max connections opened per second")
 @click.option('--max-bandwidth', type=click.IntRange(min=1), default=100000, show_default=True,
-              help="[httrack] Max bandwidth in bytes/second")
+              help="[httrack, fire-engine] Max bandwidth in bytes/second")
 @click.option('--timeout', type=click.FloatRange(min=0, min_open=True), default=120.0,
-              show_default=True, help="[httrack] Per-request timeout in seconds")
+              show_default=True, help="[httrack, fire-engine] Per-request timeout in seconds")
 @click.option('--retries', type=click.IntRange(min=0), default=2, show_default=True,
-              help="[httrack] Retries per URL")
+              help="[httrack, fire-engine] Retries per URL")
 @click.option('--max-links', type=click.IntRange(min=1), default=100000, show_default=True,
-              help="[httrack] Max URLs fetched per run")
+              help="[httrack, fire-engine] Max URLs fetched per run")
 @click.option('--max-retry-after', type=click.IntRange(min=0), default=60, show_default=True,
-              help="[httrack] Max seconds honored from Retry-After / Crawl-delay")
+              help="[httrack, fire-engine] Max seconds honored from Retry-After / Crawl-delay")
 @click.option('--disable-security-limits', is_flag=True, default=False,
-              help="[httrack] Lift the connection, rate and bandwidth clamps")
+              help="[httrack, fire-engine] Lift the connection, rate and bandwidth clamps")
 @click.option('--no-parse-scripts', is_flag=True, default=False,
-              help="[httrack] Do not scan scripts, event handlers and stylesheets for links "
+              help="[httrack, fire-engine] Do not scan scripts, event handlers and stylesheets for links "
                    "(HTTrack -j4, which also stops CSS links). Default: scanned, as HTTrack does")
 @click.option('--no-extended-parsing', is_flag=True, default=False,
-              help="[httrack] Do not guess links from quoted strings in other attributes and "
+              help="[httrack, fire-engine] Do not guess links from quoted strings in other attributes and "
                    "in scripts (HTTrack -%P0). Default: guessed, as HTTrack does")
 @click.option('--cache', type=click.IntRange(0, 2), default=None,
-              help="[httrack] Cache mode, as HTTrack -C: 0 ignores the manifest (every file "
+              help="[httrack, fire-engine] Cache mode, as HTTrack -C: 0 ignores the manifest (every file "
                    "fetched in full, its records left as they were), 1 trusts it (a recorded "
                    "file still on disk at its recorded size is not requested, HTTrack "
                    "--continue), 2 revalidates each recorded file (HTTrack --update). "
                    "Default: 2 when -o holds a manifest, else 1")
 @click.option('--updatehack', is_flag=True, default=False,
-              help="[httrack] Keep a recorded file other than a page, script or stylesheet "
+              help="[httrack, fire-engine] Keep a recorded file other than a page, script or stylesheet "
                    "when a 200 announces the size it has on disk (and, on a revalidation, the "
                    "size recorded); its body is not read (HTTrack -%s). Default: off, as in "
                    "HTTrack")
 @click.option('--changes', is_flag=True, default=False,
-              help="[httrack] Write hts-changes.json in -o: which files this run left new, "
+              help="[httrack, fire-engine] Write hts-changes.json in -o: which files this run left new, "
                    "changed, unchanged or gone against the previous run (HTTrack -%d). "
                    "Default: off, as in HTTrack")
 @click.option('--do-not-recatch', is_flag=True, default=False,
-              help="[httrack] Do not fetch again a recorded file other than a page, script "
+              help="[httrack, fire-engine] Do not fetch again a recorded file other than a page, script "
                    "or stylesheet that was erased or emptied since: it is left empty and "
                    "reported (HTTrack -%n). Default: off, fetched again in full, as in "
                    "HTTrack")

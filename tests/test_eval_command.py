@@ -73,3 +73,14 @@ def test_eval_is_in_help():
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
     assert "eval" in result.output
+
+
+def test_eval_output_unwritable_is_one_line_error():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_pack("chunks")
+        open("blocker", "w").close()  # a file where the parent directory should be
+        result = runner.invoke(cli, ["eval", "chunks", "-o", "blocker/r.json"])
+        assert result.exit_code == 1
+        assert "cannot write blocker/r.json" in result.output
+        assert isinstance(result.exception, SystemExit)

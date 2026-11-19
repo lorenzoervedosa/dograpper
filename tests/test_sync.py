@@ -194,3 +194,9 @@ def test_sync_default_chunks_dir_is_not_repacked(tmp_path):
     second = _sync()
     assert second.exit_code == 0, second.output
     assert "no files changed" in second.output
+
+
+def test_sync_format_xml_is_a_usage_error():
+    result, _ = _run_sync(['https://example.com', '-o', './out', '--format', 'xml'])
+    assert result.exit_code == 2
+    assert "xml" in result.output

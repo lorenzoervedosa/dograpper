@@ -215,6 +215,8 @@ and fixes alone are a PATCH bump.
 
 ### Changed
 
+- `pack --token-encoding` with an unknown name is a usage error (exit 2) before anything is packed, from the command line and from the `token-encoding` config key; before, it packed, warned once per chunk and exited 0 without the token lines. ([#144])
+- `pack --dedup-threshold` outside 0 to 10, or not an integer in the config, is a usage error (exit 2), from the command line and from the `dedup-threshold` config key; before, any integer was accepted. ([#142])
 - `pack` now packs documentation formats only by default (`.html`, `.htm`,
   `.md`, `.txt`). `.js`, `.css`, `.json` and other text files are skipped and
   listed by extension in one summary line; `robots.txt`,
@@ -256,8 +258,41 @@ and fixes alone are a PATCH bump.
   by target. `txt` and `jsonl` output is unchanged. ([#87],
   [#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
 
+### Removed
+
+- `pack --format xml` is no longer a choice (it could only fail); `--format xml` and `format: "xml"` in `.dograpper.json` are usage errors (exit 2). ([#150])
+- `sync --format xml`: the deprecated `xml` choice is gone from `sync --format`, as
+  from `pack --format`; it is now a usage error (exit 2) (#150).
+
 ### Fixed
 
+- `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
+- `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
+- `drift -o` and `eval -o` on a path that cannot be written print one error line
+  with the path and exit 1, instead of a traceback; the report is written atomically,
+  so a failed write leaves a previous one intact, and a missing parent directory
+  is created, as `pack -o` does (#147).
+- `doctor --check-system-libs --install` no longer drops `--install`: the install
+  runs first, then the library check, so a machine without chromium no longer
+  exits 3 asking for the `--install` that was passed (#146).
+- `doctor --check-system-libs` suggests `libasound2t64` on Ubuntu 24.04+ / Debian 13+
+  and `libasound2` on older releases, as the README lists them; where
+  `/etc/os-release` cannot tell, it keeps `libasound2` and adds a note naming the
+  `t64` package (#145).
+- `download --help` and `sync --help`: `--depth` now says what it limits in each
+  case (link hops for the wget, Playwright and httrack crawls; extra path segments
+  below the start URL for llms.txt and sitemap URL lists) (#140).
+- The `[httrack]` flags are labelled `[httrack, fire-engine]` in the help, and
+  using one under the default downloader now says `requires --downloader httrack
+  or fire-engine`; the `--user-agent` help states its default under each (#149).
+- `download --downloader fire-engine` no longer aborts a body that is still
+  arriving with `curl: (28) Operation too slow`. libcurl counts received bytes in
+  one-second records, so a byte could reach its low-speed check a second late:
+  with `--timeout 1` (or less) about one transfer in five longer than a second
+  failed at the one-second mark, and with a larger `--timeout` so did a body
+  that started in its last second and was still arriving. The low-speed window
+  is now one second longer than `--timeout`, so a silent server is given up a
+  second later. ([#154])
 - `pack --delta` no longer reports "no files changed" when a file was rewritten
   with other bytes of the same size and the same modification time, as a
   downloader that stamps files with the server's time can leave it: the
@@ -502,7 +537,13 @@ and fixes alone are a PATCH bump.
 [#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
+[#143]: https://github.com/lorenzoervedosa/dograpper/issues/143
+[#144]: https://github.com/lorenzoervedosa/dograpper/issues/144
+[#142]: https://github.com/lorenzoervedosa/dograpper/issues/142
+[#150]: https://github.com/lorenzoervedosa/dograpper/issues/150
+[#141]: https://github.com/lorenzoervedosa/dograpper/issues/141
 [#133]: https://github.com/lorenzoervedosa/dograpper/issues/133
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
+[#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78

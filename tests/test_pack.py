@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import pytest
@@ -266,14 +267,27 @@ def test_write_chunks_strips_html():
             assert "word anword" in content
             assert "<p>" not in content
 
-def test_xml_format_deprecated():
-    """--format xml raises deprecation error."""
+def test_pack_format_xml_is_a_usage_error():
+    """--format xml is not a choice: click rejects it with exit 2."""
     with tempfile.TemporaryDirectory() as d:
-        out_dir = os.path.join(d, 'out')
         files = create_mock_files(d, [("a.md", 5)])
-        chunks = chunk_by_size(files, d, 20)
-        with pytest.raises(ValueError, match="deprecated"):
-            write_chunks(chunks, d, out_dir, "ck_", "xml", True, 1)
+        result = CliRunner().invoke(pack, [d, '-o', os.path.join(d, 'out'), '--format', 'xml'])
+        assert result.exit_code == 2
+        assert "xml" in result.output
+
+
+def test_pack_format_xml_in_config_is_a_usage_error():
+    """format "xml" in .dograpper.json fails loud too, before any chunk is written."""
+    with tempfile.TemporaryDirectory() as d:
+        create_mock_files(d, [("a.md", 5)])
+        cfg = os.path.join(d, 'cfg.json')
+        with open(cfg, 'w') as f:
+            json.dump({"pack": {"format": "xml"}}, f)
+        out_dir = os.path.join(d, 'out')
+        result = CliRunner().invoke(cli, ['--config', cfg, 'pack', d, '-o', out_dir])
+        assert result.exit_code == 2
+        assert "--format" in result.output
+        assert not os.path.exists(out_dir)
 
 # --- CLI Integration ---
 
@@ -812,3 +826,40 @@ def test_pack_output_equal_to_input_is_a_usage_error(tmp_path):
     assert result.exit_code == 2
     assert "inside" in result.output or "same" in result.output
     assert not (mirror / "docs_chunk_01.md").exists()
+
+
+# --- --token-encoding validation (#144) ---
+
+def _one_file_input(d):
+    create_mock_files(d, [("a.md", 5)])
+
+
+def test_unknown_token_encoding_is_a_usage_error_before_packing():
+    with tempfile.TemporaryDirectory() as d:
+        _one_file_input(d)
+        out_dir = os.path.join(d, 'out')
+        result = CliRunner().invoke(pack, [d, '-o', out_dir, '--show-tokens', '--token-encoding', 'bogus'])
+        assert result.exit_code == 2
+        assert "bogus" in result.output and "cl100k" in result.output
+        assert not os.path.exists(out_dir)
+
+
+def test_unknown_token_encoding_in_config_is_a_usage_error():
+    with tempfile.TemporaryDirectory() as d:
+        _one_file_input(d)
+        cfg = os.path.join(d, 'cfg.json')
+        with open(cfg, 'w') as f:
+            json.dump({"pack": {"token-encoding": "bogus"}}, f)
+        out_dir = os.path.join(d, 'out')
+        result = CliRunner().invoke(cli, ['--config', cfg, 'pack', d, '-o', out_dir])
+        assert result.exit_code == 2
+        assert not os.path.exists(out_dir)
+
+
+@pytest.mark.parametrize("name", ["cl100k", "o200k", "cl100k_base"])
+def test_known_token_encodings_still_count(name):
+    with tempfile.TemporaryDirectory() as d:
+        _one_file_input(d)
+        result = CliRunner().invoke(pack, [d, '-o', os.path.join(d, 'out'), '--show-tokens', '--token-encoding', name])
+        assert result.exit_code == 0, result.output
+        assert "Total tokens:" in result.output

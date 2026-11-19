@@ -108,7 +108,7 @@ def test_default_downloader_is_wget_unchanged(tmp_path):
 def test_profile_options_tuple_matches_download_and_sync():
     from dograpper.commands.sync import sync
     tagged = {p.name for p in download.params
-              if (getattr(p, "help", None) or "").startswith("[httrack]")}
+              if (getattr(p, "help", None) or "").startswith("[httrack, fire-engine]")}
     assert tagged == set(PROFILE_OPTIONS)
     assert set(PROFILE_OPTIONS) <= {p.name for p in sync.params}
 
@@ -121,13 +121,13 @@ def test_profile_options_tuple_matches_download_and_sync():
 def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     res = run(str(tmp_path / "o"), flag)
     assert res.exit_code == 2
-    assert flag.split("=")[0] in res.output
+    assert f"{flag.split('=')[0]} requires --downloader httrack or fire-engine" in res.output
 
 
 def test_httrack_flag_in_config_with_wget_is_usage_error(tmp_path):
     res = run(str(tmp_path / "o"), config=_config(tmp_path, **{"max-links": 5}))
     assert res.exit_code == 2
-    assert "--max-links" in res.output
+    assert "--max-links requires --downloader httrack or fire-engine" in res.output
 
 
 def test_unknown_downloader_in_config_is_usage_error(tmp_path):

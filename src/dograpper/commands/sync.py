@@ -41,7 +41,7 @@ def _explicit_params(ctx: click.Context, names) -> set:
 @click.option('--output', '-o', required=True, type=click.Path(),
               help="Directory the site is mirrored into; pack then reads it from here. Created if missing.")
 @click.option('--depth', '-d', type=int, default=0, show_default=True,
-              help="Maximum number of links to follow from the start URL. 0 (default) follows links without a depth limit.")
+              help="Depth limit; 0 (default) means no limit. wget, Playwright and httrack crawls: maximum link hops from the start URL. URL lists from llms.txt and sitemap (any downloader): maximum extra path segments below the start URL.")
 @click.option('--headless', is_flag=True, default=False,
               help="Skip wget and crawl directly with Playwright, which runs the page JavaScript. Use for single-page apps whose HTML is empty without it.")
 @click.option('--delay', type=int, default=0, show_default=True,
@@ -57,8 +57,8 @@ def _explicit_params(ctx: click.Context, names) -> set:
               help="Maximum number of chunk files (see pack --max-chunks).")
 @click.option('--strategy', type=click.Choice(['size', 'semantic']), default='size', show_default=True,
               help="size: pack by word count. semantic: group by directory first (see pack --strategy).")
-@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True,
-              help="Chunk output format (see pack --format). 'xml' is deprecated.")
+@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl']), default='md', show_default=True,
+              help="Chunk output format (see pack --format).")
 @click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
               help="chunk: numbered chunk files. page: one file per page plus INDEX.md "
                    "(see pack --layout)")

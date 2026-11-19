@@ -80,9 +80,11 @@ def _default_session_factory(impersonate: str, timeout: float):
         raise CurlCffiMissing(_MISSING) from exc
     return cffi_requests.Session(impersonate=impersonate, curl_options={
         CurlOpt.HTTP_CONTENT_DECODING: 0,  # the raw body: Fetcher.get decodes it, bounded
-        # the stdlib socket timeout: to connect, then with nothing received
+        # the stdlib socket timeout: to connect, then with nothing received. libcurl counts
+        # bytes in 1 s rate records, so one reaches its check up to a second late: the
+        # extra second keeps a body still arriving from aborting (#154)
         CurlOpt.CONNECTTIMEOUT_MS: int(timeout * 1000),
-        CurlOpt.LOW_SPEED_LIMIT: 1, CurlOpt.LOW_SPEED_TIME: math.ceil(timeout)})
+        CurlOpt.LOW_SPEED_LIMIT: 1, CurlOpt.LOW_SPEED_TIME: math.ceil(timeout) + 1})
 
 
 class CurlCffiFetcher(Fetcher):

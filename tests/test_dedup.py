@@ -661,3 +661,47 @@ class TestReferenceLinks:
                                         "[1]: Intro.html\n[2]: Main.html\n[3]: Help.html")
         assert result.texts["c.md"] == c
         assert result.stats.blocks_removed_exact == 1
+
+
+class TestDedupThresholdRange:
+    """--dedup-threshold outside 0-10 is a usage error, from the CLI and from the config (#142)."""
+
+    @staticmethod
+    def _input(tmp):
+        input_dir = os.path.join(tmp, "input")
+        os.makedirs(input_dir)
+        with open(os.path.join(input_dir, "a.txt"), "w") as f:
+            f.write("hello world")
+        return input_dir
+
+    @pytest.mark.parametrize("value", ["99", "-5", "11"])
+    def test_cli_out_of_range(self, value):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out")
+            result = CliRunner().invoke(pack, [
+                self._input(tmp), "-o", out, "--dedup", "fuzzy", "--dedup-threshold", value])
+            assert result.exit_code == 2
+            assert "0<=x<=10" in result.output.replace(" ", "")
+            assert not os.path.exists(out)
+
+    @pytest.mark.parametrize("value", [99, -5, "x", 2.5])
+    def test_config_out_of_range(self, value):
+        import json
+        from dograpper.cli import cli
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = os.path.join(tmp, "cfg.json")
+            with open(cfg, "w") as f:
+                json.dump({"pack": {"dedup-threshold": value}}, f)
+            out = os.path.join(tmp, "out")
+            result = CliRunner().invoke(cli, ["--config", cfg, "pack", self._input(tmp), "-o", out])
+            assert result.exit_code == 2
+            assert "0 to 10" in result.output
+            assert not os.path.exists(out)
+
+    @pytest.mark.parametrize("value", ["0", "10"])
+    def test_bounds_accepted(self, value):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = CliRunner().invoke(pack, [
+                self._input(tmp), "-o", os.path.join(tmp, "out"),
+                "--dedup", "fuzzy", "--dedup-threshold", value])
+            assert result.exit_code == 0, result.output

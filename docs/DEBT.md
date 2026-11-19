@@ -47,3 +47,18 @@ Entry format, grouped under one heading per issue or PR:
   bandwidth, and `Fetcher.get` decodes the raw body with `_decode`. Measured on
   curl_cffi 0.17.0 with a 1 GiB bomb: peak RSS over baseline went from ~1030 MiB
   (gzip, br, zstd) to 71-130 MiB, the same as the stdlib path.**
+
+## fire-engine silence timeout (#154, 2026-11-19)
+
+- **After data has arrived, fire-engine can wait about nine seconds past
+  `--timeout` before giving up on a silent server.** libcurl's low-speed check
+  (`LOW_SPEED_LIMIT`/`LOW_SPEED_TIME`, `src/dograpper/lib/fire_engine/fetcher.py`)
+  averages the rate over its last few one-second records, so the rate only drops
+  to zero once they have all rolled past the last byte. Measured on curl_cffi
+  0.17.0 (libcurl 8.23.0), a byte at 0.1 s then silence: aborted at 8-9 s with
+  `--timeout 1` and 13-14 s with `--timeout 5`; the stdlib path aborts at 1.1 s.
+  ⏸ **accepted: it only delays giving up on a stalled server, never aborts a
+  live one, and libcurl has no per-receive idle timeout; an exact one needs a
+  progress callback (`XFERINFOFUNCTION`), which curl_cffi does not expose. Fix
+  when curl_cffi exposes it, or when a real crawl is slowed by servers that
+  stall mid-body.**
