@@ -757,7 +757,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--include-extensions` | — | `html,htm,md,txt` | Extensions packed as documentation (csv). Other files are skipped and counted by extension in the summary. `robots.txt` and dograpper's own manifests are always skipped |
 | `--prefix` | — | `docs_chunk_` | Prefix for generated files |
 | `--with-index` / `--no-index` | — | `--with-index` | Header with file index |
-| `--format` | — | `md` | Output format: `md` (Markdown: `#` headings, `[text](target)` links, `-` / `N.` lists, pipe tables, fenced code; see [Markdown structure](#markdown-structure-md)), `txt` (plain text), `jsonl` (plain text records), `xml` (deprecated — errors, use `md`) |
+| `--format` | — | `md` | Output format: `md` (Markdown: `#` headings, `[text](target)` links, `-` / `N.` lists, pipe tables, fenced code; see [Markdown structure](#markdown-structure-md)), `txt` (plain text), `jsonl` (plain text records) |
 | `--layout` | — | `chunk` | `chunk`: numbered chunk files. `page`: one file per page under `pages/` plus `INDEX.md` (see [Page layout](#page-layout---layout-page)) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
@@ -1611,7 +1611,7 @@ Stop the server with Ctrl+C.
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
 | 2 | pack --api-records | `--format` other than `jsonl`, or `--bundle notebooklm` | use `--format jsonl`; drop the bundle |
-| 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge or saved error page; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run`; `--format xml` (deprecated) | fix the input or the flags |
+| 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge or saved error page; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run` | fix the input or the flags |
 | 1 | download | the manifest cannot be written | fix permissions or free space in `--output`; the mirror itself is complete |
 | 1 | pack --delta | `pack_state.json` cannot be written | fix permissions or free space in `--output`; the chunks are complete, the next `--delta` run packs in full |
 | 2 | pack | `--output` is the same directory as `INPUT_DIR` | use a subdirectory or another path |

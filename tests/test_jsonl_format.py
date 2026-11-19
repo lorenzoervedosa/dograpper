@@ -160,8 +160,8 @@ class TestJsonlCLI:
             jsonl_files = [f for f in os.listdir(output_dir) if f.endswith('.jsonl')]
             assert len(jsonl_files) >= 1
 
-    def test_cli_xml_deprecated(self):
-        """CLI --format xml lança erro de depreciação."""
+    def test_cli_xml_rejected(self):
+        """CLI --format xml is not a choice (exit 2)."""
         from click.testing import CliRunner
         from dograpper.commands.pack import pack
 
@@ -175,5 +175,4 @@ class TestJsonlCLI:
                 input_dir, "-o", os.path.join(d, "output"),
                 "--format", "xml",
             ])
-            assert result.exit_code != 0
-            assert "deprecated" in result.output.lower() or "deprecated" in str(result.exception).lower()
+            assert result.exit_code == 2

@@ -379,7 +379,7 @@ class TestContextHeaderCLI:
                 content = f.read()
             assert "dograpper-context-v1" in content
 
-    def test_xml_format_deprecated(self):
+    def test_xml_format_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             input_dir = self._create_html_files(tmp)
             output_dir = os.path.join(tmp, "output")
@@ -389,8 +389,7 @@ class TestContextHeaderCLI:
                 input_dir, "-o", output_dir, "--context-header", "--format", "xml",
             ])
 
-            assert result.exit_code != 0
-            assert "deprecated" in result.output.lower() or "deprecated" in str(result.exception).lower()
+            assert result.exit_code == 2
 
     def test_non_html_file_source_only(self):
         with tempfile.TemporaryDirectory() as tmp:

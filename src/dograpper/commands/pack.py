@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 # would report "nothing changed" on the very run that needs packing.
 PACK_STATE_FILENAME = "pack_state.json"
 
+FORMATS = ['txt', 'md', 'jsonl']
+
 
 def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
                     is_dry_run, is_score, api_records, bundle_preset):
@@ -35,10 +37,9 @@ def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
         raise click.UsageError(
             "--api-records cannot be combined with --bundle notebooklm, which shapes "
             "whole pages into NotebookLM sources")
-    if fmt == 'xml':
-        raise click.ClickException(
-            "XML format is deprecated since v1.x. Use 'md' (default) or 'jsonl'."
-        )
+    if fmt not in FORMATS:
+        raise click.UsageError(
+            f"Invalid value for --format: {fmt!r} is not one of {', '.join(FORMATS)}.")
 
     query_list = None
     if for_queries_path:
@@ -137,8 +138,8 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Filename prefix of every chunk file (default docs_chunk_ gives docs_chunk_01.md). explain, serve and eval look chunks up by this prefix.")
 @click.option('--with-index/--no-index', default=True, show_default=True,
               help="Put a list of the source files in the header of each chunk (default). --no-index leaves the list out.")
-@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True,
-              help="Chunk output format. 'xml' is deprecated.")
+@click.option('--format', type=click.Choice(FORMATS), default='md', show_default=True,
+              help="Chunk output format.")
 @click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
               help="chunk: numbered chunk files. page: one md/txt file per page "
                    "under pages/, mirroring INPUT_DIR, plus INDEX.md.")

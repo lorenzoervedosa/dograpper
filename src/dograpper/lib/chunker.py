@@ -650,11 +650,7 @@ def write_chunks(chunks: List[Chunk], base_dir: str, output_dir: str, prefix: st
         out_filepath = os.path.join(output_dir, out_filename)
         generated_paths.append(out_filepath)
 
-        if fmt == "xml":
-            raise ValueError(
-                "XML format is deprecated. Use 'md' (default) or 'jsonl'."
-            )
-        elif fmt == "jsonl":
+        if fmt == "jsonl":
             _write_chunk_jsonl(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate, api_records=api_records, page_meta=page_meta)
         elif fmt == "txt":
             _write_chunk_text(chunk, base_dir, out_filepath, with_index, total_chunks, no_extract=no_extract, text_overrides=text_overrides, heading_map=heading_map, max_words=max_words, url_map=url_map, readiness_map=readiness_map, prefix=prefix, annotate=annotate, page_meta=page_meta)

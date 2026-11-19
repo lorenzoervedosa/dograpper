@@ -247,6 +247,7 @@ and fixes alone are a PATCH bump.
 
 ### Removed
 
+- `pack --format xml` is no longer a choice (it could only fail); `--format xml` and `format: "xml"` in `.dograpper.json` are usage errors (exit 2). ([#150])
 - `sync --format xml`: the deprecated `xml` choice is gone from `sync --format`, as
   from `pack --format`; it is now a usage error (exit 2) (#150).
 
@@ -521,6 +522,7 @@ and fixes alone are a PATCH bump.
 [#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
+[#150]: https://github.com/lorenzoervedosa/dograpper/issues/150
 [#141]: https://github.com/lorenzoervedosa/dograpper/issues/141
 [#133]: https://github.com/lorenzoervedosa/dograpper/issues/133
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
