@@ -259,7 +259,8 @@ and fixes alone are a PATCH bump.
 - `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
 - `drift -o` and `eval -o` on a path that cannot be written print one error line
   with the path and exit 1, instead of a traceback; the report is written atomically,
-  so a failed write leaves a previous one intact (#147).
+  so a failed write leaves a previous one intact, and a missing parent directory
+  is created, as `pack -o` does (#147).
 - `doctor --check-system-libs --install` no longer drops `--install`: the install
   runs first, then the library check, so a machine without chromium no longer
   exits 3 asking for the `--install` that was passed (#146).
