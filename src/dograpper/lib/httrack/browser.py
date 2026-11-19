@@ -13,15 +13,14 @@ Playwright is never imported: the crawl (lib/playwright_crawl.py) passes its obj
 """
 
 import logging
-import os
 import threading
 from urllib.parse import urlsplit
 
 from dograpper.lib.url_filter import UrlFilters
-from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.redact import redact_url
 
-from .crawl import extension_set, fetch_page, record_of, relink, seed_redirect_ok, stamp
+from .crawl import (extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
+                    stamp)
 from .fetcher import Fetcher
 from .links import url_key
 from .mirror import outside, rescope, skipped_by_extension, start_rule
@@ -119,19 +118,11 @@ class Navigator:
         --include-extensions leaves it out or it cannot be written (the report says which,
         as crawl.fetch_url_list words it)."""
         final, res = self._last
-        ctype = res.headers.get("content-type")
-        path = self._names.assign(final, ctype)
-        if path is None:
-            self.report.errors.append((redact_url(final), "unsafe local path", None))
-            return None
-        if self._exts and os.path.splitext(path)[1].lower() not in self._exts:
-            self.report.filtered.append(redact_url(final))
-            return None
         page = _is_page(res)
-        try:
-            atomic_write_bytes(path, html.encode("utf-8") if page else res.body)
-        except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
-            self.report.errors.append((redact_url(final), f"write failed: {exc}", None))
+        path = save_file(self._names, final, res.headers.get("content-type"),
+                         html.encode("utf-8") if page else res.body, self._exts, self.report,
+                         redact_url(final), None)
+        if path is None:
             return None
         self._files[path] = final
         if page:

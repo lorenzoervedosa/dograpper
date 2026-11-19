@@ -129,6 +129,30 @@ def seed_redirect_ok(url: str, nxt: str, report: RunReport,
     return filters is None or filters.decide(nxt) is not False
 
 
+def save_file(names: NameRegistry, url: str, content_type: str | None, body: bytes,
+              exts: set[str], report: RunReport, safe: str, via: str | None, *,
+              prefer: str | None = None, changes=None) -> str | None:
+    """Save `body`, the answer to `url`, under the name NameRegistry gives it (`prefer` as
+    assign() takes it) when --include-extensions keeps that name: atomically, sampled first
+    for --changes. Return the file, or None with the cause in `report` (a name outside the
+    output, filtered, a failed write). For the calling thread (mirror_site, the Playwright
+    path); fetch_url_list's write() takes the same steps across its threads."""
+    path = names.assign(url, content_type, prefer=prefer)
+    if path is None:
+        report.errors.append((safe, "unsafe local path", via))
+    elif exts and os.path.splitext(path)[1].lower() not in exts:
+        report.filtered.append(safe)
+    else:
+        try:
+            if changes is not None:
+                changes.overwriting(path)
+            atomic_write_bytes(path, body)
+            return path
+        except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
+            report.errors.append((safe, f"write failed: {exc}", via))
+    return None
+
+
 def extension_set(include_extensions: str) -> set[str]:
     """--include-extensions as the dotted, lower-case extensions it keeps; empty keeps all.
     (lib/ignore_parser.split_by_extension parses the same flag for pack.)"""
@@ -488,6 +512,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
         return "refused" if failed else "kept"  # still fails the front (spec 5.4, 5.8)
 
     def write(url: str, seed: str, safe: str, res, mine: str | None = None) -> str:
+        # save_file()'s steps, split around the wait for another seed writing the same file
         path = names.assign(url, res.headers.get("content-type"), prefer=mine)
         if path is None:
             with lock:

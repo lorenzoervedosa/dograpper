@@ -21,14 +21,13 @@ from urllib.parse import unquote, urlsplit
 
 from dograpper.lib.manifest import Manifest
 from dograpper.lib.url_filter import UrlFilters
-from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .changes import Changes
 from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, extension_set, fetch_page,
-                    moved_request, previous_files, record_of, relink, reserve_names, sends,
-                    stamp, uncached)
+                    moved_request, previous_files, record_of, relink, reserve_names, save_file,
+                    sends, stamp, uncached)
 from .fetcher import Fetcher, same_host
 from .links import JS_MIMES, css_links, page_links, script_links, url_key
 from .naming import NameRegistry, no_page, url_extension
@@ -238,29 +237,18 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             links = script_links(res.body, entry.url, entry.referer or entry.url, **scans)
         else:
             links = []
-        # second copy of crawl.fetch_url_list's write(): name, --include-extensions, write
         mine = entry.prev.path if entry.prev and not entry.prev.redirected else None
-        path = names.assign(entry.url, ctype, prefer=mine)
-        if path is None:
-            report.errors.append((safe, "unsafe local path", via))
-        elif exts and os.path.splitext(path)[1].lower() not in exts:
-            report.filtered.append(safe)
-        else:
-            try:
-                if changes is not None:
-                    changes.overwriting(path)
-                atomic_write_bytes(path, res.body)
-            except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
-                report.errors.append((safe, f"write failed: {exc}", via))
-            else:
-                saved[url_key(entry.url)] = path
-                fields[path] = record_of(res)
-                state["bytes"] += len(res.body)
-                if mime == "text/html":
-                    pages[path] = entry.url
-                elif mime == "text/css" or mime in JS_MIMES:  # a script: its page's base
-                    scripts[path] = (entry.url, None if mime == "text/css" else entry.referer,
-                                     mime == "text/css")
+        path = save_file(names, entry.url, ctype, res.body, exts, report, safe, via,
+                         prefer=mine, changes=changes)
+        if path is not None:
+            saved[url_key(entry.url)] = path
+            fields[path] = record_of(res)
+            state["bytes"] += len(res.body)
+            if mime == "text/html":
+                pages[path] = entry.url
+            elif mime == "text/css" or mime in JS_MIMES:  # a script: its page's base
+                scripts[path] = (entry.url, None if mime == "text/css" else entry.referer,
+                                 mime == "text/css")
         for link in links:
             got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta,
                           initiator=entry.url)
