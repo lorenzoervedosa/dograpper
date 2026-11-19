@@ -24,7 +24,7 @@ from .crawl import (extension_set, fetch_page, record_of, relink, save_file, see
 from .fetcher import Fetcher
 from .links import url_key
 from .mirror import outside, rescope, skipped_by_extension, start_rule
-from .naming import NameRegistry
+from .naming import NameRegistry, mime_type
 from .report import RunReport
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ _DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding",
 
 
 def _is_page(res) -> bool:
-    return (res.headers.get("content-type") or "").split(";")[0].strip().lower() == "text/html"
+    return mime_type(res.headers.get("content-type")) == "text/html"
 
 
 class Navigator:

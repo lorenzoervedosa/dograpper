@@ -30,7 +30,7 @@ from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, extension_set, fetch
                     sends, stamp, uncached)
 from .fetcher import Fetcher, same_host
 from .links import JS_MIMES, css_links, page_links, script_links, url_key
-from .naming import NameRegistry, no_page, url_extension
+from .naming import NameRegistry, mime_type, no_page, url_extension
 from .policy import NAVIGATION, FetchMeta, HttrackPolicy
 from .report import RunReport
 
@@ -225,7 +225,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             return
         state["front_ok"] |= entry.front
         ctype = res.headers.get("content-type")
-        mime = (ctype or "").split(";")[0].strip().lower()
+        mime = mime_type(ctype)
         scans = {"parse_scripts": policy.parse_scripts,
                  "extended_parsing": policy.extended_parsing}
         if mime == "text/html":
@@ -266,7 +266,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         saved[url_key(entry.url)] = p.path
         kept.add(p.path)
         fields[p.path] = p.record
-        mime = (p.record["content_type"] or "").split(";")[0].strip().lower()
+        mime = mime_type(p.record["content_type"])
         if mime not in ("text/html", "text/css", *JS_MIMES) or res.error is not None or (
                 failed and entry.front):
             return []

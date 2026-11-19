@@ -21,7 +21,7 @@ from dograpper.utils.redact import recordable_url, redact_url
 from .escape import request_target
 from .fetcher import REDIRECTS, Fetcher, FetchResult, same_host
 from .links import JS_MIMES, rewrite_file_links, rewrite_links, url_key
-from .naming import NameRegistry, no_page
+from .naming import NameRegistry, mime_type, no_page
 from .policy import (NAVIGATION, SITES, FetchMeta, HttrackPolicy, conditional_headers,
                      response_validators, site_of)
 from .report import RunReport
@@ -176,7 +176,7 @@ def hypertext(content_type: str | None) -> bool:
     """htslib.h is_hypertext_mime: a page, script, stylesheet or SVG, or no type at all
     (HTTrack reads it as HTML). shortcut: no guess from the extension for an
     application/octet-stream type (may_unknown); upgrade if a site serves documents so."""
-    mime = (content_type or "").split(";")[0].strip().lower()
+    mime = mime_type(content_type)
     return not mime or mime in HYPERTEXT
 
 
@@ -554,7 +554,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
             size[0] += len(res.body)
             fields[path] = record_of(res)
             reached.extend(((url, path), (seed, path)))
-            mime = (res.headers.get("content-type") or "").split(";")[0].strip().lower()
+            mime = mime_type(res.headers.get("content-type"))
             if mime == "text/html":
                 pages[path] = url
             elif mime == "text/css" or mime in JS_MIMES:  # a seed: no page loaded it
