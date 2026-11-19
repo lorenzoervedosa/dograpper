@@ -84,7 +84,7 @@ def eval(ctx, chunks_dir, top_k, output, prefix):
         try:
             atomic_write_bytes(
                 output, json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8"))
-        except OSError as e:
+        except OSError as e:  # second copy, with commands/drift.py: a third one extracts the shape
             click.echo(f"Error: cannot write {output}: {e.strerror or e}", err=True)
             ctx.exit(1)
         click.echo(f"Report written to {output}")

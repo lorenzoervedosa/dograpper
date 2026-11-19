@@ -124,7 +124,7 @@ def drift(ctx, new_path, old_path, delta_path, output_format, output,
     if output:
         try:
             atomic_write_bytes(output, (rendered + "\n").encode('utf-8'))
-        except OSError as e:
+        except OSError as e:  # second copy, with commands/eval.py: a third one extracts the shape
             click.echo(f"Error: cannot write {output}: {e.strerror or e}", err=True)
             ctx.exit(1)
     else:
