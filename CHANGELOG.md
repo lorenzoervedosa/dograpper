@@ -252,6 +252,7 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
 - `drift -o` and `eval -o` on a path that cannot be written print one error line
   with the path and exit 1, instead of a traceback; the report is written atomically,
   so a failed write leaves a previous one intact (#147).
@@ -520,6 +521,7 @@ and fixes alone are a PATCH bump.
 [#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
+[#141]: https://github.com/lorenzoervedosa/dograpper/issues/141
 [#133]: https://github.com/lorenzoervedosa/dograpper/issues/133
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132

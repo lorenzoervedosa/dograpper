@@ -192,8 +192,9 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
               help="Write readiness-report.html with per-page before/after "
                    "extraction data and score penalty causes. Implies --score.")
 @click.option('--api-records', is_flag=True, default=False,
-              help="Split API reference pages (Javadoc) into one container record "
-                   "and one record per member. Requires --format jsonl.")
+              help="Split API reference pages into one container record and one "
+                   "record per member, for the documentation generators listed in "
+                   "the README ('API reference records'). Requires --format jsonl.")
 @click.pass_context
 def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: int, max_chunks: int, strategy: str, ignore_file: str, ignore: tuple, prefix: str, with_index: bool, format: str, layout: str, no_extract: bool, show_tokens: bool, token_encoding: str, dry_run: bool, dedup: str, dedup_threshold: int, context_header: bool, cross_refs: bool, delta: bool, include_extensions: str, manifest: str, bundle: str, score: bool, for_queries: str, report: bool, api_records: bool):
     """Process and group files into chunks optimized for LLM ingestion.
