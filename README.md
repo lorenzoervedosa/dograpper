@@ -625,9 +625,14 @@ the `wget` cascade's Playwright:
   script runs; the report lists it as the engine's would. `/cdn-cgi/` is
   never requested, not even by a script of a page.
 - **Subresources** (scripts, styles, XHR the page needs to render) are the
-  browser's own requests, with the profile's User-Agent. An iframe, a popup
-  or a navigation the page starts itself (meta refresh, `location =`) is not
-  followed, and service workers are blocked.
+  browser's own requests, with the profile's User-Agent, neither checked
+  against robots.txt nor paced: they are dependencies of a page the policy
+  already let through, as in an ordinary visit (a decided exception to the
+  profile's rule that every request goes through it). Routing every request
+  turns Chromium's HTTP cache off, so each page fetches them again. An
+  iframe, a popup or a navigation the page starts itself (meta refresh,
+  `location =`) is not followed yet ([#159](https://github.com/lorenzoervedosa/dograpper/issues/159)),
+  and service workers are blocked.
 - **Scope, names, links:** a seeded run opens its seeds alone, as the seeded
   fetch does; links of a rendered page follow the crawl's scope (start host,
   start directory, `--filter`, `--depth`, `--max-links`, a known non-page type
@@ -639,7 +644,8 @@ the `wget` cascade's Playwright:
 - **Each page in full.** `--headless` skips the engine's fetch, so no page is
   revalidated: `--cache`, `--updatehack`, `--do-not-recatch` and `--changes`
   with `--headless` are a usage error (exit 2). After an engine fetch that
-  looked client-rendered, the browser fetches every page again; a crawl that
+  looked client-rendered, the browser fetches every page again (reusing the
+  engine's copy is planned, [#160](https://github.com/lorenzoervedosa/dograpper/issues/160)); a crawl that
   saved one page because the rest was challenged is no trigger (no browser
   run, the report lists the challenges).
 - **Report and exit.** After an engine fetch, the browser's own report follows

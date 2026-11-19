@@ -55,13 +55,21 @@ Entry format:
   (Chromium normalizes URLs; `about:blank` makes the match positional);
   Playwright for `fire-engine` (its navigations would lose the curl_cffi
   fingerprint, and its tests are another lane's).
-- **Pending:** should subresources go through the profile too (§2 says every
-  network path of layer 4; §7 routes navigations)? It would put Chromium's
-  script and style requests under robots.txt, the pacing and the profile's
-  TLS. Should a page's own navigation (meta refresh, `location =`) be queued
-  as a link (§5.5)? Should the browser pass after an engine fetch revalidate,
-  or render only what the engine wrote? The usage error for the update flags
-  under `--headless` was not asked for: keep it?
+- **Pending:** none. The maintainer answered the four open questions
+  (2026-11-19):
+  - Subresources stay Chromium's own requests (its TLS, the profile's UA, no
+    robots.txt, no pacing; `/cdn-cgi/` aborted). This is an approved deviation
+    (spec §5.2). They are dependencies of a page the policy already let
+    through, as in an ordinary browser visit, and robots.txt often forbids
+    legitimate assets. The load is bounded by the paced navigations and
+    Chromium's per-host connection limit; not by the HTTP cache, which
+    Playwright turns off while routing is on (measured).
+  - A page's own navigation (meta refresh, `location =`) is to be queued as a
+    link; not implemented, tracked in #159.
+  - After an engine fetch, the browser pass is to reuse the engine's body
+    instead of fetching each page again; not implemented, tracked in #160.
+  - The exit 2 for `--cache`, `--updatehack`, `--do-not-recatch` and
+    `--changes` with `--headless` stays.
 
 ## 2026-11-18 — Root CLAUDE.md split into nested files
 

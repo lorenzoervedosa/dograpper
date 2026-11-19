@@ -35,7 +35,8 @@ lose the wget path, which works well on the sites it already serves.
   - layer 2 (sitemap);
   - layer 3, a new Python engine that replaces *both* `wget -i` and
     `wget --mirror`;
-  - layer 4 (Playwright).
+  - layer 4 (Playwright): its navigations; its subresources are a
+    **deviation** (§5.2).
 - **Identical to HTTrack, on the wire and in behavior.** The user's words: "a
   implementação idêntica à do HTTrack, só que no dograpper". The only
   deviations are the ones listed in this document, each marked
@@ -180,6 +181,20 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 
 - Fetched once per host before that host's first content request, and applied
   to every layer, including seeded URL lists and Playwright navigations.
+- **Playwright subresources are exempt (deviation, user decision
+  2026-11-19).** The scripts, styles, fonts, images and XHR a rendered page
+  asks for are Chromium's own requests: Chromium's TLS, the profile's UA, no
+  robots.txt check and no pacing; `/cdn-cgi/` is still aborted.
+  - Why: they are dependencies of a page the policy already let through,
+    fetched as an ordinary browser visit fetches them, and robots.txt often
+    forbids legitimate assets.
+  - What bounds the load: the navigations, paced by the `Fetcher` one page at
+    a time, and Chromium's own per-host connection limit.
+  - The HTTP cache does **not** soften it: Playwright turns Chromium's cache
+    off while routing is on, and the profile routes every request (measured
+    with Playwright 1.58: a `max-age=3600` script was fetched once per page,
+    against once per run without routing). Each page fetches its
+    subresources again.
 - **Group selection:** a `dograpper` UA token (case-insensitive prefix) beats
   `*`, and consecutive `User-agent:` lines form one group.
 - **Matching:** longest pattern wins and Allow wins ties.
@@ -560,7 +575,9 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- None at the moment: the cache and update options of #132 are in §5.6.
+- The Playwright pass (§7, PR 4) does not follow a navigation a page starts
+  itself (meta refresh, `location =`), where §5.5 counts meta refresh as a
+  link. Decided: queue it as a link. Tracked in [#159](https://github.com/lorenzoervedosa/dograpper/issues/159).
 
 ## 6. Code layout (proposal; the plan may refine)
 
@@ -617,18 +634,22 @@ README and CHANGELOG.
    - Redirects are resolved by the `Fetcher` before the page opens: Chromium
      follows a fulfilled 3xx without routing the next hop (measured with
      Playwright 1.58's Chromium), which would leave the policy.
-   - **Open question (owner: user), not an approved deviation:** §2 puts
-     every network path of layer 4 under the profile, while this item routes
-     navigations only. Subresources (scripts, styles, XHR) are the browser's
-     own requests, with the profile's UA but Chromium's TLS, no robots.txt
-     check and no pacing; `/cdn-cgi/` is aborted for every request.
+   - Subresources are Chromium's own requests: the §5.2 **deviation** (user
+     decision, 2026-11-19); `/cdn-cgi/` is aborted for every request.
    - Not followed: iframes, popups and navigations a page starts itself (meta
-     refresh, `location =`; §5.5 counts meta refresh as a link: open
-     question). A seeded run opens its seeds alone; followed links carry their
+     refresh, `location =`). Decided (2026-11-19): queue them as links, not
+     implemented yet, tracked in [#159](https://github.com/lorenzoervedosa/dograpper/issues/159) (Known gaps). A seeded run opens its seeds alone; followed links carry their
      page as `Referer` and pass mirror's scope and extension pre-filter; a
      non-HTML answer is saved as fetched, never opened. After an engine fetch
      the browser pass has its own report and is no front (§5.8); a shallow
-     crawl explained by challenges does not trigger it (§5.4). Code:
+     crawl explained by challenges does not trigger it (§5.4).
+   - After an engine fetch that looks client-rendered, the browser fetches
+     every page again. Decided (2026-11-19): reuse the engine's body in the
+     browser pass instead, not implemented yet, tracked in [#160](https://github.com/lorenzoervedosa/dograpper/issues/160).
+   - `--cache`, `--updatehack`, `--do-not-recatch` and `--changes` with
+     `--headless` are a usage error (exit 2), since no page is revalidated
+     there: kept (user decision, 2026-11-19).
+   - Code:
      `lib/httrack/browser.py` (`Navigator`), wired into
      `lib/playwright_crawl.py`; `fire-engine` keeps failing loud on
      `--headless` and on a client-rendered result.
@@ -639,8 +660,9 @@ README and CHANGELOG.
 `--downloader httrack` needs a path that does not exist yet (recursive crawl,
 or Playwright under the profile), it fails loudly with exit 1 and names the
 missing piece. It never falls back to wget or to Playwright without the
-policy. (Both have landed; the rule still holds for what PR 5 adds.) Release timing between PRs is the user's call; CHANGELOG entries
-accumulate under `[Unreleased]`.
+policy. (Both have landed; the rule still holds for what PR 5 adds.)
+Release timing between PRs is the user's call; CHANGELOG entries accumulate
+under `[Unreleased]`.
 
 ## 8. Open decisions (owner: user)
 
