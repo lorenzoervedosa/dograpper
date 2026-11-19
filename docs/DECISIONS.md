@@ -22,6 +22,22 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-18 — Existing text keeps its words (#153)
+
+Supersedes the "Pending" of the entry below.
+
+- **Decision:** the confirmed glossary terms are not applied to text and
+  identifiers that already exist. The README section "Downloader profiles",
+  the `[httrack]` help labels, `PROFILE_OPTIONS` / `run_profile` and the
+  `Files skipped: N (cached)` summary line keep their words; new text uses
+  the terms.
+- **Why:** the maintainer decided it when asked, after #153 was merged.
+  Renaming the summary line or the help labels is an observable change, and
+  renaming identifiers changes no behaviour.
+- **Rejected:** a rename pass over the README, the help labels and the
+  identifiers.
+- **Pending:** none.
+
 ## 2026-11-18 — Glossary terms confirmed by the maintainer (#138)
 
 Supersedes the "Pending" of the entry below.
