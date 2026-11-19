@@ -55,16 +55,9 @@ def count_tokens(text: str, encoding: str = "cl100k") -> TokenCount:
     if words == 0:
         return TokenCount(words=0, tokens=0, encoding=encoding)
 
-    # Resolve alias → full name
+    check_encoding(encoding)
     enc_name = SUPPORTED_ENCODINGS.get(encoding, encoding)
-
-    try:
-        enc = tiktoken.get_encoding(enc_name)
-    except ValueError:
-        raise ValueError(
-            f"Encoding '{encoding}' not recognized. "
-            f"Supported options: {', '.join(SUPPORTED_ENCODINGS.keys())}"
-        )
+    enc = tiktoken.get_encoding(enc_name)
 
     tokens = len(enc.encode(text))
     return TokenCount(words=words, tokens=tokens, encoding=enc_name)

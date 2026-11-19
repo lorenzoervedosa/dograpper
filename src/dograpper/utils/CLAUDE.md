@@ -31,7 +31,7 @@ src/dograpper/utils/
     ├── readiness_report.py # PageReadiness, find_removed_blocks(), generate_html_report(), format_terminal_report() — relatório do --report
     ├── redact.py           # redact_url() — remove userinfo (user:senha@), mascara o valor de parâmetros de query com cara de credencial (mask_secret_params()) e percent-encoda caracteres de controle antes de logar; recordable_url()/NAVIGATION_PARAMS — URL que pode ir para o manifest e o hts-changes.json (None se algum parâmetro da query está fora da allowlist de navegação); drop_userinfo() — fonte única da remoção de userinfo (logs e headers do perfil httrack); neutralize_controls() — fonte única da neutralização C0/DEL/C1
     ├── scorer.py           # LLM Readiness Score: noise_ratio, boundary_integrity, context_depth → grade A/B/C
-    ├── token_counter.py    # count_tokens() via tiktoken (dependência obrigatória, sem fallback; aliases cl100k/o200k/p50k, encoding desconhecido levanta ValueError), count_tokens_file() (leitura tolerante), format_token_summary()
+    ├── token_counter.py    # count_tokens() via tiktoken (dependência obrigatória, sem fallback; aliases cl100k/o200k/p50k, encoding desconhecido levanta ValueError via check_encoding(), que o pack chama antes de empacotar), count_tokens_file() (leitura tolerante), format_token_summary()
     └── word_counter.py     # count_words() (markdown=True: sem a marcação do md — marcadores de título/lista, pipes, linha delimitadora, bloco de definições de link no fim) e count_words_file()
 ```
 
