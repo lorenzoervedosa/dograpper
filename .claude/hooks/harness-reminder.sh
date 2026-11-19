@@ -14,6 +14,7 @@ except Exception:
     pass' 2>/dev/null) || exit 0
 
 case "$file" in
+  */CLAUDE.md) exit 0 ;;  # a nested CLAUDE.md is the doc, not the contract (commands/, lib/httrack/ ...)
   *src/dograpper/utils/heading_extractor.py|*src/dograpper/lib/chunker.py|*src/dograpper/utils/api_reference/*)
     docs="docs/schema-v1.md (dograpper-context-v1 header and JSONL record fields) and README.md" ;;
   *src/dograpper/lib/config_loader.py|*src/dograpper/commands/sync.py)

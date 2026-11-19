@@ -276,7 +276,8 @@ def test_reminder_output_stays_valid_json_for_any_path(tmp_path):
     assert "README.md" in reminder(tmp_path / 'src/dograpper/commands/a"b\\c.py', tmp_path)
 
 
-@pytest.mark.parametrize("rel", ["tests/test_pack.py", "README.md", "src/dograpper/utils/logger.py"])
+@pytest.mark.parametrize("rel", ["tests/test_pack.py", "README.md", "src/dograpper/utils/logger.py",
+                                 "src/dograpper/commands/CLAUDE.md", "src/dograpper/lib/httrack/CLAUDE.md"])
 def test_reminder_stays_silent_for_other_files(rel, tmp_path):
     assert reminder(tmp_path / rel, tmp_path) is None
 
