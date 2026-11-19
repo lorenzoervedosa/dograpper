@@ -14,8 +14,8 @@ Permalink signs and ``[source]`` links are dropped. Any other markup raises NotS
 
 from typing import List, Optional
 
-from . import ApiRecord, NotSplit, check_symbol
-from ._html import Regions, Text
+from . import ApiRecord, NotSplit, check_anchor, check_symbol, declared
+from ._html import Regions, Text, line
 
 GENERATOR = "sphinx"
 # Start of every object signature; __init__ recognises a Sphinx page by it.
@@ -61,15 +61,10 @@ class _Page(Regions):
         self.objects: List[_Object] = []   # every object, in page order
         self.unknown: Optional[str] = None
 
-    def _set(self, name, value, closers) -> None:
-        previous = getattr(self, name)
-        setattr(self, name, value)
-        closers.append(lambda: setattr(self, name, previous))
-
     def start(self, tag, attr, classes, closers):
         if attr.get("role") == "main" and self.main is None:
             self.main = self.region(closers)
-            self._set("_in_main", True, closers)
+            self.set_until_end("_in_main", True, closers)
             return
         if not self._in_main:
             return
@@ -100,7 +95,7 @@ class _Page(Regions):
             field = "prename" if "sig-prename" in classes else "name"
             if getattr(obj, field) is None:
                 setattr(obj, field, Text())
-                self._set("_tap", getattr(obj, field), closers)
+                self.set_until_end("_tap", getattr(obj, field), closers)
 
     def handle_data(self, data):
         super().handle_data(data)
@@ -112,16 +107,9 @@ def _unsupported(problem: str) -> NotSplit:
     return NotSplit(f"unsupported Sphinx markup: {problem}")
 
 
-def _line(text: Optional[Text]) -> str:
-    return " ".join(text.final()) if text else ""
-
-
 def _declared(children: List[_Object], short) -> List[str]:
     """One "Label: a, b" line per object type, in order of first appearance."""
-    declared = {}  # label -> {name: None}, an ordered set
-    for child in children:
-        declared.setdefault(_TYPES[child.objtype][1], {})[short(child)] = None
-    return [f"{label}: {', '.join(names)}" for label, names in declared.items()]
+    return declared((_TYPES[child.objtype][1], short(child)) for child in children)
 
 
 def records(html: str) -> List[ApiRecord]:
@@ -142,16 +130,14 @@ def records(html: str) -> List[ApiRecord]:
             raise _unsupported("a dl.py without a dt.sig-object")
         if not obj.anchor:
             raise _unsupported("an object without an id (:no-index:)")
-        if obj.anchor in anchors:
-            raise _unsupported("duplicate object id")
-        anchors.add(obj.anchor)
-        name = _line(obj.name)
+        check_anchor(obj.anchor, anchors, _unsupported, "duplicate object id")
+        name = line(obj.name)
         if not name:
             raise _unsupported("a signature without a sig-name")
         if obj.parent is not None:
             obj.symbol = f"{obj.parent.symbol}.{name}"
         else:
-            obj.symbol = (_line(obj.prename) + name) if obj.prename else obj.anchor
+            obj.symbol = (line(obj.prename) + name) if obj.prename else obj.anchor
         check_symbol(obj.symbol, _unsupported)
 
     top = [obj for obj in page.objects if obj.parent is None]
@@ -167,11 +153,11 @@ def records(html: str) -> List[ApiRecord]:
                         breadcrumb=[module], generator=GENERATOR)]
     for obj in page.objects:
         kind = _TYPES[obj.objtype][0]
-        signatures = [_line(sig) for sig in obj.signatures]
+        signatures = [line(sig) for sig in obj.signatures]
         doc = obj.doc.final() if obj.doc else []
         if kind == "container":
             text = [f"{obj.symbol} ({obj.objtype})"] + signatures + doc + _declared(
-                obj.children, lambda child: _line(child.name))
+                obj.children, lambda child: line(child.name))
             result.append(ApiRecord(text="\n".join(text), symbol=obj.symbol, kind=kind,
                                     symbol_kind=obj.objtype, breadcrumb=[obj.symbol],
                                     generator=GENERATOR, anchor=obj.anchor))

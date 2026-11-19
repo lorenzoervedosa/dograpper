@@ -8,7 +8,7 @@ is reported, with the reason, by ``format_kept_whole``.
 
 import os
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, Iterable, List, Set, Tuple
 from urllib.parse import quote
 
 from ..generator import page_generator
@@ -31,6 +31,23 @@ def check_symbol(symbol: str, unsupported: Callable[[str], NotSplit]) -> None:
     """Raise the adapter's ``unsupported(problem)`` for a qualified name over MAX_SYMBOL characters."""
     if len(symbol) > MAX_SYMBOL:
         raise unsupported(f"a qualified name over {MAX_SYMBOL} characters")
+
+
+def check_anchor(anchor: str, seen: Set[str], unsupported: Callable[[str], NotSplit], problem: str) -> None:
+    """Add ``anchor`` to ``seen``; raise the adapter's ``unsupported(problem)`` if it is there already,
+    as two records of one page would share an id."""
+    if anchor in seen:
+        raise unsupported(problem)
+    seen.add(anchor)
+
+
+def declared(pairs: Iterable[Tuple[str, str]]) -> List[str]:
+    """One "Label: a, b" line per label of the (label, name) pairs, in order of first appearance;
+    each name once, in page order."""
+    names = {}  # label -> {name: None}, an ordered set
+    for label, name in pairs:
+        names.setdefault(label, {})[name] = None
+    return [f"{label}: {', '.join(listed)}" for label, listed in names.items()]
 
 
 @dataclass
