@@ -606,6 +606,32 @@ README and CHANGELOG.
    - A response carrying `cf-mitigated` or challenge markup is aborted
      *before* it renders, so no challenge script runs (*call*, same reason as
      §5.4).
+   - **Status: implemented (2026-11-19 wave),** with one change of mechanism
+     (user decision, 2026-11-19): navigations are fetched by the profile's
+     own `Fetcher` through `crawl.fetch_page` and handed over with
+     `route.fulfill()`, not with `route.fetch()`. `route.fetch()` sends the
+     request through Playwright's driver (`context.request`, a Node client),
+     whose TLS is neither the profile's nor Chromium's: §8.0 showed the
+     handshake decides on site B, and robots.txt, pacing, retries and
+     `Retry-After` would have to be rebuilt outside the `Fetcher`.
+   - Redirects are resolved by the `Fetcher` before the page opens: Chromium
+     follows a fulfilled 3xx without routing the next hop (measured with
+     Playwright 1.58's Chromium), which would leave the policy.
+   - **Open question (owner: user), not an approved deviation:** §2 puts
+     every network path of layer 4 under the profile, while this item routes
+     navigations only. Subresources (scripts, styles, XHR) are the browser's
+     own requests, with the profile's UA but Chromium's TLS, no robots.txt
+     check and no pacing; `/cdn-cgi/` is aborted for every request.
+   - Not followed: iframes, popups and navigations a page starts itself (meta
+     refresh, `location =`; §5.5 counts meta refresh as a link: open
+     question). A seeded run opens its seeds alone; followed links carry their
+     page as `Referer` and pass mirror's scope and extension pre-filter; a
+     non-HTML answer is saved as fetched, never opened. After an engine fetch
+     the browser pass has its own report and is no front (§5.8); a shallow
+     crawl explained by challenges does not trigger it (§5.4). Code:
+     `lib/httrack/browser.py` (`Navigator`), wired into
+     `lib/playwright_crawl.py`; `fire-engine` keeps failing loud on
+     `--headless` and on a client-rendered result.
 5. **Opt-in session features.** `--cookies`, `--browser-headers` and
    `--browser-login`.
 
@@ -613,7 +639,7 @@ README and CHANGELOG.
 `--downloader httrack` needs a path that does not exist yet (recursive crawl,
 or Playwright under the profile), it fails loudly with exit 1 and names the
 missing piece. It never falls back to wget or to Playwright without the
-policy. Release timing between PRs is the user's call; CHANGELOG entries
+policy. (Both have landed; the rule still holds for what PR 5 adds.) Release timing between PRs is the user's call; CHANGELOG entries
 accumulate under `[Unreleased]`.
 
 ## 8. Open decisions (owner: user)

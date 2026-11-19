@@ -18,7 +18,7 @@ src/dograpper/lib/
 │   ├── pack_artifacts.py   # Sidecars do pack: cross_refs.json, delta_manifest.json, llm-readiness.json, report HTML, tokens
 │   ├── pack_reader.py      # load_chunks() — leitura tolerante dos chunks JSONL do pack em PackedChunk
 │   ├── pack_scoring.py     # score_chunks() — readiness por chunk + páginas do --report, lê cada fonte uma vez
-│   ├── playwright_crawl.py # Crawler headless; hidratação bounded (domcontentloaded 10s + a[href] 5s + 500ms); aceita seed_urls
+│   ├── playwright_crawl.py # Crawler headless; hidratação bounded (domcontentloaded 10s + a[href] 5s + 500ms); aceita seed_urls; navigator= (lib/httrack/browser.py) põe o crawl sob o perfil httrack: semeado = só as sementes, about:blank antes de cada página, goto na URL final que o Navigator devolveu, página recusada ou não-HTML nunca aberta, links no escopo do perfil (dentro do --depth), nome/escrita do Navigator
 │   ├── query_packer.py     # load_queries() + order_files_by_queries() — ordenação gulosa por afinidade BM25 (pack --for-queries)
 │   ├── readiness_diff.py   # compare_readiness() + render_markdown()/render_text() — diff de snapshots llm-readiness.json, stdlib-only
 │   ├── retrieval.py        # build_index()/BM25Index — retrieval determinístico stdlib-only (tie-break por doc_id)
@@ -43,4 +43,5 @@ src/dograpper/lib/
 | `tests/test_retrieval.py` | Antes de alterar `lib/retrieval.py` (BM25, tokenização ou tie-break determinístico) |
 | `tests/test_pack_reader.py` | Antes de alterar `lib/pack_reader.py` ou o formato JSONL que ele consome |
 | `tests/test_golden_qa.py` | Antes de alterar `lib/golden_qa.py` ou o template de perguntas |
+| `tests/test_httrack_browser.py` | Antes de alterar `lib/httrack/browser.py` ou o caminho `navigator=` de `lib/playwright_crawl.py` (navegação pelo Fetcher do perfil, aborto antes do render, redirect antes do goto, escopo de iframe/popup/subrecurso) |
 | `tests/test_eval_harness.py` | Antes de alterar `lib/eval_harness.py` (hit-rate, MRR, breakdown por grade) |

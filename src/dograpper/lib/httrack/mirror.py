@@ -111,7 +111,7 @@ def outside(u: str, start: str, rule: UrlFilters, filters: UrlFilters | None) ->
     return "directory" if verdict is None and not rule.decide(u) else None
 
 
-def _skipped_by_extension(url: str, exts: set) -> bool:
+def skipped_by_extension(url: str, exts: set) -> bool:
     """--include-extensions before the request: an extension HTTrack knows as a type that is
     no page, and that the list leaves out, is not fetched (a page may come from any other)."""
     return bool(exts) and no_page(url) and url_extension(url) not in exts
@@ -172,7 +172,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             return "refused"
         if depth and hop > depth:
             return "refused"
-        if _skipped_by_extension(u, exts):
+        if skipped_by_extension(u, exts):
             report.filtered.append(redact_url(u))
             return "refused"
         if len(queue) >= policy.max_links:

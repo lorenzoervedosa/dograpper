@@ -18,6 +18,7 @@ from dograpper.lib.httrack.crawl import HttrackResult
 from dograpper.lib.httrack.fetcher import FetchResult
 from dograpper.lib.httrack.report import RunReport
 from dograpper.lib.httrack.robots import NO_RULES, RobotsRules, parse_robots
+from dograpper.lib.playwright_crawl import CrawlResult
 from dograpper.lib.wget_mirror import WgetResult
 
 P = "dograpper.commands._httrack_profile"  # the httrack mode's module (patch target)
@@ -271,12 +272,78 @@ def test_httrack_crawl_front_failure_exits_1(crawl, challenged, cause):
     assert "Responses:" in res.output  # report printed before the error
 
 
-def test_httrack_crawl_of_one_page_fails_loud_playwright(crawl):
+def _rendered(out, names=("index.html",), challenged=()):
+    """What run_playwright_crawl returns under the profile: the files its navigator saved,
+    the navigator's report filled as the policy refused pages."""
+    def crawl(url, o, depth, delay, exts, manifest_data, *, seed_urls, filters, navigator):
+        navigator.report.challenged.extend(challenged)
+        files = []
+        for name in names:
+            files.append(os.path.join(o, name))
+            with open(files[-1], "w") as fh:
+                fh.write("<html><body><p>" + "R" * 300 + "</p></body></html>")
+            navigator.records[files[-1]] = {"status": 200, "content_type": "text/html",
+                                            "etag": '"r"', "last_modified": None,
+                                            "redirected": False}
+        return CrawlResult(True, o, files, [], 0, {f: "http://example.com/" +
+                                                   os.path.basename(f) for f in files})
+    return crawl
+
+
+def test_httrack_crawl_of_one_page_falls_back_to_playwright_under_the_policy(crawl):
     out, ms = crawl
     ms.side_effect = lambda u, o, *a, **k: _crawled(o, names=("index.html",))
-    res = run(out, "--downloader", "httrack")
+    with patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out, ("index.html", "b.html"))
+               ) as pw:
+        res = run(out, "--downloader", "httrack", "-d", "2", "--delay", "300")
+    assert res.exit_code == 0, res.output
+    (url, o, depth, delay, exts, manifest_data), kw = pw.call_args
+    # pacing is the Fetcher's (policy.delay_ms), the cache is the engine's: none of the crawl's
+    assert (url, o, depth, delay, exts, manifest_data) == (
+        "http://example.com", out, 2, 0, "html,md,txt", None)
+    assert kw["seed_urls"] is None  # nothing discovered: the browser crawls from the start URL
+    nav = kw["navigator"]
+    assert nav.fetcher is FakeFetcher.instances[0] and nav.fetcher.policy.delay_ms == 300
+    assert "Files downloaded: 2" in res.output and "Responses:" in res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert {e["local_path"]: e["etag"] for e in manifest["files"].values()} == {
+        "index.html": '"r"', "b.html": '"r"'}
+
+
+def test_httrack_headless_front_failure_exits_1(ht):
+    out, _, _ = ht
+    with patch(f"{P}.run_playwright_crawl",
+               side_effect=_rendered(out, (), challenged=URLS)):
+        res = run(out, "--downloader", "httrack", "--headless")
     assert res.exit_code == 1
-    assert "Playwright fallback is not implemented yet" in res.output
+    assert "the site refused or challenged every seed URL (likely bot protection)" in res.output
+    assert "Challenged: 5" in res.output  # report printed before the error
+
+
+def test_httrack_fallback_that_saves_nothing_keeps_the_engine_result(crawl):
+    """The run's start URL was fetched by the engine: no front error (spec 5.8)."""
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: _crawled(o, names=("index.html",))
+    with patch(f"{P}.run_playwright_crawl",
+               side_effect=_rendered(out, (), challenged=["http://example.com/"])):
+        res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output
+    assert "Files downloaded: 1" in res.output
+    assert "Playwright pass:" in res.output and "    Challenged: 1" in res.output
+    manifest = json.loads(open(out + ".manifest.json").read())
+    assert [e["local_path"] for e in manifest["files"].values()] == ["index.html"]
+
+
+def test_httrack_shallow_crawl_explained_by_challenges_is_no_browser_trigger(crawl):
+    """Spec 5.4: the too-shallow fallback is never triggered by a challenge."""
+    out, ms = crawl
+    ms.side_effect = lambda u, o, *a, **k: _crawled(
+        o, names=("index.html",), challenged=["http://example.com/a"])
+    with patch(f"{P}.run_playwright_crawl") as pw:
+        res = run(out, "--downloader", "httrack")
+    assert res.exit_code == 0, res.output
+    pw.assert_not_called()
+    assert "Challenged: 1" in res.output
 
 
 def _updated(out, written=(), kept=("index.html", "a.html")):
@@ -342,20 +409,43 @@ def test_httrack_cache_0_lists_no_unreached_file(crawl):
     assert "Not reached" not in res.output
 
 
-def test_httrack_headless_fails_loud_playwright(ht):
+def test_httrack_headless_runs_playwright_under_the_policy(ht):
+    """As the wget cascade's --headless: layers 1+2 (under the profile), then the browser."""
     out, fu, _ = ht
-    res = run(out, "--downloader", "httrack", "--headless")
-    assert res.exit_code == 1
-    assert "Playwright fallback is not implemented yet" in res.output
-    fu.assert_not_called()
+    with patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out)) as pw:
+        res = run(out, "--downloader", "httrack", "--headless")
+    assert res.exit_code == 0, res.output
+    fu.assert_not_called()  # no engine fetch before the browser
+    kw = pw.call_args.kwargs
+    assert kw["seed_urls"] == URLS
+    assert kw["navigator"].fetcher is FakeFetcher.instances[0]
+    assert "Files downloaded: 1" in res.output
 
 
-def test_httrack_spa_fails_loud_playwright(ht):
-    out, _, _ = ht
-    with patch(f"{P}.is_spa", return_value=True):
+def test_httrack_spa_falls_back_to_playwright_with_the_discovered_seeds(ht):
+    out, fu, _ = ht
+    engine = []
+    fu.side_effect = lambda urls, o, *a, **k: engine.append(_res(o)) or engine[-1]
+    with patch(f"{P}.is_spa", return_value=True), \
+         patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out, ("p0.html",))) as pw:
         res = run(out, "--downloader", "httrack")
-    assert res.exit_code == 1
-    assert "Playwright fallback is not implemented yet" in res.output
+    assert res.exit_code == 0, res.output
+    assert pw.call_args.kwargs["seed_urls"] == URLS
+    # the browser pass has its own report, under the engine's: nothing counted twice
+    assert pw.call_args.kwargs["navigator"].report is not engine[0].report
+    assert res.output.index("Responses:") < res.output.index("Playwright pass:")
+    assert "Files downloaded: 1" in res.output  # the page the browser rendered over the shell
+
+
+@pytest.mark.parametrize("flag", ["--cache=1", "--updatehack", "--do-not-recatch", "--changes"])
+def test_httrack_update_flags_under_headless_are_usage_errors(ht, flag):
+    """They steer the engine's revalidation; under --headless no page is revalidated."""
+    out, _, _ = ht
+    with patch(f"{P}.run_playwright_crawl") as pw:
+        res = run(out, "--downloader", "httrack", "--headless", flag)
+    assert res.exit_code == 2
+    assert flag.split("=")[0] in res.output and "--headless" in res.output
+    pw.assert_not_called()
 
 
 def test_httrack_config_keys_respected_and_cli_wins(ht, tmp_path):

@@ -210,7 +210,7 @@ dograpper download <url> -o <directory> [options]
 |---|---|---|---|
 | `--output` | `-o` | *required* | Destination directory |
 | `--depth` | `-d` | `0` (unlimited) | Maximum link depth: link hops for `wget --mirror`, Playwright and the httrack crawl; for an llms.txt or sitemap URL list, path segments below the start URL |
-| `--headless` | — | `false` | Skip wget and use playwright directly |
+| `--headless` | — | `false` | Skip wget (or the `httrack` engine's fetch) and use playwright directly |
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions (csv) |
 | `--manifest` | — | `.dograpper-manifest.json` | Manifest file for incremental downloads. A relative path resolves against `-o` (so the default lives in the output directory); an absolute path is used as is |
@@ -437,8 +437,8 @@ HTTrack's mirror loop:
 - **Exit 1** when the start URL (or the redirect chain it starts) is refused,
   challenged, blocked by robots.txt or leaves the host; on an update, a start
   URL whose previous copy was kept after an error is no failure (below). A
-  crawl that saves at most one HTML page, or an SPA shell, would fall back to
-  Playwright, which the profile does not have yet (see below).
+  crawl that saves at most one HTML page, or an SPA shell, falls back to
+  Playwright under the profile (below).
 
 **File times (`httrack`, `fire-engine`).** Each saved file gets the response's
 `Last-Modified`, else its `Date`, as its modification and access time, as
@@ -609,11 +609,46 @@ the profile advertise and decode `br` / `zstd` over TLS. Without them it
 advertises only what it can decode. Python 3.14's stdlib `compression.zstd`
 is used when available. The release binary includes this extra.
 
-**Current gaps (temporary).** Under `httrack`, the Playwright fallback is
-not implemented yet and fails loud (exit 1): `--headless` is rejected up
-front, and a result that looks client-rendered (an SPA shell, or a crawl that
-saved at most one HTML page) ends the run with the same message. Use
-`--downloader wget` for those sites. It is no deviation from HTTrack.
+**Playwright under the profile (`httrack`).** With `--headless`, or when the
+engine's result looks client-rendered (an SPA shell, or a crawl that saved at
+most one HTML page), the cascade's layer 4 runs under the profile, never as
+the `wget` cascade's Playwright:
+
+- **Every navigation is fetched by the profile.** The browser asks, the
+  profile's own client fetches it (same TLS, headers, pacing, retries,
+  `Retry-After`, robots.txt before each hop) and hands the response to
+  Chromium. A redirect is resolved by the profile before the page opens, its
+  target in the crawl's scope and checked against robots.txt.
+- **A challenge never renders.** A response with `cf-mitigated` or the
+  "Just a moment..." title, a non-2xx, a URL robots.txt forbids or one out of
+  scope is aborted before the browser sees a byte of it, so no challenge
+  script runs; the report lists it as the engine's would. `/cdn-cgi/` is
+  never requested, not even by a script of a page.
+- **Subresources** (scripts, styles, XHR the page needs to render) are the
+  browser's own requests, with the profile's User-Agent. An iframe, a popup
+  or a navigation the page starts itself (meta refresh, `location =`) is not
+  followed, and service workers are blocked.
+- **Scope, names, links:** a seeded run opens its seeds alone, as the seeded
+  fetch does; links of a rendered page follow the crawl's scope (start host,
+  start directory, `--filter`, `--depth`, `--max-links`, a known non-page type
+  outside `--include-extensions` never requested) and are requested with the
+  page as `Referer`. Pages are saved with the engine's names, from the final
+  URL, and their links rewritten as the crawl rewrites them. A response that
+  is no HTML page is saved as it came, never opened in the browser. File
+  times and manifest records are the response's.
+- **Each page in full.** `--headless` skips the engine's fetch, so no page is
+  revalidated: `--cache`, `--updatehack`, `--do-not-recatch` and `--changes`
+  with `--headless` are a usage error (exit 2). After an engine fetch that
+  looked client-rendered, the browser fetches every page again; a crawl that
+  saved one page because the rest was challenged is no trigger (no browser
+  run, the report lists the challenges).
+- **Report and exit.** After an engine fetch, the browser's own report follows
+  the engine's under `Playwright pass:`; if the browser saves nothing, the
+  engine's files stand and the run exits 0. Under `--headless` the run exits 1
+  when the browser saves no page (the start URL, or every seed, refused,
+  challenged or failing), with the report printed first. Needs the `headless`
+  extra and `dograpper doctor --install` for Chromium, as the `wget` cascade's
+  Playwright does.
 
 ##### fire-engine
 
@@ -704,7 +739,7 @@ A file the current run did not fetch keeps the `url` recorded when it was; a
 file no run recorded gets `"url": null`. The saved path is never turned back
 into a URL: `--adjust-extension` adds `.html`, a directory URL is saved as
 `index.html`, and a query is decoded (wget), dropped (Playwright) or hashed
-(httrack) in the file name.
+(httrack, Playwright under the profile included) in the file name.
 
 #### Examples
 
@@ -1597,8 +1632,8 @@ Stop the server with Ctrl+C.
 | 1 | doctor --install | download, SHA256 verification, or the chromium install step failed | retry, check network/proxy |
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
-| 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl, refused/challenged; `--headless`; a result that looks client-rendered; `fire-engine` without its extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | a `[httrack]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, or an invalid `--filter` rule | fix the flags |
+| 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl (or of `httrack --headless`'s Playwright crawl), refused/challenged; `fire-engine`: `--headless`, a result that looks client-rendered, or no `fire-engine` extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
+| 2 | download / sync | a `[httrack]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
