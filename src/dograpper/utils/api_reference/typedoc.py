@@ -20,8 +20,8 @@ markup raises NotSplit.
 
 from typing import Dict, List, Optional
 
-from . import ApiRecord, NotSplit, check_symbol
-from ._html import Regions, Text
+from . import ApiRecord, NotSplit, check_anchor, check_symbol, declared
+from ._html import Regions, Text, line
 
 GENERATOR = "typedoc"
 # Start of every TypeDoc page title block; __init__ recognises a TypeDoc page by it.
@@ -89,17 +89,11 @@ class _Page(Regions):
         self._member: Optional[_Member] = None
         self._tap: Optional[Text] = None  # aside being read; it also feeds the member's body
 
-    # _set and the _tap in handle_data: second copy of sphinx._Page's.
-    def _set(self, name, value, closers) -> None:
-        previous = getattr(self, name)
-        setattr(self, name, value)
-        closers.append(lambda: setattr(self, name, previous))
-
     def start(self, tag, attr, classes, closers):
         if not self._in_content:
             if tag == "div" and "col-content" in classes and self.content is None:
                 self.content = self.region(closers)
-                self._set("_in_content", True, closers)
+                self.set_until_end("_in_content", True, closers)
             return
         member = self._member
         if (tag == "button" or (tag == "a" and "tsd-anchor-icon" in classes)
@@ -107,14 +101,14 @@ class _Page(Regions):
                 or (tag == "dd" and "tsd-member-summary" in classes)):
             self.skip(closers)  # Copy button, permalink sign, index, summary text
         elif tag == "ul" and "tsd-breadcrumb" in classes:
-            self._set("_in_crumbs", True, closers)
+            self.set_until_end("_in_crumbs", True, closers)
         elif tag == "li" and self._in_crumbs:
             self.crumbs.append(self.region(closers))
         elif tag == "a" and self._in_crumbs and attr.get("aria-current") == "page":
             self.current = len(self.crumbs)
         elif tag == "h1" and self.title is None and member is None:
             self.title = self.region(closers)
-            self._set("_in_title", True, closers)
+            self.set_until_end("_in_title", True, closers)
         elif tag == "code" and "tsd-tag" in classes:
             if self._in_title:
                 self.tags.append(self.region(closers))
@@ -126,16 +120,16 @@ class _Page(Regions):
         elif tag == "details" and "tsd-member-group" in classes:
             group = _Group()
             self.groups.append(group)
-            self._set("_group", group, closers)
+            self.set_until_end("_group", group, closers)
         elif tag == "h2" and self._group is not None and self._group.label is None and member is None:
             self._group.label = self.region(closers)
         elif tag == "dt" and "tsd-member-summary" in classes and self._group is not None:
             self._group.names.append(self.region(closers))
         elif tag == "aside" and "tsd-sources" in classes:
-            self._set("_in_sources", True, closers)
+            self.set_until_end("_in_sources", True, closers)
             if member is not None and member.source is None:
                 member.source = Text()
-                self._set("_tap", member.source, closers)
+                self.set_until_end("_tap", member.source, closers)
         elif tag == "ul" and self._in_sources:
             self.skip(closers)  # "Defined in" source locations, like Sphinx's [source] links
         elif tag == "section" and "tsd-member" in classes:
@@ -145,13 +139,13 @@ class _Page(Regions):
             member = _Member(len(self._stack), self._group, classes)
             self.members.append(member)
             member.body = self.region(closers)
-            self._set("_member", member, closers)
+            self.set_until_end("_member", member, closers)
         elif member is None:
             return
         elif tag == "h3" and member.name is None and len(self._stack) == member.depth + 1:
             member.anchor = attr.get("id")
             member.name = self.region(closers)
-            self._set("_in_h3", True, closers)
+            self.set_until_end("_in_h3", True, closers)
         elif tag == "div" and "tsd-signature" in classes and member.kind is None and not member.signed:
             member.signed = True
             closers.append(lambda: setattr(member, "signed", False))
@@ -160,25 +154,20 @@ class _Page(Regions):
             if kind_classes:
                 member.kind = kind_classes[0]
 
-    def handle_data(self, data):
+    def handle_data(self, data):  # the _tap: second copy of sphinx._Page.handle_data
         super().handle_data(data)
         if self._tap is not None and not self._raw:
             self._tap.add(data)
 
 
-# _unsupported: same shape as javadoc's and sphinx's; _line: second copy of sphinx._line.
 def _unsupported(problem: str) -> NotSplit:
     return NotSplit(f"unsupported TypeDoc markup: {problem}")
 
 
-def _line(text: Optional[Text]) -> str:
-    return " ".join(text.final()) if text else ""
-
-
 def _tags(tags: List[Text]) -> List[str]:
     """The flags line ("Static Readonly"), or nothing."""
-    line = " ".join(filter(None, (_line(t) for t in tags)))
-    return [line] if line else []
+    flags = " ".join(filter(None, (line(t) for t in tags)))
+    return [flags] if flags else []
 
 
 def _kind(title: str, name: str):
@@ -200,8 +189,8 @@ def records(html: str) -> List[ApiRecord]:
         raise _unsupported("no div.col-content")
     if page.problem is not None:
         raise _unsupported(page.problem)
-    crumbs = [_line(c) for c in page.crumbs]
-    title = _line(page.title)
+    crumbs = [line(c) for c in page.crumbs]
+    title = line(page.title)
     if not crumbs or not all(crumbs):
         raise NotSplit(NOT_API)  # readme, hierarchy, the project's own index
     if page.current != len(crumbs):  # TypeDoc 0.25-0.27: the path starts at the project, no current page
@@ -217,19 +206,17 @@ def records(html: str) -> List[ApiRecord]:
     own: List[_Member] = []
     inherited: Dict[str, List[str]] = {}  # base -> member names, in page order
     for member in page.members:
-        name = _line(member.name)
+        name = line(member.name)
         if not name or not member.anchor:
             raise _unsupported("a section.tsd-member without an h3 id")
-        if member.anchor in anchors:
-            raise _unsupported("duplicate member anchor")
-        anchors.add(member.anchor)
+        check_anchor(member.anchor, anchors, _unsupported, "duplicate member anchor")
         if member.inherited:
-            source = _line(member.source)
+            source = line(member.source)
             if not source.startswith(_INHERITED) or "." not in source:
                 raise _unsupported("an inherited member without its base")
             inherited.setdefault(source[len(_INHERITED):].rpartition(".")[0], []).append(name)
             continue
-        if member.group is None or not _line(member.group.label):
+        if member.group is None or not line(member.group.label):
             raise _unsupported("a member outside a member group")
         if member.kind not in _MEMBERS:
             raise _unsupported(f"unknown member kind {member.kind or 'without a signature'}")
@@ -250,19 +237,14 @@ def records(html: str) -> List[ApiRecord]:
                           breadcrumb=[container, crumbs[-1]] if container else [symbol],
                           generator=GENERATOR, container=container)]
 
-    declared: Dict[str, Dict[str, None]] = {}  # group label -> ordered set of names (as javadoc, sphinx)
-    for group in page.groups:
-        for name in group.names:
-            declared.setdefault(_line(group.label), {})[_line(name)] = None
-    for member in own:
-        declared.setdefault(_line(member.group.label), {})[_line(member.name)] = None
-    lines = ([f"{symbol} ({symbol_kind})"] + _tags(page.tags) + [title] + main
-             + [f"{label}: {', '.join(names)}" for label, names in declared.items()]
+    pairs = [(line(group.label), line(name)) for group in page.groups for name in group.names]
+    pairs += [(line(member.group.label), line(member.name)) for member in own]
+    lines = ([f"{symbol} ({symbol_kind})"] + _tags(page.tags) + [title] + main + declared(pairs)
              + [f"{_INHERITED}{base}: {', '.join(names)}" for base, names in inherited.items()])
     result = [ApiRecord(text="\n".join(lines), symbol=symbol, kind="container",
                         symbol_kind=symbol_kind, breadcrumb=[symbol], generator=GENERATOR)]
     for member in own:
-        name = _line(member.name)
+        name = line(member.name)
         result.append(ApiRecord(
             text="\n".join([f"{symbol}.{name}"] + _tags(member.tags) + member.body.final()),
             symbol=f"{symbol}.{name}", kind="member", symbol_kind=_MEMBERS[member.kind],
