@@ -14,6 +14,7 @@ from ..lib.pack_reader import load_chunks
 from ..lib.retrieval import build_index
 from ..lib.golden_qa import generate_golden_qa
 from ..lib.eval_harness import evaluate
+from ..utils.atomic_write import atomic_write_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,10 @@ def eval(ctx, chunks_dir, top_k, output, prefix):
             "mrr": report.mrr,
             "per_grade": report.per_grade,
         }
-        with open(output, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
+        try:
+            atomic_write_bytes(
+                output, json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8"))
+        except OSError as e:
+            click.echo(f"Error: cannot write {output}: {e.strerror or e}", err=True)
+            ctx.exit(1)
         click.echo(f"Report written to {output}")

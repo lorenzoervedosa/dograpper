@@ -10,6 +10,7 @@ import json
 import click
 import logging
 
+from ..utils.atomic_write import atomic_write_bytes
 from ..lib.readiness_diff import compare_readiness, render_markdown, render_text
 
 logger = logging.getLogger(__name__)
@@ -121,8 +122,11 @@ def drift(ctx, new_path, old_path, delta_path, output_format, output,
         rendered = render_text(report, delta)
 
     if output:
-        with open(output, 'w', encoding='utf-8') as f:
-            f.write(rendered + "\n")
+        try:
+            atomic_write_bytes(output, (rendered + "\n").encode('utf-8'))
+        except OSError as e:
+            click.echo(f"Error: cannot write {output}: {e.strerror or e}", err=True)
+            ctx.exit(1)
     else:
         click.echo(rendered)
 
