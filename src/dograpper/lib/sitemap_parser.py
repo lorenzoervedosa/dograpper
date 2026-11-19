@@ -5,7 +5,10 @@ Implements the sitemap protocol (https://www.sitemaps.org/protocol.html):
   - <sitemapindex> with <sitemap><loc>...</loc></sitemap> entries (recursive)
 
 Gzip-encoded sitemaps are detected via magic bytes and decompressed.
-Cross-host recursion is rejected (same-netloc guard at depth > 0).
+Scope: top-level candidates (incl. robots.txt hints) must be on the start host.
+A <sitemapindex> child is followed when it is on the same host, or on another
+host whose directory path starts with the start URL's path prefix
+(see _sub_sitemap_in_scope: the Mintlify-style CDN sub-sitemap case).
 
 Stdlib-only: urllib, xml.etree.ElementTree, gzip.
 """
