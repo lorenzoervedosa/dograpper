@@ -268,6 +268,14 @@ and fixes alone are a PATCH bump.
 - The `[httrack]` flags are labelled `[httrack, fire-engine]` in the help, and
   using one under the default downloader now says `requires --downloader httrack
   or fire-engine`; the `--user-agent` help states its default under each (#149).
+- `download --downloader fire-engine` no longer aborts a body that is still
+  arriving with `curl: (28) Operation too slow`. libcurl counts received bytes in
+  one-second records, so a byte could reach its low-speed check a second late:
+  with `--timeout 1` (or less) about one transfer in five longer than a second
+  failed at the one-second mark, and with a larger `--timeout` so did a body
+  that started in its last second and was still arriving. The low-speed window
+  is now one second longer than `--timeout`, so a silent server is given up a
+  second later. ([#154])
 - `pack --delta` no longer reports "no files changed" when a file was rewritten
   with other bytes of the same size and the same modification time, as a
   downloader that stamps files with the server's time can leave it: the
@@ -515,3 +523,4 @@ and fixes alone are a PATCH bump.
 [#133]: https://github.com/lorenzoervedosa/dograpper/issues/133
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
+[#154]: https://github.com/lorenzoervedosa/dograpper/issues/154

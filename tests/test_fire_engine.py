@@ -543,7 +543,8 @@ def test_real_raw_body_over_the_cap_aborts_the_transfer(server, monkeypatch):
 
 @pytest.fixture
 def trickle():
-    """A server that answers 300 bytes in three pieces 0.5 s apart, or never answers."""
+    """A server that answers 300 bytes in three pieces 0.5 s apart (the first 1.5 s in
+    on /late), or never answers (/hang)."""
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -557,6 +558,8 @@ def trickle():
             self.send_response(200)
             self.send_header("Content-Length", "300")
             self.end_headers()
+            if self.path == "/late":
+                time.sleep(1)
             for _ in range(3):
                 time.sleep(0.5)
                 self.wfile.write(b"x" * 100)
@@ -583,6 +586,18 @@ def test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout(trickle):
 
     assert (slow.status, slow.body, slow.error) == (200, b"x" * 300, None)
     assert hung.status is None and "(28)" in hung.error
+
+
+def test_real_timeout_lets_a_first_byte_come_just_under_it(trickle):
+    """#154: libcurl measures the rate in 1 s records, so a byte counts for its low-speed
+    check up to a second late; a 1.5 s silence, then a body still arriving at 2 s, passes
+    a 2 s timeout as it does the stdlib socket timeout."""
+    pytest.importorskip("curl_cffi")
+    fetcher = CurlCffiFetcher(build_policy(retries=0, timeout=2))
+
+    late = fetcher.get(trickle + "/late", kind="navigate")
+
+    assert (late.status, late.body, late.error) == (200, b"x" * 300, None)
 
 
 @pytest.mark.parametrize("proxy", [

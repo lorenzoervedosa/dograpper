@@ -635,7 +635,12 @@ Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
 decoders of the `httrack` extra: curl hands the body over as it came, and the
 profile decodes it with the `httrack` decoder, under the same size and zstd
 window limits. `--timeout` is the time to connect, then the longest silence
-while receiving, as under `httrack`. Without the extra, the
+while receiving, as under `httrack`, but measured by libcurl's low-speed check,
+which counts bytes in one-second records: a silence shorter than `--timeout`
+never aborts the transfer, a server that sends nothing is given up one to two
+seconds after `--timeout` (rounded up to whole seconds), and a silence after
+data has arrived can run up to about nine seconds longer, since libcurl
+averages the rate over its last few records. Without the extra, the
 profile fails loud with an install hint; the release binary does not bundle
 this extra, so `fire-engine` needs a source install. `--headless` is rejected
 (the profile has its own transport), and a result that looks client-rendered
