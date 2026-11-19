@@ -111,6 +111,18 @@ def outside(u: str, start: str, rule: UrlFilters, filters: UrlFilters | None) ->
     return "directory" if verdict is None and not rule.decide(u) else None
 
 
+def rescope(u: str, start: str, rule: UrlFilters, filters: UrlFilters | None,
+            front: bool) -> tuple[str | None, UrlFilters]:
+    """outside() for a crawl whose scope `rule` follows its start URL: when the start's own
+    redirect chain (`front`) leaves the directory, the scope is re-based on the target, not
+    an empty mirror (deviation, spec 5.5). Returns (why, the rule from now on)."""
+    why = outside(u, start, rule, filters)
+    if why == "directory" and front:
+        logger.info("start URL redirected to %s; the crawl scope follows it", redact_url(u))
+        return None, start_rule(u)
+    return why, rule
+
+
 def skipped_by_extension(url: str, exts: set) -> bool:
     """--include-extensions before the request: an extension HTTrack knows as a type that is
     no page, and that the list leaves out, is not fetched (a page may come from any other)."""
@@ -160,11 +172,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         if k in entry_of:
             return "known"
         entry_of[k] = u
-        why = outside(u, url, scope[0], filters)
-        if why == "directory" and front:  # deviation (spec 5.5): re-base, not an empty mirror
-            logger.info("start URL redirected to %s; the crawl scope follows it",
-                        redact_url(u))
-            scope[0], why = start_rule(u), None
+        why, scope[0] = rescope(u, url, scope[0], filters, front)
         if why == "rule":
             return "refused"
         if why is not None:

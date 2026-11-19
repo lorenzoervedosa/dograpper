@@ -21,10 +21,10 @@ from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.redact import redact_url
 
-from .crawl import extension_set, fetch_page, record_of, relink, stamp
-from .fetcher import Fetcher, same_host
+from .crawl import extension_set, fetch_page, record_of, relink, seed_redirect_ok, stamp
+from .fetcher import Fetcher
 from .links import url_key
-from .mirror import outside, skipped_by_extension, start_rule
+from .mirror import outside, rescope, skipped_by_extension, start_rule
 from .naming import NameRegistry
 from .report import RunReport
 
@@ -79,16 +79,9 @@ class Navigator:
         return True
 
     def _redirect_ok(self, url: str, nxt: str) -> bool:
-        if self._seeded:  # as fetch_url_list's redirect_ok (the first copy): host and --filter
-            if not same_host(url, nxt):
-                self.report.out_of_scope.append(redact_url(nxt))
-                return False
-            return self.filters is None or self.filters.decide(nxt) is not False
-        why = outside(nxt, self._start, self._rule, self.filters)
-        if why == "directory" and self._front:  # deviation (spec 5.5), as mirror_site
-            logger.info("start URL redirected to %s; the crawl scope follows it",
-                        redact_url(nxt))
-            self._rule, why = start_rule(nxt), None
+        if self._seeded:  # as fetch_url_list
+            return seed_redirect_ok(url, nxt, self.report, self.filters)
+        why, self._rule = rescope(nxt, self._start, self._rule, self.filters, self._front)
         if why not in (None, "rule"):  # a rule's refusal lands in filters.excluded
             self.report.out_of_scope.append(redact_url(nxt))
         return why is None

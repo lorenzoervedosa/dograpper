@@ -119,6 +119,16 @@ def uncached(records: dict[str, dict], urls: Mapping[str, str], previous: Manife
     return {f: kept(f) for f in records}
 
 
+def seed_redirect_ok(url: str, nxt: str, report: RunReport,
+                     filters: UrlFilters | None) -> bool:
+    """Whether a seed's redirect from `url` is followed to `nxt`: on the same host only (else
+    out of scope in `report`) and unless --filter refuses it (filters.excluded records it)."""
+    if not same_host(url, nxt):
+        report.out_of_scope.append(redact_url(nxt))
+        return False
+    return filters is None or filters.decide(nxt) is not False
+
+
 def extension_set(include_extensions: str) -> set[str]:
     """--include-extensions as the dotted, lower-case extensions it keeps; empty keeps all.
     (lib/ignore_parser.split_by_extension parses the same flag for pack.)"""
@@ -449,10 +459,7 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
     progress = ProgressReporter("httrack", total=len(seeds))
 
     def redirect_ok(url: str, nxt: str) -> bool:
-        if not same_host(url, nxt):
-            report.out_of_scope.append(redact_url(nxt))
-            return False
-        return filters is None or filters.decide(nxt) is not False
+        return seed_redirect_ok(url, nxt, report, filters)
 
     def fetch_one(url: str) -> str:
         """Return "refused", "scoped" (skipped by scope/filter), "written" or "kept"."""
