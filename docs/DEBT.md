@@ -15,6 +15,21 @@ Entry format, grouped under one heading per issue or PR:
   <why now is not the time>; <what would trigger the fix>.**
 ```
 
+## rustdoc API records (#75, 2026-11-19)
+
+- **A trait implementation member with its own doc comment is dropped.**
+  `utils/api_reference/rustdoc.py` keeps only the `impl` headers of trait
+  implementations; a documented `fmt` or `size_hint` of one type is lost with
+  the members that repeat the trait's docs. ⏸ **accepted: rustdoc marks both
+  kinds the same way, and none of the 22 lookups on `itertools` needed one;
+  fix when a lookup misses a member documented only in a trait
+  implementation.**
+- **The container bound (≤ 5,000 words) is measured, not enforced.** The
+  `impl` header lists have no cap; `itertools::structs::Zip` is 1,604 words,
+  mostly headers. ⏸ **accepted: the largest container on the acceptance
+  corpus is 2,545 words; fix when a measured corpus (e.g. the standard
+  library) has a container over the bound.**
+
 ## Harness hooks (#35, 2026-11-18)
 
 - **The contract file set lives in two places.** The `case` map of

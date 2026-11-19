@@ -12,6 +12,7 @@ tests/
 ├── linearity.py            # assert_linear()/cpu_time() — razão de tempo de CPU entre n e 4n (best of 3, GC desligado), fonte única dos testes de linearidade em entrada hostil (#126, #131, #135)
 ├── test_action_yml.py      # Guard estrutural do action.yml (inputs, outputs, marcador, branding)
 ├── test_api_reference.py   # --api-records: detecção/despacho, registros contêiner e membro sobre as fixtures javadoc 25 (tests/fixtures/javadoc) e Sphinx 9.2 autodoc (tests/fixtures/sphinx), markup não suportada, linearidade, CLI (erros de uso, dedup, --for-queries, --delta, serve)
+├── test_api_reference_rustdoc.py # --api-records sobre a fixture rustdoc 1.96 (tests/fixtures/rustdoc): páginas de função/constante/static/macro (1 membro), crate e módulo, struct/enum/union/trait/alias (contêiner com cabeçalhos impl, membros com o cabeçalho do impl inerente), markup não suportada, linearidade e limites de nome/cabeçalho repetido, CLI (pack, serve)
 ├── test_atomic_write.py    # atomic_write_bytes: cria pais e conteúdo; falha/KeyboardInterrupt não deixa arquivo final nem *.tmp; modo segue o umask corrente, sem nunca alterá-lo
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard

@@ -10,8 +10,8 @@ with any other markup raises NotSplit.
 
 from typing import List, Optional
 
-from . import ApiRecord, NotSplit, check_symbol
-from ._html import Regions, Text
+from . import ApiRecord, NotSplit, check_anchor, check_symbol, declared
+from ._html import Regions, Text, line
 
 GENERATOR = "javadoc"
 TYPE_PAGE = "javadoc/ClassWriter"
@@ -53,11 +53,6 @@ class _TypePage(Regions):
         self.inherited: List[Text] = []
         self.members: List[_Member] = []
 
-    def _set_group(self, group, closers) -> None:
-        previous = self._group
-        self._group = group
-        closers.append(lambda: setattr(self, "_group", previous))
-
     def _end_subnav(self) -> None:
         self._subnav -= 1
 
@@ -73,7 +68,7 @@ class _TypePage(Regions):
                 self._members.append(member)
                 closers.append(self._members.pop)
             elif section_id.endswith("-detail"):
-                self._set_group(_MEMBER_SECTIONS.get(section_id), closers)
+                self.set_until_end("_group", _MEMBER_SECTIONS.get(section_id), closers)
         elif tag == "div" and ("inheritance" in classes or "inherited-list" in classes):
             target = self.inheritance if "inheritance" in classes else self.inherited
             target.append(self.region(closers))
@@ -112,28 +107,26 @@ def records(html: str, generator: str) -> List[ApiRecord]:
             break
     if not kind or not name:
         raise _unsupported("unknown type kind in the h1 title")
-    package = " ".join(page.package.final()) if page.package else ""
+    package = line(page.package)
     qualified = f"{package}.{name}" if package else name
     check_symbol(qualified, _unsupported)
 
     members: List[ApiRecord] = []
-    declared = {}  # label -> {member name: None}, an ordered set in page order
+    names = []  # (label, member name) in page order
     anchors = set()
     for m in page.members:
         if not m.anchor:
             raise _unsupported("a section.detail without an id")
-        if m.anchor in anchors:
-            raise _unsupported("duplicate member anchor")
-        anchors.add(m.anchor)
+        check_anchor(m.anchor, anchors, _unsupported, "duplicate member anchor")
         if m.group is None:
             raise _unsupported("a section.detail outside the known member sections")
         if not m.signature:
             raise _unsupported("a section.detail without a div.member-signature")
-        short = " ".join(m.name.final()) if m.name else ""
+        short = line(m.name)
         if not short:
             raise _unsupported("a section.detail without an h3")
         symbol_kind, label = m.group
-        declared.setdefault(label, {})[short] = None
+        names.append((label, short))
         member_name = short + (m.anchor[m.anchor.index("("):] if "(" in m.anchor else "")
         symbol = f"{qualified}#{member_name}"
         check_symbol(symbol, _unsupported)
@@ -147,11 +140,11 @@ def records(html: str, generator: str) -> List[ApiRecord]:
     if chain:
         lines.append("Inheritance: " + " > ".join(chain))
     lines.extend(page.descriptions[0].final())
-    lines.extend(f"{label}: {', '.join(names)}" for label, names in declared.items())
+    lines.extend(declared(names))
     for inherited in page.inherited:
         heading, *listed = inherited.final() or [""]
         lines.append(f"{heading}: {' '.join(listed)}" if listed else heading)
-    container = ApiRecord(text="\n".join(line for line in lines if line), symbol=qualified,
+    container = ApiRecord(text="\n".join(ln for ln in lines if ln), symbol=qualified,
                           kind="container", symbol_kind=kind, breadcrumb=[qualified],
                           generator=GENERATOR)
     return [container] + members

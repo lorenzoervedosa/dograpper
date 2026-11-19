@@ -6,7 +6,7 @@ is pushed and popped once and a stray end tag is dropped in O(1), so hostile mar
 """
 
 from html.parser import HTMLParser
-from typing import List
+from typing import List, Optional
 
 VOID = frozenset(("area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
                   "source", "track", "wbr"))
@@ -49,6 +49,11 @@ class Text:
         return self.lines
 
 
+def line(text: Optional[Text]) -> str:
+    """The region's lines joined into one; "" for a region that never opened."""
+    return " ".join(text.final()) if text else ""
+
+
 class Regions(HTMLParser):
     """One pass over a page. Subclasses open regions and track state in ``start``."""
 
@@ -68,6 +73,12 @@ class Regions(HTMLParser):
         self._sinks.append(text)
         closers.append(self._sinks.pop)
         return text
+
+    def set_until_end(self, name: str, value, closers) -> None:
+        """Set attribute ``name`` to ``value`` until the element ends, then restore the previous value."""
+        previous = getattr(self, name)
+        setattr(self, name, value)
+        closers.append(lambda: setattr(self, name, previous))
 
     def skip(self, closers) -> None:
         """Drop the element's text, e.g. a permalink sign."""

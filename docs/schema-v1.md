@@ -77,7 +77,7 @@ content.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| id | string | yes | Unique record identifier: `NN_path`, the chunk number (zero-padded to one width per run, at least two digits) and the source path; `NN_J_path` for sub-chunk `J` of a file that heading-driven splitting divided. With `--api-records`: `NN_path` for a page's main container record, `NN_path#anchor` for its other records (see below). |
+| id | string | yes | Unique record identifier: `NN_path`, the chunk number (zero-padded to one width per run, at least two digits) and the source path; `NN_J_path` for sub-chunk `J` of a file that heading-driven splitting divided. With `--api-records`: `NN_path` for a page's main container record (on a rustdoc function, constant, static or macro page, its one member record), `NN_path#anchor` for its other records (see below). |
 | source | string | yes | Relative path of the source file |
 | words | int | yes | Word count of `content` |
 | content | string | yes | Extracted text |
@@ -87,11 +87,11 @@ content.
 | total_chunks | int | no | Total sub-chunks for this file. Same condition as `chunk_index`. |
 | url | string | no | Original URL. Present only with `--context-header` **and** either a matching manifest entry that has a `url` or a valid HTTrack / saved-from marker in the page head — `--score` alone never populates it, even against a matching manifest. On a member record it ends with the member's anchor, percent-encoded as the generator links it (`#%3Cinit%3E(int)`). |
 | readiness_grade | string | no | Bare grade letter ("A"/"B"/"C"). Present with `--score`. Not the same shape as the header's `llm_readiness` object — see below. |
-| symbol | string | no | API records only. Qualified name of the record's symbol, e.g. `zombie.characters.IsoGameCharacter#getInventory()` (Javadoc), `packaging.version.Version.is_prerelease` (Sphinx). |
+| symbol | string | no | API records only. Qualified name of the record's symbol, e.g. `zombie.characters.IsoGameCharacter#getInventory()` (Javadoc), `packaging.version.Version.is_prerelease` (Sphinx), `itertools::Itertools::interleave` (rustdoc). |
 | kind | string | no | API records only. `container` or `member`. |
-| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). Sphinx containers: `module`, `class`, `exception`; members: `function`, `method` (classmethods and staticmethods too; the signature says which), `property`, `attribute`, `data` (module-level variable). |
+| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). Sphinx containers: `module`, `class`, `exception`; members: `function`, `method` (classmethods and staticmethods too; the signature says which), `property`, `attribute`, `data` (module-level variable). rustdoc containers: `crate`, `module`, `struct`, `enum`, `union`, `trait`, `type_alias`; members: `field` (a tuple field is `0`, `1`, …), `variant`, `method` (associated functions and required trait methods too; the signature says which), `associated_constant`, `associated_type`, and the one-symbol pages `function`, `constant`, `static`, `macro`. |
 | container | string | no | Member records only. Qualified name of the container that declares the member. |
-| generator | string | no | API records only. The adapter that split the page: `javadoc` or `sphinx`. |
+| generator | string | no | API records only. The adapter that split the page: `javadoc`, `sphinx` or `rustdoc`. |
 | version | string | no | Page metadata of a MediaWiki page, as in the header above. Present with `--context-header` or `--score`, only when the page states its version. |
 | version_status | string | no | As in the header above. Same condition as `version`, and only when the version comes from the banner. |
 
@@ -114,7 +114,13 @@ keep the plain record above, without the API fields.
   module's (`packaging.version (module)`): the page text outside the
   objects, then the names of the top-level objects by kind; each class and
   exception record holds its signature, `Bases:` line, docstring and member
-  names, and a nested class gets its own record.
+  names, and a nested class gets its own record. On a rustdoc struct, enum,
+  union, trait or type alias page the container record
+  (`itertools::Itertools (trait)`) holds the declaration, the doc comment,
+  the member names by kind and the `impl` headers of the trait
+  implementations, auto trait implementations, implementations on foreign
+  types and implementors; a crate or module page's record holds its doc
+  comment and its symbols' names by section.
 - **Member record**: `id` `NN_path#anchor`, the anchor being the member's
   HTML id (`getInventory()`, `<init>(int)`); `content` starts with the
   qualified name (`zombie.characters.IsoGameCharacter#getInventory()`, a
@@ -123,7 +129,14 @@ keep the plain record above, without the API fields.
   Parameters, Returns, Throws). On a Sphinx page the anchor is the object's
   HTML id (`packaging.version.parse`); `content` starts with the qualified
   name, then every signature with its annotations (overloads included), the
-  docstring and its fields (Parameters, Returns, Raises).
+  docstring and its fields (Parameters, Returns, Raises). On a rustdoc page
+  the anchor is the rustdoc id (`method.interleave`, `structfield.items`,
+  `variant.Both`); `content` starts with the qualified name
+  (`itertools::Itertools::interleave`), then, for a member of an inherent
+  `impl` block, that block's header (`impl<T: Ord> Boxed<T>`), the
+  signature, the deprecation note and the doc comment. A rustdoc function,
+  constant, static or macro page is one member record with `id` `NN_path`
+  and the module as `container`.
 
 ```json
 {"id": "01_fixture/api/Box.html#of(U)", "source": "fixture/api/Box.html", "words": 37,

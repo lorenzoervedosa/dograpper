@@ -1,14 +1,14 @@
 """API reference pages split into container and member records (ADR-0009): detection and dispatch.
 
 A page is split only when an adapter here recognises its generator and its markup
-is the measured one. Javadoc declares itself in ``<meta name="generator">``; Sphinx
-writes no such meta, so its object markup tells. Any other page keeps one record and
+is the measured one. Javadoc and rustdoc declare themselves in ``<meta name="generator">``;
+Sphinx writes no such meta, so its object markup tells. Any other page keeps one record and
 is reported, with the reason, by ``format_kept_whole``.
 """
 
 import os
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, Iterable, List, Set, Tuple
 from urllib.parse import quote
 
 from ..generator import page_generator
@@ -18,8 +18,8 @@ NO_ADAPTER = "no supported generator"
 # Shown before "... N more (use --verbose)"; same cap as lib/source_urls.py MAX_SHOWN_MISSING.
 MAX_SHOWN_KEPT_WHOLE = 10
 # Records repeat their container's qualified name (every Javadoc member the type's, every Sphinx
-# object its ancestors'), so a huge or deeply nested name would make the output quadratic in the
-# page size; no real qualified name is this long.
+# object its ancestors', every rustdoc member also its impl block's header), so a huge or deeply
+# nested name would make the output quadratic in the page size; no real qualified name is this long.
 MAX_SYMBOL = 1000
 
 
@@ -27,10 +27,28 @@ class NotSplit(Exception):
     """The page keeps one record; the message says why."""
 
 
-def check_symbol(symbol: str, unsupported: Callable[[str], NotSplit]) -> None:
-    """Raise the adapter's ``unsupported(problem)`` for a qualified name over MAX_SYMBOL characters."""
+def check_symbol(symbol: str, unsupported: Callable[[str], NotSplit], what: str = "a qualified name") -> None:
+    """Raise the adapter's ``unsupported(problem)`` for ``what`` (a text every member record repeats)
+    over MAX_SYMBOL characters."""
     if len(symbol) > MAX_SYMBOL:
-        raise unsupported(f"a qualified name over {MAX_SYMBOL} characters")
+        raise unsupported(f"{what} over {MAX_SYMBOL} characters")
+
+
+def check_anchor(anchor: str, seen: Set[str], unsupported: Callable[[str], NotSplit], problem: str) -> None:
+    """Add ``anchor`` to ``seen``; raise the adapter's ``unsupported(problem)`` if it is there already,
+    as two records of one page would share an id."""
+    if anchor in seen:
+        raise unsupported(problem)
+    seen.add(anchor)
+
+
+def declared(pairs: Iterable[Tuple[str, str]]) -> List[str]:
+    """One "Label: a, b" line per label of the (label, name) pairs, in order of first appearance;
+    each name once, in page order."""
+    names = {}  # label -> {name: None}, an ordered set
+    for label, name in pairs:
+        names.setdefault(label, {})[name] = None
+    return [f"{label}: {', '.join(listed)}" for label, listed in names.items()]
 
 
 @dataclass
@@ -68,6 +86,9 @@ def split_page(html: str) -> List[ApiRecord]:
     if generator and generator.startswith("javadoc/"):
         from . import javadoc
         return javadoc.records(html, generator)
+    if generator == "rustdoc":
+        from . import rustdoc
+        return rustdoc.records(html)
     from . import sphinx
     if sphinx.SIGNATURE in html:  # Sphinx writes no generator meta: its object markup tells
         return sphinx.records(html)
