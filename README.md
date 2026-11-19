@@ -1359,7 +1359,7 @@ dograpper sync <url> -o <dir> [options]
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
 | `--strategy` | — | `size` | `size` \| `semantic` (passed to `pack`) |
-| `--format` | — | `md` | `txt` \| `md` \| `jsonl` \| `xml` (deprecated) (passed to `pack`) |
+| `--format` | — | `md` | `txt` \| `md` \| `jsonl` (passed to `pack`) |
 | `--layout` | — | `chunk` | `chunk` \| `page` (passed to `pack`) |
 | `--bundle` | — | *(none)* | `pack` preset |
 | `--context-header` | — | `false` | v1 header (passed to `pack`) |

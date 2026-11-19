@@ -57,8 +57,8 @@ def _explicit_params(ctx: click.Context, names) -> set:
               help="Maximum number of chunk files (see pack --max-chunks).")
 @click.option('--strategy', type=click.Choice(['size', 'semantic']), default='size', show_default=True,
               help="size: pack by word count. semantic: group by directory first (see pack --strategy).")
-@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl', 'xml']), default='md', show_default=True,
-              help="Chunk output format (see pack --format). 'xml' is deprecated.")
+@click.option('--format', type=click.Choice(['txt', 'md', 'jsonl']), default='md', show_default=True,
+              help="Chunk output format (see pack --format).")
 @click.option('--layout', type=click.Choice(['chunk', 'page']), default='chunk', show_default=True,
               help="chunk: numbered chunk files. page: one file per page plus INDEX.md "
                    "(see pack --layout)")

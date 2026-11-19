@@ -245,6 +245,11 @@ and fixes alone are a PATCH bump.
   by target. `txt` and `jsonl` output is unchanged. ([#87],
   [#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
 
+### Removed
+
+- `sync --format xml`: the deprecated `xml` choice is gone from `sync --format`, as
+  from `pack --format`; it is now a usage error (exit 2) (#150).
+
 ### Fixed
 
 - `drift -o` and `eval -o` on a path that cannot be written print one error line
