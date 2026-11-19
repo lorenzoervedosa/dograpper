@@ -2,6 +2,8 @@
 
 Suíte pytest. Qual teste ler antes de alterar um módulo está no CLAUDE.md do diretório do módulo. Contratos, gates e fluxo de sessão: `CLAUDE.md` da raiz.
 
+- **Tempo:** linearidade só pela razão de CPU de `tests/linearity.py` (`assert_linear()`), nunca por limite de relógio, que quebra sob carga.
+
 ## Módulos
 
 ```

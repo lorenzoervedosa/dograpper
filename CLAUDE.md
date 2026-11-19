@@ -171,6 +171,17 @@ nem push na `main` (o guarda `.claude/hooks/block-dangerous-git.py` bloqueia).
      depois do passo 2; branch remota idem com
      `DOGRAPPER_BRANCH_MERGED=1 git push origin --delete <branch>`.
 
+## Armadilhas do ambiente
+
+- **zsh:** `$T:s…` é modificador (`:s`, `:h`, `:t`…), escreva `${T}:`; glob sem aspas num argumento (`--include=*.py`) que não casa aborta o comando com "no matches found", use aspas.
+- **Amend:** só de HEAD não publicado, numa forma que `block-dangerous-git.py` localiza: `git commit --amend` no cwd, `cd DIR && [git add … &&] git commit --amend` ou `git -C DIR commit --amend`; `;`, `$VAR` ou subshell bloqueiam. HEAD publicado exige consentimento (`DOGRAPPER_USER_APPROVED=1`).
+- **Publicar:** push de branch nova e abertura de PR exigem ok explícito do usuário a cada vez, mesmo com o lote pronto.
+- **`git cherry` após cherry-pick com conflito:** o patch resolvido ganha outro patch-id e aparece como `+` mesmo já estando na `main`; compare com `git range-diff <base>..<branch> <base>..origin/main` (`<base>` = `git merge-base <branch> origin/main`) antes do `branch -D`.
+- **Worktree que é o cwd:** removê-la quebra o próximo comando do shell; limpe por `git -C <checkout principal> worktree remove …`, como último passo.
+- **`pgrep -f` / `pkill -f`:** um padrão que aparece no próprio comando casa com o shell que o roda e o mata; use `'[d]ograpper serve'` ou o PID.
+- **Verificação por commit sem `git stash`** (a pilha é compartilhada entre worktrees): worktree descartável `--detach` com os patches cumulativos aplicados, sem editar nada enquanto a suíte roda.
+- **Hooks numa worktree:** a sessão aberta no checkout principal roda os hooks de `$CLAUDE_PROJECT_DIR` (o checkout principal); mudança em `.claude/hooks/` feita numa worktree só vale para ela depois do merge.
+
 ## Padrões de commit e branch
 
 - Commits em português ou inglês, sem preferência rígida
