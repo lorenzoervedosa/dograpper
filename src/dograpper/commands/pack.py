@@ -23,11 +23,16 @@ PACK_STATE_FILENAME = "pack_state.json"
 FORMATS = ['txt', 'md', 'jsonl']
 
 
-def _validate_values(dedup_threshold):
+def _validate_values(dedup_threshold, token_encoding):
     """Range checks for values that can arrive from .dograpper.json, where click's own checks do not run."""
     if not 0 <= dedup_threshold <= 10:
         raise click.UsageError(
             f"Invalid value for --dedup-threshold: {dedup_threshold} is not in the range 0 to 10.")
+    from ..utils.token_counter import check_encoding
+    try:
+        check_encoding(token_encoding)
+    except ValueError as e:
+        raise click.UsageError(f"Invalid value for --token-encoding: {e}")
 
 
 def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
@@ -155,7 +160,7 @@ def _query_packing_summary(query_list, query_pack_result) -> str:
 @click.option('--show-tokens', is_flag=True, default=False,
               help="Show per-chunk and total token count in the final summary.")
 @click.option('--token-encoding', type=str, default="cl100k", show_default=True,
-              help="Tokenizer encoding (cl100k, o200k, p50k). Requires --show-tokens.")
+              help="Tokenizer encoding (cl100k, o200k, p50k, or a full tiktoken name); an unknown name is a usage error. Requires --show-tokens.")
 @click.option('--dry-run', is_flag=True, default=False,
               help="Run the whole pipeline but write no files; print the compression report and the projected chunks instead.")
 @click.option('--dedup', type=click.Choice(['off', 'exact', 'fuzzy', 'both'], case_sensitive=False),
@@ -295,7 +300,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     is_api_records = merged_params.get('api_records', api_records)
 
     # 2-pre. Config values click never saw: same errors as the command line
-    _validate_values(dedup_thresh)
+    _validate_values(dedup_thresh, t_encoding)
 
     # 2a. Page layout (ADR-0010): reject chunk-only settings, never touch a pages/ we did not write
     if page_layout:

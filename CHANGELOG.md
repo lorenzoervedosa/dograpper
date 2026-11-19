@@ -204,6 +204,7 @@ and fixes alone are a PATCH bump.
 
 ### Changed
 
+- `pack --token-encoding` with an unknown name is a usage error (exit 2) before anything is packed, from the command line and from the `token-encoding` config key; before, it packed, warned once per chunk and exited 0 without the token lines. ([#144])
 - `pack --dedup-threshold` outside 0 to 10 is a usage error (exit 2), from the command line and from the `dedup-threshold` config key; before, any integer was accepted. ([#142])
 - `pack` now packs documentation formats only by default (`.html`, `.htm`,
   `.md`, `.txt`). `.js`, `.css`, `.json` and other text files are skipped and
@@ -523,6 +524,7 @@ and fixes alone are a PATCH bump.
 [#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
+[#144]: https://github.com/lorenzoervedosa/dograpper/issues/144
 [#142]: https://github.com/lorenzoervedosa/dograpper/issues/142
 [#150]: https://github.com/lorenzoervedosa/dograpper/issues/150
 [#141]: https://github.com/lorenzoervedosa/dograpper/issues/141

@@ -761,7 +761,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--layout` | — | `chunk` | `chunk`: numbered chunk files. `page`: one file per page under `pages/` plus `INDEX.md` (see [Page layout](#page-layout---layout-page)) |
 | `--no-extract` | — | `false` | Disable smart HTML content extraction |
 | `--show-tokens` | — | `false` | Show token count in the final summary |
-| `--token-encoding` | — | `cl100k` | Tokenizer encoding: `cl100k`, `o200k`, `p50k` |
+| `--token-encoding` | — | `cl100k` | Tokenizer encoding: `cl100k`, `o200k`, `p50k` or a full tiktoken name; an unknown one is a usage error (exit 2) |
 | `--dry-run` | — | `false` | Simulate pack without writing; prints report |
 | `--dedup` | — | `off` | Block deduplication: `off`, `exact`, `fuzzy`, `both` |
 | `--dedup-threshold` | — | `3` | Maximum Hamming distance for fuzzy dedup (0-10) |
@@ -1614,6 +1614,7 @@ Stop the server with Ctrl+C.
 | 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge or saved error page; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run` | fix the input or the flags |
 | 1 | download | the manifest cannot be written | fix permissions or free space in `--output`; the mirror itself is complete |
 | 1 | pack --delta | `pack_state.json` cannot be written | fix permissions or free space in `--output`; the chunks are complete, the next `--delta` run packs in full |
+| 2 | pack | `--dedup-threshold` outside 0 to 10, or an unknown `--token-encoding` (command line or config) | use a value in range; `cl100k`, `o200k`, `p50k` or a full tiktoken name |
 | 2 | pack | `--output` is the same directory as `INPUT_DIR` | use a subdirectory or another path |
 | 1 | explain / eval / serve | no chunk file matches `--prefix` (JSONL for `eval` and `serve`); `explain`: unknown chunk id; `eval`: no record carries a heading breadcrumb | re-run `pack` with the format and flags the command needs |
 | 1 | drift | a snapshot or the delta manifest is unreadable or malformed; with `--fail-on-drift`, drift was found | fix the file; with `--fail-on-drift` the exit is the signal asked for |
