@@ -44,6 +44,54 @@ Entry format:
   byte at every `--timeout`); an exact idle timer (needs `XFERINFOFUNCTION`,
   which curl_cffi does not expose; see `docs/DEBT.md`).
 - **Pending:** none.
+## 2026-11-19 — Playwright under the httrack profile (#78 PR 4)
+
+- **Decision:** every navigation of the crawled page is fetched by the
+  profile's `Fetcher` (`crawl.fetch_page`) and handed to Chromium with
+  `route.fulfill()`; a refusal (challenge, non-2xx, robots.txt, scope) is
+  never opened. This replaces the spec's `route.fetch()` (user's choice
+  between the two). The redirect chain is resolved before `page.goto`, which
+  then opens the final URL; each page opens from `about:blank`, so the
+  previous page cannot start a navigation that takes the armed answer. Subresources
+  go to the network as the browser's own requests, with the profile's UA;
+  iframes, popups and navigations a page starts itself are aborted; `/cdn-cgi/`
+  is aborted for every request; service workers are blocked. Redirects of a
+  seeded run use `fetch_url_list`'s rule (host and `--filter`), those of a
+  crawl `mirror.outside` with the start re-base. A seeded run opens its seeds
+  alone; followed links carry their page as `Referer` and pass mirror's
+  extension pre-filter; a non-HTML answer is saved, never opened. After an
+  engine fetch, the browser pass reports apart and is no front: the engine's
+  files stand when it saves nothing, and challenges that left a crawl at one
+  page do not trigger it. `--cache`, `--updatehack`, `--do-not-recatch` and
+  `--changes` with `--headless` are a usage error. `fire-engine` is unchanged
+  (still fails loud on `--headless` and SPAs).
+- **Why:** `route.fetch()` runs in Playwright's driver (`context.request`, a
+  Node client), so its TLS is neither the profile's nor Chromium's, and the
+  spec's §8.0 showed the handshake decides. A spike with Playwright 1.58's
+  Chromium showed that a 3xx given to `route.fulfill()` is followed without
+  routing the next hop. A route handler may block (the Fetcher's pacing) but
+  `page.goto`'s 10 s timeout keeps running, hence the fetch before the goto.
+  The update flags steer the engine's revalidation, and `--headless` has none.
+- **Rejected:** `route.fetch()` (other TLS, the policy rebuilt around it);
+  a fulfilled 3xx (escapes the route); a URL match for the armed answer
+  (Chromium normalizes URLs; `about:blank` makes the match positional);
+  Playwright for `fire-engine` (its navigations would lose the curl_cffi
+  fingerprint, and its tests are another lane's).
+- **Pending:** none. The maintainer answered the four open questions
+  (2026-11-19):
+  - Subresources stay Chromium's own requests (its TLS, the profile's UA, no
+    robots.txt, no pacing; `/cdn-cgi/` aborted). This is an approved deviation
+    (spec §5.2). They are dependencies of a page the policy already let
+    through, as in an ordinary browser visit, and robots.txt often forbids
+    legitimate assets. The load is bounded by the paced navigations and
+    Chromium's per-host connection limit; not by the HTTP cache, which
+    Playwright turns off while routing is on (measured).
+  - A page's own navigation (meta refresh, `location =`) is to be queued as a
+    link; not implemented, tracked in #159.
+  - After an engine fetch, the browser pass is to reuse the engine's body
+    instead of fetching each page again; not implemented, tracked in #160.
+  - The exit 2 for `--cache`, `--updatehack`, `--do-not-recatch` and
+    `--changes` with `--headless` stays.
 
 ## 2026-11-18 — Root CLAUDE.md split into nested files
 

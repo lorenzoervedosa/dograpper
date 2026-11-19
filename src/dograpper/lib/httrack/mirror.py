@@ -21,16 +21,16 @@ from urllib.parse import unquote, urlsplit
 
 from dograpper.lib.manifest import Manifest
 from dograpper.lib.url_filter import UrlFilters
-from dograpper.utils.atomic_write import atomic_write_bytes
 from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .changes import Changes
-from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, fetch_page, moved_request,
-                    previous_files, record_of, relink, reserve_names, sends, stamp, uncached)
+from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, extension_set, fetch_page,
+                    moved_request, previous_files, record_of, relink, reserve_names, save_file,
+                    sends, stamp, uncached)
 from .fetcher import Fetcher, same_host
 from .links import JS_MIMES, css_links, page_links, script_links, url_key
-from .naming import NameRegistry, no_page, url_extension
+from .naming import NameRegistry, mime_type, no_page, url_extension
 from .policy import NAVIGATION, FetchMeta, HttrackPolicy
 from .report import RunReport
 
@@ -88,7 +88,7 @@ def _kept_links(read, url: str, path: str, root: str, url_of: dict[str, str],
     return links
 
 
-def _start_rule(url: str) -> UrlFilters:
+def start_rule(url: str) -> UrlFilters:
     """HTTrack's implicit first rule, +<host>/<directory of url>* (htswizard.c), as
     wget_mirror.url_filter_args first wrote it: /docs/a.html -> /docs/, /docs -> /."""
     parts = urlsplit(url)
@@ -96,7 +96,33 @@ def _start_rule(url: str) -> UrlFilters:
     return UrlFilters([f"+{parts.netloc.rpartition('@')[2]}{directory}*"])
 
 
-def _skipped_by_extension(url: str, exts: set) -> bool:
+def outside(u: str, start: str, rule: UrlFilters, filters: UrlFilters | None) -> str | None:
+    """Why `u` is out of the crawl scope of `start` ("host" | "cdn-cgi" | "rule" |
+    "directory") or None: the start host, never /cdn-cgi/, then --filter, whose verdict
+    beats `rule` (start_rule of the start URL, or of where it was re-based)."""
+    if urlsplit(u).scheme not in ("http", "https") or not same_host(start, u):
+        return "host"
+    if urlsplit(u).path.startswith("/cdn-cgi/"):
+        return "cdn-cgi"
+    verdict = filters.decide(u) if filters is not None else None
+    if verdict is False:
+        return "rule"
+    return "directory" if verdict is None and not rule.decide(u) else None
+
+
+def rescope(u: str, start: str, rule: UrlFilters, filters: UrlFilters | None,
+            front: bool) -> tuple[str | None, UrlFilters]:
+    """outside() for a crawl whose scope `rule` follows its start URL: when the start's own
+    redirect chain (`front`) leaves the directory, the scope is re-based on the target, not
+    an empty mirror (deviation, spec 5.5). Returns (why, the rule from now on)."""
+    why = outside(u, start, rule, filters)
+    if why == "directory" and front:
+        logger.info("start URL redirected to %s; the crawl scope follows it", redact_url(u))
+        return None, start_rule(u)
+    return why, rule
+
+
+def skipped_by_extension(url: str, exts: set) -> bool:
     """--include-extensions before the request: an extension HTTrack knows as a type that is
     no page, and that the list leaves out, is not fetched (a page may come from any other)."""
     return bool(exts) and no_page(url) and url_extension(url) not in exts
@@ -122,9 +148,9 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
               if e.url}
     kept: set[str] = set()
     fields: dict[str, dict] = {}  # file -> record_of() its response, or its previous record
-    exts = {"." + e.strip().lower().lstrip(".") for e in include_extensions.split(",") if e.strip()}
+    exts = extension_set(include_extensions)
     report, lock = RunReport(), threading.Lock()
-    scope = [_start_rule(url)]
+    scope = [start_rule(url)]
     own, carry = _revalidates(prev.get(url_key(url)), None, False)
     queue = [_Entry(url, 0, front=True, prev=own, carry=carry)]
     entry_of = {url_key(url): url}       # url_key -> URL queued for it
@@ -136,17 +162,6 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
     progress = ProgressReporter("httrack crawl")
     state = {"bytes": 0, "front_ok": False, "front_failed": False}
 
-    def outside(u: str) -> str | None:
-        """Why `u` is out of scope ("host" | "cdn-cgi" | "rule" | "directory") or None."""
-        if urlsplit(u).scheme not in ("http", "https") or not same_host(url, u):
-            return "host"
-        if urlsplit(u).path.startswith("/cdn-cgi/"):
-            return "cdn-cgi"
-        verdict = filters.decide(u) if filters is not None else None
-        if verdict is False:
-            return "rule"
-        return "directory" if verdict is None and not scope[0].decide(u) else None
-
     def enqueue(u: str, *, hop: int, referer: str | None, meta: FetchMeta,
                 front: bool = False, redirects: int = 0, initiator: str | None = None,
                 carried: Previous | None = None) -> str:
@@ -156,11 +171,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         if k in entry_of:
             return "known"
         entry_of[k] = u
-        why = outside(u)
-        if why == "directory" and front:  # deviation (spec 5.5): re-base, not an empty mirror
-            logger.info("start URL redirected to %s; the crawl scope follows it",
-                        redact_url(u))
-            scope[0], why = _start_rule(u), None
+        why, scope[0] = rescope(u, url, scope[0], filters, front)
         if why == "rule":
             return "refused"
         if why is not None:
@@ -168,7 +179,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             return "refused"
         if depth and hop > depth:
             return "refused"
-        if _skipped_by_extension(u, exts):
+        if skipped_by_extension(u, exts):
             report.filtered.append(redact_url(u))
             return "refused"
         if len(queue) >= policy.max_links:
@@ -214,7 +225,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             return
         state["front_ok"] |= entry.front
         ctype = res.headers.get("content-type")
-        mime = (ctype or "").split(";")[0].strip().lower()
+        mime = mime_type(ctype)
         scans = {"parse_scripts": policy.parse_scripts,
                  "extended_parsing": policy.extended_parsing}
         if mime == "text/html":
@@ -226,29 +237,18 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             links = script_links(res.body, entry.url, entry.referer or entry.url, **scans)
         else:
             links = []
-        # second copy of crawl.fetch_url_list's write(): name, --include-extensions, write
         mine = entry.prev.path if entry.prev and not entry.prev.redirected else None
-        path = names.assign(entry.url, ctype, prefer=mine)
-        if path is None:
-            report.errors.append((safe, "unsafe local path", via))
-        elif exts and os.path.splitext(path)[1].lower() not in exts:
-            report.filtered.append(safe)
-        else:
-            try:
-                if changes is not None:
-                    changes.overwriting(path)
-                atomic_write_bytes(path, res.body)
-            except OSError as exc:  # e.g. file/dir conflict or disk full: recorded, run continues
-                report.errors.append((safe, f"write failed: {exc}", via))
-            else:
-                saved[url_key(entry.url)] = path
-                fields[path] = record_of(res)
-                state["bytes"] += len(res.body)
-                if mime == "text/html":
-                    pages[path] = entry.url
-                elif mime == "text/css" or mime in JS_MIMES:  # a script: its page's base
-                    scripts[path] = (entry.url, None if mime == "text/css" else entry.referer,
-                                     mime == "text/css")
+        path = save_file(names, entry.url, ctype, res.body, exts, report, safe, via,
+                         prefer=mine, changes=changes)
+        if path is not None:
+            saved[url_key(entry.url)] = path
+            fields[path] = record_of(res)
+            state["bytes"] += len(res.body)
+            if mime == "text/html":
+                pages[path] = entry.url
+            elif mime == "text/css" or mime in JS_MIMES:  # a script: its page's base
+                scripts[path] = (entry.url, None if mime == "text/css" else entry.referer,
+                                 mime == "text/css")
         for link in links:
             got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta,
                           initiator=entry.url)
@@ -266,7 +266,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         saved[url_key(entry.url)] = p.path
         kept.add(p.path)
         fields[p.path] = p.record
-        mime = (p.record["content_type"] or "").split(";")[0].strip().lower()
+        mime = mime_type(p.record["content_type"])
         if mime not in ("text/html", "text/css", *JS_MIMES) or res.error is not None or (
                 failed and entry.front):
             return []

@@ -39,3 +39,24 @@ Entradas abaixo, uma seção `##` por termo.
 **Onde apareceu:** `--timeout` do perfil `--downloader fire-engine` (#154, 2026-11-19): com `LOW_SPEED_TIME` igual ao `--timeout`, transferências vivas abortavam; a janela passou a ser `--timeout` + 1 s.
 **Por que importa pra decisão:** ele não reproduz o timeout de socket da stdlib (que zera a cada byte recebido): ou se aceita abortar conexão viva, ou se aceita esperar mais por um servidor morto; aqui a escolha foi esperar mais.
 **Nível:** 🆕 novo
+
+## subrecurso (subresource)
+**Em uma frase:** tudo o que uma página pede sozinha depois de chegar ao navegador para conseguir se montar: scripts, folhas de estilo, fontes, imagens e as chamadas de dados (XHR/fetch) que o JavaScript dela faz.
+**Analogia:** a página é a receita; os subrecursos são os ingredientes que a receita manda buscar na despensa.
+**Onde apareceu:** Playwright sob o perfil `httrack` (#78 PR 4, 2026-11-19): a navegação de cada página passa pelo Fetcher do perfil, e os subrecursos ficam com a rede do próprio Chromium (UA do perfil, sem robots.txt nem pacing, `/cdn-cgi/` abortado), um desvio aprovado pelo mantenedor (spec §5.2).
+**Por que importa pra decisão:** é onde fidelidade e funcionamento se cruzam. Pôr os subrecursos sob robots e pacing deixa cada página lenta e quebra as que têm assets proibidos no robots.txt; deixá-los com o navegador abre mão de parte da identidade do perfil. E, com o routing ligado, o Chromium não usa cache HTTP, então cada página baixa seus scripts de novo.
+**Nível:** 🆕 novo
+
+## fingerprint TLS (handshake)
+**Em uma frase:** a "assinatura" que um cliente deixa na primeira mensagem da conexão segura (o ClientHello do handshake TLS): quais cifras, extensões e curvas ele oferece e em que ordem. Servidores e WAFs comparam essa assinatura com a de navegadores e ferramentas conhecidas.
+**Analogia:** o sotaque de quem telefona: antes de você dizer o nome (o User-Agent), o jeito de falar já diz de onde você vem.
+**Onde apareceu:** spec do perfil `httrack`, §5.1 e §8.0 (2026-11-13): o site B respondeu 200 ao handshake do OpenSSL 3.5 e 403 ao do 3.0, com o mesmo pedido. No #78 PR 4 (2026-11-19), `route.fetch()` foi trocado pelo Fetcher do perfil porque sairia com o handshake do Node. O `fire-engine` (ADR-0011) imita o de um navegador com curl_cffi.
+**Por que importa pra decisão:** trocar só o User-Agent não muda o sotaque; quem passa ou não por um WAF é o handshake. Cada caminho de rede (motor, navegador, subrecurso) carrega a assinatura de quem abre a conexão, e é isso que se escolhe ao decidir quem busca o quê.
+**Nível:** 🆕 novo
+
+## hidratação (SPA)
+**Em uma frase:** o momento em que o JavaScript de uma SPA (single-page app, a página que se monta no navegador) roda e preenche a "casca" HTML quase vazia que o servidor mandou com o conteúdo de verdade.
+**Analogia:** o servidor entrega o móvel desmontado com o manual; a hidratação é a montagem na sua sala.
+**Onde apareceu:** `lib/playwright_crawl.py`, com hidratação limitada (domcontentloaded 10 s + espera por `a[href]` 5 s + 500 ms); o fallback para Playwright quando `is_spa()` vê cascas vazias; o Playwright sob o perfil `httrack` (#78 PR 4, 2026-11-19).
+**Por que importa pra decisão:** quem baixa só o HTML (wget, o motor do `httrack`) recebe a casca vazia de uma SPA, e por isso a cascata cai para um navegador. Esperar a hidratação custa tempo por página, e o limite dessa espera decide entre salvar uma página incompleta e travar o crawl.
+**Nível:** 🆕 novo

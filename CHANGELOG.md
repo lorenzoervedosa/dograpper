@@ -48,6 +48,17 @@ and fixes alone are a PATCH bump.
 
 ### Added
 
+- `download --downloader httrack --headless`, and the profile's fallback for a
+  result that looks client-rendered, run Playwright under the profile instead
+  of failing: every navigation is fetched by the profile's own client (TLS,
+  headers, pacing, robots.txt, the challenge policy) and handed to the
+  browser, so a challenge or a refused page is aborted before it renders and
+  no challenge script runs; redirects, scope, names, link rewriting and
+  manifest records follow the engine, and after an engine fetch the browser's
+  report follows under `Playwright pass:`. `--cache`, `--updatehack`,
+  `--do-not-recatch` and `--changes` with `--headless` are a usage error
+  (exit 2), since no page is revalidated there. ([#78])
+
 - `download --downloader fire-engine` (and on `sync`): the httrack crawl over a
   `curl_cffi` transport that sends a browser TLS/HTTP-2 fingerprint, for docs
   behind a WAF that rejects the stdlib handshake. Adds `--proxy` and
@@ -535,3 +546,4 @@ and fixes alone are a PATCH bump.
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
+[#78]: https://github.com/lorenzoervedosa/dograpper/issues/78

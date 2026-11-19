@@ -49,6 +49,7 @@ def run_playwright_crawl(
     manifest_data: Any = None,
     seed_urls: List[str] | None = None,
     filters: UrlFilters | None = None,
+    navigator: Any = None,
 ) -> CrawlResult:
     """Crawl SPAs using playwright.
 
@@ -62,6 +63,10 @@ def run_playwright_crawl(
 
     `filters` (optional) drops the links its --filter rules refuse, recording them
     in `filters.excluded`.
+
+    `navigator` (optional, lib/httrack/browser.Navigator) runs the crawl under the httrack
+    profile: it fetches every navigation, scopes the links, and names and writes the
+    pages; the caller leaves pacing and the cache to it (`delay` 0, no `manifest_data`).
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -72,10 +77,12 @@ def run_playwright_crawl(
     base_domain = parsed_initial.netloc
 
     visited = set()
-    to_visit: List[tuple[str, int]] = [(url, 0)]
+    # under a navigator a seeded crawl is its seeds alone, as the profile's seeded fetch is
+    seeds_only = navigator is not None and bool(seed_urls)
+    to_visit: List[tuple[str, int]] = [] if seeds_only else [(url, 0)]
     if seed_urls:
         for seed in seed_urls:
-            if seed != url:
+            if seeds_only or seed != url:
                 to_visit.append((seed, 0))
     files_downloaded = []
     urls: Dict[str, str] = {}
@@ -99,13 +106,17 @@ def run_playwright_crawl(
                 within_depth = depth == 0 or current_depth < depth
                 if absolute_link not in visited and not (
                         within_depth and filters is not None
-                        and filters.decide(absolute_link) is False):
+                        and filters.decide(absolute_link) is False) and (
+                            navigator is None or not within_depth
+                            or navigator.follows(absolute_link, current_url)):
                     to_visit.append((absolute_link, current_depth + 1))
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
+        context = browser.new_context(**(navigator.context_options() if navigator else {}))
         page = context.new_page()
+        if navigator is not None:
+            navigator.attach(context, page)
         
         while to_visit:
             current_url, current_depth = to_visit.pop(0)
@@ -149,53 +160,77 @@ def run_playwright_crawl(
                 continue
                 
             logger.debug(f"Downloading: {current_url}")
-            
+
+            target = current_url
+            if navigator is not None:
+                page.goto("about:blank")  # so the last page starts no navigation meanwhile
+                target = navigator.prepare(current_url)
+                # None: refused by the profile's policy (its report says why); or a
+                # redirect to a page this crawl already opened
+                if target is None or (target != current_url and target in visited):
+                    progress.update(done=len(files_downloaded), queued=len(to_visit),
+                                    last_url=current_url)
+                    continue
+                visited.add(target)
+
             try:
-                # Bounded hydration: 10s DOM + 5s selector wait + 500ms grace
-                # (worst case 15.5s). Replaces `networkidle` which can hang
-                # indefinitely on Mintlify-class SPAs whose RUM beacons keep
-                # the network busy.
-                page.goto(current_url, wait_until="domcontentloaded", timeout=10_000)
-                try:
-                    page.wait_for_selector("a[href]", timeout=5_000)
-                except Exception as hydrate_err:
-                    logger.debug(f"hydration: a[href] wait timed out for {current_url}: {hydrate_err}")
-                page.wait_for_timeout(500)
-                content = page.content()
-                
-                # Determine file path
-                parsed_current = urlparse(current_url)
-                path = parsed_current.path
-                if not path or path.endswith('/'):
-                    path += 'index.html'
-                elif not any(path.endswith(f".{ext}") for ext in extensions):
-                    path += '.html' # default to html for SPAs
-                    
-                path = path.lstrip('/')
-                
-                # Create directory and save
-                full_path = os.path.join(output_dir, parsed_initial.netloc, path)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                
-                with open(full_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                    
-                files_downloaded.append(full_path)
-                urls[full_path] = current_url
-                
-                # Extract links
-                links = page.evaluate('''() => {
-                    return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
-                }''')
-                follow(links, current_url, current_depth)
-                            
+                if navigator is not None and not navigator.renders:
+                    content = None  # no HTML page: saved as fetched (a PDF would download)
+                else:
+                    # Bounded hydration: 10s DOM + 5s selector wait + 500ms grace
+                    # (worst case 15.5s). Replaces `networkidle` which can hang
+                    # indefinitely on Mintlify-class SPAs whose RUM beacons keep
+                    # the network busy.
+                    page.goto(target, wait_until="domcontentloaded", timeout=10_000)
+                    try:
+                        page.wait_for_selector("a[href]", timeout=5_000)
+                    except Exception as hydrate_err:
+                        logger.debug(f"hydration: a[href] wait timed out for {current_url}: {hydrate_err}")
+                    page.wait_for_timeout(500)
+                    content = page.content()
+
+                if navigator is not None:
+                    full_path = navigator.save(current_url, content)
+                else:
+                    # Determine file path
+                    parsed_current = urlparse(current_url)
+                    path = parsed_current.path
+                    if not path or path.endswith('/'):
+                        path += 'index.html'
+                    elif not any(path.endswith(f".{ext}") for ext in extensions):
+                        path += '.html' # default to html for SPAs
+
+                    path = path.lstrip('/')
+
+                    # Create directory and save
+                    full_path = os.path.join(output_dir, parsed_initial.netloc, path)
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+
+                if full_path is not None:  # None: not saved, the navigator's report says why
+                    files_downloaded.append(full_path)
+                    urls[full_path] = current_url
+
+                if content is not None:
+                    # Extract links
+                    links = page.evaluate('''() => {
+                        return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
+                    }''')
+                    follow(links, target, current_depth)
+
             except Exception as e:
                 logger.error(f"Error crawling {current_url}: {e}")
                 errors.append(f"Error crawling {current_url}: {e}")
+                if navigator is not None:
+                    navigator.error(current_url, e)
             progress.update(done=len(files_downloaded), queued=len(to_visit), last_url=current_url)
                 
         browser.close()
     progress.finish()
+    if navigator is not None:
+        navigator.finish()
         
     return CrawlResult(
         success=True,

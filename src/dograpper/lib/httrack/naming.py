@@ -54,6 +54,11 @@ def no_page(url: str) -> bool:
     return ext in KNOWN_EXTS and ext not in PAGE_EXTS
 
 
+def mime_type(content_type: str | None) -> str:
+    """The media type of a Content-Type value, lower case, without parameters ("" if none)."""
+    return (content_type or "").split(";")[0].strip().lower()
+
+
 class NameRegistry:
     def __init__(self, output_dir: str):
         self._root = os.path.realpath(output_dir)
@@ -124,7 +129,7 @@ class NameRegistry:
         stem, ext = os.path.splitext(name)
         if parts.query:
             stem += hashlib.md5(parts.query.encode()).hexdigest()[:4]
-        is_html = (content_type or "").split(";")[0].strip().lower() == "text/html"
+        is_html = mime_type(content_type) == "text/html"
         if is_html and ext.lower() not in (".html", ".htm"):
             # shortcut: no htssniff.c magic check, so a real PDF served as text/html still
             # gets doc.html where HTTrack keeps doc.pdf; upgrade if mislabeled binaries matter.
