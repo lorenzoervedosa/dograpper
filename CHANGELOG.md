@@ -255,6 +255,7 @@ and fixes alone are a PATCH bump.
 
 ### Fixed
 
+- `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
 - `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
 - `drift -o` and `eval -o` on a path that cannot be written print one error line
   with the path and exit 1, instead of a traceback; the report is written atomically,
@@ -524,6 +525,7 @@ and fixes alone are a PATCH bump.
 [#121]: https://github.com/lorenzoervedosa/dograpper/issues/121
 [#68]: https://github.com/lorenzoervedosa/dograpper/issues/68
 [#98]: https://github.com/lorenzoervedosa/dograpper/issues/98
+[#143]: https://github.com/lorenzoervedosa/dograpper/issues/143
 [#144]: https://github.com/lorenzoervedosa/dograpper/issues/144
 [#142]: https://github.com/lorenzoervedosa/dograpper/issues/142
 [#150]: https://github.com/lorenzoervedosa/dograpper/issues/150

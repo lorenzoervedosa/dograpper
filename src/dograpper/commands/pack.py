@@ -726,7 +726,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         total_words_for_guide = sum(c.total_words for c in chunks)
         guide_path = generate_import_guide(
             chunks, output_dir, bundle_preset, total_words_for_guide,
-            heading_map=heading_map
+            heading_map=heading_map, prefix=pref, fmt=fmt
         )
 
     # 10d. LLM Readiness — write JSON (scoring already done in step 9c)

@@ -222,8 +222,12 @@ def balance_chunks(chunks: List[Chunk], target_chunks: int, max_words: int) -> L
 
 
 def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
-                          total_words: int, heading_map: Dict = None) -> str:
-    """Generate IMPORT_GUIDE.md with upload instructions for the preset."""
+                          total_words: int, heading_map: Dict = None,
+                          prefix: str = "docs_chunk_", fmt: str = "md") -> str:
+    """Generate IMPORT_GUIDE.md with upload instructions for the preset.
+
+    ``prefix`` and ``fmt`` are the run's, so the guide lists the files write_chunks wrote.
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     lines = []
@@ -240,7 +244,7 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
         lines.append("|---|------|-------|----------------|")
 
         for c in chunks:
-            chunk_name = f"docs_chunk_{format_chunk_index(c.index, len(chunks))}.md"
+            chunk_name = f"{chunk_id(prefix, c, len(chunks))}.{fmt}"
             words_fmt = f"{c.total_words:,}"
 
             # Derive section from heading_map or directory
@@ -273,7 +277,7 @@ def generate_import_guide(chunks: List[Chunk], output_dir: str, preset: str,
         lines.append("|---|------|-------|----------------|")
 
         for c in chunks:
-            chunk_name = f"docs_chunk_{format_chunk_index(c.index, len(chunks))}.md"
+            chunk_name = f"{chunk_id(prefix, c, len(chunks))}.{fmt}"
             words_fmt = f"{c.total_words:,}"
             section = ""
             if c.files:
