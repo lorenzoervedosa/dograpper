@@ -538,7 +538,7 @@ again: a missing one is created empty, and its URL is listed under `Errors` as
 stylesheet is fetched again in full (HTTrack restores it from the body its
 cache holds).
 
-`[httrack]` flags (an error under `--downloader wget` when given on the
+`[httrack, fire-engine]` flags (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
 `.dograpper.json` keys get the same type and range checks as the flags, so
 `"no-robots": "false"` means false and `"retries": 1.5` is rejected:
@@ -623,7 +623,7 @@ saved at most one HTML page) ends the run with the same message. Use
 `--downloader fire-engine` runs the `httrack` crawl with its wire client
 replaced by `curl_cffi`, which sends a real browser's TLS/HTTP-2 fingerprint so
 a WAF that checks the handshake (common in front of public docs) accepts the
-request. All `[httrack]` flags above apply, plus:
+request. All `[httrack, fire-engine]` flags above apply, plus:
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -1359,7 +1359,7 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
+| `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1606,7 +1606,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl, refused/challenged; `--headless`; a result that looks client-rendered; `fire-engine` without its extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | a `[httrack]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
