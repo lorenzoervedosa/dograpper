@@ -556,7 +556,8 @@ robots.txt included. A header named like one the profile sends (compared
 without case) takes that header's place in the order, with your value and your
 spelling of the name, which shows on HTTP/1.1 only (HTTP/2 lowercases every
 name); any other header is added after the profile's. `--header 'User-Agent:
-X'` is exactly `--user-agent X`; giving both is a usage error (exit 2). A line
+X'` is exactly `--user-agent X`; giving both is a usage error (exit 2), and so
+is one name on two `--header` lines (no line silently wins). A line
 that is not `Name: value`, a name that is not an RFC 9110 token, a value with
 CR, LF or NUL, and the names `Host`, `Content-Length`, `Transfer-Encoding` and
 `Connection` are refused with exit 2; the message names the header (or its

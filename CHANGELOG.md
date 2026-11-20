@@ -273,7 +273,7 @@ stays `0.0.0.dev0`.
   `fire-engine`: adds a request header to every request, robots.txt included,
   in the place of the profile's header of the same name or after the
   profile's. `--header 'User-Agent: X'` acts as `--user-agent X`; giving both,
-  a malformed header, a CR, LF or NUL in a value, `Host`, `Content-Length`,
+  one name on two lines, a malformed header, a CR, LF or NUL in a value, `Host`, `Content-Length`,
   `Transfer-Encoding` or `Connection`, and `--header` under `wget` are usage
   errors (exit 2) whose message never quotes the value. ([#136])
 

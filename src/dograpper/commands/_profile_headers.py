@@ -12,15 +12,18 @@ def user_headers(lines, src: str):
     """The --header lines, each checked by parse_header (the shared wire guard), as
     (the User-Agent among them or None, the other (name, value) pairs); `src` is the
     config_note of the lines."""
-    pairs = []
+    pairs, seen = [], set()
     for position, line in enumerate(lines, 1):
         try:
-            pairs.append(parse_header(line, position))
+            name, value = parse_header(line, position)
         except ValueError as e:
             raise click.UsageError(f"--header {e}{src}") from None
-    agents = [value for name, value in pairs if name.lower() == "user-agent"]
-    return (agents[-1] if agents else None,
-            tuple(pair for pair in pairs if pair[0].lower() != "user-agent"))
+        if name.lower() in seen:  # no silent last-one-wins
+            raise click.UsageError(f"--header {name} is given more than once; give it once{src}")
+        seen.add(name.lower())
+        pairs.append((name, value))
+    agent = next((value for name, value in pairs if name.lower() == "user-agent"), None)
+    return agent, tuple(pair for pair in pairs if pair[0].lower() != "user-agent")
 
 
 def checked_user_agent(value: str | None, src: str) -> str | None:

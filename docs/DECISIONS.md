@@ -56,6 +56,16 @@ Entry format:
 - **Why:** the Agent Brief names `--dry-run` alone; a stub is a few hundred bytes.
 - **Maintainer (2026-11-20):** keep it; recorded on #139.
 
+## 2026-11-20 — `--header` edge rules the Agent Brief left open (#136)
+
+- **Decision:** three readings, all toward failing loud or keeping the user's word:
+  - one name on two `--header` lines (compared without case, two `User-Agent:` lines included) is a usage error (exit 2), not a silent last-one-wins;
+  - a User-Agent from `--user-agent` and one from `--header` are exit 2 whatever the level of each (command line or `.dograpper.json`): contract 6 orders the levels of one option, and these are two options that set one header;
+  - under fire-engine, a `sec-ch-ua*` hint given with `--header` survives an explicit User-Agent, which drops only the profile's hints (the user's header is applied last).
+- **Why:** the brief says "giving both is a usage error" without naming levels and says nothing about repeated names or user-given hints; the global "no silent fallback" rule and the research doc's "a user header always wins" (§6, the option the maintainer chose) decide them.
+- **Rejected:** last line wins (silent); sending both lines as `curl -H` does (a second User-Agent confuses servers); a command-line `--header 'User-Agent'` beating a config `user-agent` (contract 6 stretched across two options); dropping user-given hints too.
+- **Pending:** none; the maintainer can reverse any of the three in review.
+
 ## 2026-11-20 — Docs site content copied
 
 - **Decision:** supersedes "Docs site pages copied from the README". The README sections copied into `site/` have two copy points. `site/index.md` and `site/commands/pack.md` were copied at commit `97e4ccf` (README blob `16043b5`); every other page (the other commands, `reference/`, `install.md`, `quickstart.md`, `guides/`, `troubleshooting.md`) at commit `3799eda` (README blob `4eba1a4`). At cutover, `git diff 97e4ccf HEAD -- README.md` (the oldest point) lists what to carry over. Each guide also holds an English `## More on ...` section written from the matching Portuguese note in `docs/workflows/`; `docs/workflows/` is untouched, and its JSONL example, the only flag-bearing content, was checked against `schema-v1.md` and `--help`. The cutover diff from `97e4ccf` also re-lists the install and action hunks already copied at `3799eda`, and that is harmless.

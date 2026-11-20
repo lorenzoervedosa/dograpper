@@ -839,3 +839,17 @@ def test_user_agent_with_cr_lf_or_nul_is_usage_error(ht, tmp_path, config, bad):
     assert ("(from .dograpper.json)" in res.output) is config
     assert "s3cret" not in res.output and "Bot/1" not in res.output
     fu.assert_not_called()
+
+
+@pytest.mark.parametrize("first,second,named", [
+    ("X-Test: 1", "x-test: 2", "x-test"),         # names compare without case
+    ("User-Agent: A/1", "User-Agent: B/2", "User-Agent"),
+])
+def test_header_name_given_twice_is_usage_error(ht, first, second, named):
+    """No silent last-one-wins: two lines for one name are refused, naming it."""
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", "--header", first, "--header", second)
+    assert res.exit_code == 2
+    assert f"--header {named} is given more than once" in res.output
+    assert "A/1" not in res.output and "B/2" not in res.output
+    fu.assert_not_called()
