@@ -146,11 +146,11 @@ cada commit; nenhuma sessão faz merge local nem push na `main` (o guarda
 - **Trabalho que você não reconhece** (órfão, inacabado, divergência num
   rebase) pode ser de outra sessão: deixe como está e reporte; ação
   destrutiva só depois de confirmar com o usuário (regra global).
-- **Entrega:** um PR combinado por lote. Cada sessão entrega commits atômicos
-  na sua branch, sem push; a sessão integradora junta as branches, confere o
-  nível 2 em cada commit e abre o PR. Mudança que outra sessão também toca
-  (árvore e tabela deste arquivo, `CHANGELOG.md`) entra como bloco ou linha
-  isolada, para o merge ficar mecânico.
+- **Entrega:** mudanças pequenas num PR de lote, grandes com PR próprio. Cada
+  sessão entrega commits atômicos na sua branch, sem push; a sessão
+  integradora junta as branches, confere o nível 2 em cada commit e abre o PR.
+  Mudança que outra sessão também toca (árvore e tabela deste arquivo,
+  `CHANGELOG.md`) entra como bloco ou linha isolada, para o merge ficar mecânico.
 - **PR já publicado e a `main` andou:** prefira `git merge origin/main` na
   branch do PR. Rebase + `push --force-with-lease` reescreve commits
   publicados e exige consentimento explícito a cada vez.
@@ -179,6 +179,24 @@ cada commit; nenhuma sessão faz merge local nem push na `main` (o guarda
   4. `DOGRAPPER_BRANCH_MERGED=1 git branch -D <branch>` — pré-autorizado só
      depois do passo 2; branch remota idem com
      `DOGRAPPER_BRANCH_MERGED=1 git push origin --delete <branch>`.
+
+## Onda paralela (lorenzo-wave)
+
+Fatos que `/lorenzo-wave`, `lorenzo-land` e `/lorenzo-close` leem daqui; setup
+da worktree, gates, hooks, limpeza e documentos vivos estão nas seções acima.
+
+- **Diretório da onda:** `.claude/waves/<AAAA-MM-DD>-<slug>/` no checkout
+  principal, fora do versionamento (`.git/info/exclude`, como `.claude/worktrees/`).
+- **Merge:** a regra está no início de "Sessões paralelas" (`gh pr merge --merge`,
+  sessão autorizada, CI verde). A `main` não tem proteção de branch no GitHub:
+  o guarda é `block-dangerous-git.py` mais o fluxo por PR.
+- **PRs:** mudanças pequenas num PR de lote, grandes com PR próprio (onda 1:
+  #158 foi lote; #161, #164 e #165, próprios).
+- **Registro de decisões:** `docs/DECISIONS.md`, entrada nova no topo; a
+  entrada de fechamento da onda segue o mesmo formato.
+- **Flakes conhecidos:** nenhum aberto. O último
+  (`test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout`) foi
+  corrigido no #158.
 
 ## Armadilhas do ambiente
 
