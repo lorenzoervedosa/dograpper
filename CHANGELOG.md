@@ -576,6 +576,10 @@ stays `0.0.0.dev0`.
   otherwise `"url": null`. Logs and failure reports show the value of
   credential-like parameters (`token`, `secret`, `key`, `sig`, `jwt`,
   `X-Amz-*`, ...) as `REDACTED`. ([#94])
+- `download --user-agent` (httrack and fire-engine, on the command line or in
+  `.dograpper.json`) with a CR, LF or NUL is a usage error (exit 2) that never
+  quotes the value; under fire-engine a line break in it used to put a header
+  line of its own on the wire. ([#136])
 
 [#1]: https://github.com/lorenzoervedosa/dograpper/issues/1
 [#2]: https://github.com/lorenzoervedosa/dograpper/issues/2

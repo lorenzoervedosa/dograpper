@@ -560,7 +560,8 @@ X'` is exactly `--user-agent X`; giving both is a usage error (exit 2). A line
 that is not `Name: value`, a name that is not an RFC 9110 token, a value with
 CR, LF or NUL, and the names `Host`, `Content-Length`, `Transfer-Encoding` and
 `Connection` are refused with exit 2; the message names the header (or its
-position) and never quotes the value, which can carry a credential. Under
+position) and never quotes the value, which can carry a credential. A
+`--user-agent` value with CR, LF or NUL is refused the same way. Under
 `--headless`, the headers reach every navigation, which the profile fetches,
 but not the browser's own subresource requests.
 
@@ -1710,7 +1711,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl (or of `httrack --headless`'s Playwright crawl), refused/challenged; `fire-engine`: `--headless`, a result that looks client-rendered, or no `fire-engine` extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | an invalid `--header` (see "Request headers"), or the User-Agent given both by `--user-agent` and by `--header`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |

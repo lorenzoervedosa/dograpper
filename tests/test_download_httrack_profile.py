@@ -821,3 +821,21 @@ def test_user_agent_given_two_ways_is_usage_error(ht, tmp_path, config):
     assert "--user-agent and --header 'User-Agent: …' both set the User-Agent" in res.output
     assert "A/1" not in res.output and "B/2" not in res.output
     fu.assert_not_called()
+
+
+@pytest.mark.parametrize("config", [False, True])
+@pytest.mark.parametrize("bad", ["Bot/1\r\nX-Injected: s3cret", "Bot/1\nX-Injected: s3cret",
+                                 "Bot/1\x00s3cret"])
+def test_user_agent_with_cr_lf_or_nul_is_usage_error(ht, tmp_path, config, bad):
+    """The --user-agent value goes on the wire like a --header one, so the same check
+    guards it: a line break would put a header line of its own on the wire."""
+    out, fu, _ = ht
+    if config:
+        res = run(out, config=_config(tmp_path, downloader="httrack", **{"user-agent": bad}))
+    else:
+        res = run(out, "--downloader", "httrack", "--user-agent", bad)
+    assert res.exit_code == 2
+    assert "--user-agent: User-Agent has a CR, LF or NUL character in its value" in res.output
+    assert ("(from .dograpper.json)" in res.output) is config
+    assert "s3cret" not in res.output and "Bot/1" not in res.output
+    fu.assert_not_called()

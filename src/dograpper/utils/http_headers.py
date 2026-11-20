@@ -18,9 +18,15 @@ def parse_header(text: str, position: int) -> tuple[str, str]:
                          "letters, digits and !#$%&'*+-.^_`|~")
     if name.lower() in REFUSED:
         raise ValueError(f"{name} is set by the downloader itself and cannot be given")
+    check_value(name, value)
+    return name, value.strip(" \t")
+
+
+def check_value(name: str, value: str) -> None:
+    """ValueError naming `name` when `value` holds a CR, LF or NUL, which would end the
+    header line and start one of the value's own on the wire."""
     if any(c in value for c in "\r\n\0"):
         raise ValueError(f"{name} has a CR, LF or NUL character in its value")
-    return name, value.strip(" \t")
 
 
 def merge_headers(base, extra) -> list:

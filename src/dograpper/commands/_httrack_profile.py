@@ -25,7 +25,7 @@ from ..lib.spa_detector import is_spa
 from ..utils.atomic_write import atomic_write_bytes
 from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
-from ._profile_headers import single_user_agent, user_headers
+from ._profile_headers import checked_user_agent, single_user_agent, user_headers
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,9 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
             if param.name not in from_config or values[param.name] != param.default:
                 raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack or fire-engine")
     header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
-    values['user_agent'] = single_user_agent({"--user-agent": values['user_agent'],
+    user_agent = checked_user_agent(values['user_agent'],
+                                    config_note('user_agent' in from_config))
+    values['user_agent'] = single_user_agent({"--user-agent": user_agent,
                                               "--header 'User-Agent: …'": header_ua})
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     policy_kw['headers'] = headers

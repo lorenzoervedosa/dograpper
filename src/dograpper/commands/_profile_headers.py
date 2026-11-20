@@ -5,7 +5,7 @@ from typing import Dict
 
 import click
 
-from ..utils.http_headers import parse_header
+from ..utils.http_headers import check_value, parse_header
 
 
 def user_headers(lines, src: str):
@@ -21,6 +21,17 @@ def user_headers(lines, src: str):
     agents = [value for name, value in pairs if name.lower() == "user-agent"]
     return (agents[-1] if agents else None,
             tuple(pair for pair in pairs if pair[0].lower() != "user-agent"))
+
+
+def checked_user_agent(value: str | None, src: str) -> str | None:
+    """The --user-agent value, through the check --header lines get (it goes on the wire
+    the same way); `src` is its config_note."""
+    if value is not None:
+        try:
+            check_value("User-Agent", value)
+        except ValueError as e:
+            raise click.UsageError(f"--user-agent: {e}{src}") from None
+    return value
 
 
 def single_user_agent(sources: Dict[str, str | None]) -> str | None:
