@@ -279,7 +279,6 @@ stays `0.0.0.dev0`.
   from signatures; any other rustdoc version still keeps one record per page.
   ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
   [#162](https://github.com/lorenzoervedosa/dograpper/issues/162))
-
 - `pack --token-encoding` with an unknown name is a usage error (exit 2) before anything is packed, from the command line and from the `token-encoding` config key; before, it packed, warned once per chunk and exited 0 without the token lines. ([#144])
 - `pack --dedup-threshold` outside 0 to 10, or not an integer in the config, is a usage error (exit 2), from the command line and from the `dedup-threshold` config key; before, any integer was accepted. ([#142])
 - `pack` now packs documentation formats only by default (`.html`, `.htm`,

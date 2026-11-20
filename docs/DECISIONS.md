@@ -22,6 +22,40 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-20 — rustdoc accepts one measured nightly build (#162)
+
+- **Decision:** `MEASURED_VERSIONS` accepts `1.96.` and the exact prefix
+  `1.102.0-nightly (6905905bb `; the notable-trait mark is dropped as
+  `span.tooltip` as well as `a.tooltip`.
+- **Why:** the nightly passed the ADR-0009 bar on itertools 0.14.0 (see the
+  acceptance doc); the issue says to accept only measured prefixes, and a
+  nightly's markup moves daily.
+- **Rejected:** `1.102.` or any `-nightly` (unmeasured builds).
+- **Pending:** docs.rs builds change daily, so most docs.rs pages stay
+  whole; widening again means measuring another build.
+
+## 2026-11-20 — browser lane (feat/httrack-browser-pass)
+
+- #166: a launch error is matched on "Executable doesn't exist" in its first line; the
+  install hint is only for that case (maintainer decision), any other keeps Playwright's line.
+- #159: a meta refresh is read from the rendered DOM by the same `evaluate` that reads
+  `a[href]`; a seeded run still follows links of its seeds (as before), it only opens no start URL.
+- #167: the subresource cache is capped at 64 MiB, keyed by URL (no `Vary`, no `Range`),
+  replays without `set-cookie`; a body that cannot be read is a cache miss (debug log).
+- #160: the cap of the engine's response store is 128 MiB; it keeps every 2xx body (non-HTML too);
+  a start URL that redirected is fetched again, since only a fetch re-bases the scope.
+  `run_profile` (owner: `fire`) gained the sink creation and the `responses=` argument.
+
+## 2026-11-20 — `--quiet` and `pack --report` / the stub scan window (#139, #163)
+
+- **Decision:** `pack --report` under `-q` loses its terminal summary (the report
+  file is still written); it goes through `say()` like the other summaries. Only
+  `--dry-run` is kept as "output that is the purpose of a flag". The redirect-stub
+  detector reads the first 16 KiB of a file, as the error-page one does: a larger
+  page is not a stub.
+- **Why:** the Agent Brief names `--dry-run` alone; a stub is a few hundred bytes.
+- **Maintainer (2026-11-20):** keep it; recorded on #139.
+
 ## 2026-11-20 — Docs site content copied
 
 - **Decision:** supersedes "Docs site pages copied from the README". The README sections copied into `site/` have two copy points. `site/index.md` and `site/commands/pack.md` were copied at commit `97e4ccf` (README blob `16043b5`); every other page (the other commands, `reference/`, `install.md`, `quickstart.md`, `guides/`, `troubleshooting.md`) at commit `3799eda` (README blob `4eba1a4`). At cutover, `git diff 97e4ccf HEAD -- README.md` (the oldest point) lists what to carry over. Each guide also holds an English `## More on ...` section written from the matching Portuguese note in `docs/workflows/`; `docs/workflows/` is untouched, and its JSONL example, the only flag-bearing content, was checked against `schema-v1.md` and `--help`. The cutover diff from `97e4ccf` also re-lists the install and action hunks already copied at `3799eda`, and that is harmless.
@@ -107,18 +141,6 @@ Entry format:
   every page whole until a nightly corpus is measured and the accepted
   versions widen.
 
-## 2026-11-20 — rustdoc accepts one measured nightly build (#162)
-
-- **Decision:** `MEASURED_VERSIONS` accepts `1.96.` and the exact prefix
-  `1.102.0-nightly (6905905bb `; the notable-trait mark is dropped as
-  `span.tooltip` as well as `a.tooltip`.
-- **Why:** the nightly passed the ADR-0009 bar on itertools 0.14.0 (see the
-  acceptance doc); the issue says to accept only measured prefixes, and a
-  nightly's markup moves daily.
-- **Rejected:** `1.102.` or any `-nightly` (unmeasured builds).
-- **Pending:** docs.rs builds change daily, so most docs.rs pages stay
-  whole; widening again means measuring another build.
-
 ## 2026-11-19 — rustdoc adapter: corpus, test file, shared helpers (#75)
 
 - **Decision:** the acceptance corpus is `itertools` 0.14.0 from the local
@@ -165,6 +187,7 @@ Entry format:
   byte at every `--timeout`); an exact idle timer (needs `XFERINFOFUNCTION`,
   which curl_cffi does not expose; see `docs/DEBT.md`).
 - **Pending:** none.
+
 ## 2026-11-19 — Playwright under the httrack profile (#78 PR 4)
 
 - **Decision:** every navigation of the crawled page is fetched by the
@@ -682,25 +705,3 @@ picked option (a).
 - **Rejected:** prefixing `./` (an unrecorded deviation).
 - **Pending:** maintainer: keep HTTrack's form, or deviate (spec §5) to keep
   module imports working offline.
-
-## 2026-11-20 — browser lane (feat/httrack-browser-pass)
-
-- #166: a launch error is matched on "Executable doesn't exist" in its first line; the
-  install hint is only for that case (maintainer decision), any other keeps Playwright's line.
-- #159: a meta refresh is read from the rendered DOM by the same `evaluate` that reads
-  `a[href]`; a seeded run still follows links of its seeds (as before), it only opens no start URL.
-- #167: the subresource cache is capped at 64 MiB, keyed by URL (no `Vary`, no `Range`),
-  replays without `set-cookie`; a body that cannot be read is a cache miss (debug log).
-- #160: the cap of the engine's response store is 128 MiB; it keeps every 2xx body (non-HTML too);
-  a start URL that redirected is fetched again, since only a fetch re-bases the scope.
-  `run_profile` (owner: `fire`) gained the sink creation and the `responses=` argument.
-
-## 2026-11-20 — `--quiet` and `pack --report` / the stub scan window (#139, #163)
-
-- **Decision:** `pack --report` under `-q` loses its terminal summary (the report
-  file is still written); it goes through `say()` like the other summaries. Only
-  `--dry-run` is kept as "output that is the purpose of a flag". The redirect-stub
-  detector reads the first 16 KiB of a file, as the error-page one does: a larger
-  page is not a stub.
-- **Why:** the Agent Brief names `--dry-run` alone; a stub is a few hundred bytes.
-- **Pending:** maintainer: keep the `--report` terminal output under `-q`?

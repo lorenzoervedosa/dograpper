@@ -96,6 +96,8 @@ Entry format, grouped under one heading per issue or PR:
   when curl_cffi exposes it, or when a real crawl is slowed by servers that
   stall mid-body.**
 
+## `commands/pack.py` size budget (#139, #163, 2026-11-20)
+
 - **`commands/pack.py` is 869 lines, above the 800-line budget of the size
   sentinel** (868 before the `--quiet` and redirect-stub work; the stub stage
   now costs one call to `commands/_skip_pages.py`).
