@@ -545,6 +545,9 @@ stays `0.0.0.dev0`.
 - `dograpper docs` shows `none` as the default of an option that has none,
   instead of `Sentinel.UNSET` (click 8.3).
 - `dograpper docs` lists `-h` next to `--help`, as every command accepts both.
+- `download --downloader fire-engine` no longer offers an h2c upgrade on plain
+  `http://` URLs (`Upgrade: h2c`, `HTTP2-Settings`, `Connection: Upgrade, …`),
+  which no browser sends; HTTPS still offers HTTP/2. ([#156])
 
 ### Security
 
@@ -592,6 +595,7 @@ stays `0.0.0.dev0`.
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
+[#156]: https://github.com/lorenzoervedosa/dograpper/issues/156
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159

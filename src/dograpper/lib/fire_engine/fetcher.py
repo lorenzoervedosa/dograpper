@@ -74,11 +74,13 @@ class CurlCffiMissing(RuntimeError):
 
 def _default_session_factory(impersonate: str, timeout: float):
     try:
-        from curl_cffi import CurlOpt
+        from curl_cffi import CurlHttpVersion, CurlOpt
         from curl_cffi import requests as cffi_requests
     except ImportError as exc:
         raise CurlCffiMissing(_MISSING) from exc
     return cffi_requests.Session(impersonate=impersonate, curl_options={
+        # HTTP/2 over TLS only: on http:// a browser never offers curl's h2c upgrade (#156)
+        CurlOpt.HTTP_VERSION: CurlHttpVersion.V2TLS,
         CurlOpt.HTTP_CONTENT_DECODING: 0,  # the raw body: Fetcher.get decodes it, bounded
         # the stdlib socket timeout: to connect, then with nothing received. libcurl counts
         # bytes in 1 s rate records, so one reaches its check up to a second late: the

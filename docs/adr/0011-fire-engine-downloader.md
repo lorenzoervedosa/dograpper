@@ -117,6 +117,20 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   status, o `Content-Type` e o `Content-Length` que o curl leu (`CURLINFO`), e
   o writer aborta a transferência sem guardar nem cobrar o corpo.
 
+## Identidade no fio (#156, #157, #136)
+
+Evidência: `docs/discovery/firecrawl-header-behavior.md`.
+
+- **Sem upgrade h2c em `http://` (#156).** A sessão do curl usa
+  `HTTP_VERSION` = `V2TLS` (HTTP/2 só sobre TLS). Num alvo `http://` o curl
+  deixa de mandar `Upgrade: h2c`, `HTTP2-Settings` e `Connection: Upgrade,
+  HTTP2-Settings`, que nenhum navegador manda; no HTTPS o ALPN continua
+  oferecendo `h2`. Resíduo aceito: sob o alvo `chrome`, `Host` é a última
+  linha do pedido HTTP/1.1 em texto claro, onde o Chromium o põe primeiro.
+  Mudar isso abandonaria a ordem de headers do perfil (decisão do mantenedor,
+  2026-11-20). Em HTTP/2 o host vai no pseudo-header `:authority`, na ordem
+  do perfil.
+
 ## Estado da decisão (2026-11-18)
 
 Entregue pelas fatias 1 e 2: itens 1 e 2 da decisão, com um proxy único vindo

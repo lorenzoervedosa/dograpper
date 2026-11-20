@@ -330,6 +330,36 @@ def test_real_get_goes_through_the_proxy_with_its_credentials(server):
     assert log[0]["Proxy-Authorization"] == "Basic " + base64.b64encode(b"user:pw").decode()
 
 
+OK_REPLY = b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+
+
+def wire_lines(head: bytes) -> list[str]:
+    """The header lines of a raw request head (raw_server), in wire order and case."""
+    return head.decode("latin-1").split("\r\n")[1:-2]
+
+
+def test_real_plain_http_request_offers_no_h2c_upgrade(raw_server):
+    """#156: no browser asks a cleartext server for an h2c upgrade."""
+    base, heads = raw_server(OK_REPLY)
+
+    res = real_fetcher().get(base + "/p", kind="navigate")
+
+    assert (res.status, res.body) == (200, b"ok")
+    lines = [line.lower() for line in wire_lines(heads[0])]
+    assert not [line for line in lines if line.startswith(("upgrade:", "http2-settings:"))]
+    assert not [line for line in lines if line.startswith("connection:") and "upgrade" in line]
+
+
+def test_real_https_still_offers_http2(raw_server):
+    """#156: HTTP/2 stays on over TLS: the ClientHello's ALPN still lists h2, then http/1.1."""
+    base, heads = raw_server(b"")
+
+    res = real_fetcher().get(base.replace("http://", "https://") + "/p", kind="navigate")
+
+    assert res.status is None  # the server reads the ClientHello and closes
+    assert b"\x02h2\x08http/1.1" in heads[0]
+
+
 FAST = ["--disable-security-limits", "--max-conn-rate", "1000"]  # local server: no pacing wait
 
 
