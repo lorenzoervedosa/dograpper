@@ -190,11 +190,18 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     forbids legitimate assets.
   - What bounds the load: the navigations, paced by the `Fetcher` one page at
     a time, and Chromium's own per-host connection limit.
-  - The HTTP cache does **not** soften it: Playwright turns Chromium's cache
-    off while routing is on, and the profile routes every request (measured
-    with Playwright 1.58: a `max-age=3600` script was fetched once per page,
-    against once per run without routing). Each page fetches its
-    subresources again.
+  - Chromium's HTTP cache does not soften it: Playwright turns it off while
+    routing is on, and the profile routes every request (measured with
+    Playwright 1.58: a `max-age=3600` script was fetched once per page,
+    against once per run without routing). The profile keeps its own
+    per-run cache instead: the first request for a subresource URL is
+    Chromium's own and its body is read from the context's response event
+    (inside the callback, while the page is open); later requests for it in
+    the same run are answered with `route.fulfill()` from memory. Only GET
+    answers with status 200 and no `Cache-Control: no-store` are kept, up to
+    64 MiB in total (past it responses pass through unkept, no eviction);
+    nothing goes to disk or to the manifest, and `max-age` is not honored.
+    `route.fetch()` is not used: its TLS is the Playwright driver's.
 - **Group selection:** a `dograpper` UA token (case-insensitive prefix) beats
   `*`, and consecutive `User-agent:` lines form one group.
 - **Matching:** longest pattern wins and Allow wins ties.

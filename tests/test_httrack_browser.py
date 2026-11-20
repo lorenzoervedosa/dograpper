@@ -40,8 +40,8 @@ class Frame:
 
 
 class Request:
-    def __init__(self, url, frame, nav=True):
-        self.url, self.frame, self._nav = url, frame, nav
+    def __init__(self, url, frame, nav=True, method="GET"):
+        self.url, self.frame, self._nav, self.method = url, frame, nav, method
 
     def is_navigation_request(self):
         return self._nav
@@ -62,8 +62,28 @@ class Route:
 
 
 class Context:
+    def __init__(self):
+        self.events = {}
+
     def route(self, pattern, handler):
         self.pattern, self.handler = pattern, handler
+
+    def on(self, event, handler):
+        self.events[event] = handler
+
+
+class Response:
+    """What the context's response event hands over; body() works only while `open`."""
+    def __init__(self, request, status=200, headers=None, body=b"x"):
+        self.request, self.status, self.headers = request, status, headers or {}
+        self._body = body
+
+    @property
+    def url(self):
+        return self.request.url
+
+    def body(self):
+        return self._body
 
 
 class Page:
@@ -453,3 +473,80 @@ def test_crawl_started_navigation_of_a_seeded_run_opens_no_start_url(server, tmp
     _chain(ctx, page, base, {base + "/docs/a": base + "/docs/b"})
     crawl_with(base, tmp_path, seed_urls=[base + "/docs/a"])
     assert seen == ["/robots.txt", "/docs/a", "/docs/b"]  # never the start URL /docs/
+
+
+def load(ctx, page, url, *, method="GET", status=200, headers=None, body=b"js"):
+    """A subresource the browser loads: route it, and when the route lets it through, the
+    server answers and the response event fires. Returns (route calls, went to the server)."""
+    req = Request(url, page.main_frame, nav=False, method=method)
+    route = Route(req)
+    ctx.handler(route)
+    went = route.calls == [("continue",)]
+    if went:
+        ctx.events["response"](Response(req, status, headers, body))
+    return route.calls, went
+
+
+def test_subresource_is_requested_once_per_run(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    js, css = base + "/app.js", base + "/site.css"
+    assert load(ctx, page, js, body=b"code") == ([("continue",)], True)
+    assert load(ctx, page, css, headers={"content-type": "text/css"}, body=b"a{}") == (
+        [("continue",)], True)
+    (call,), went = load(ctx, page, js)  # the second page's request: answered from memory
+    assert not went and call[0] == "fulfill"
+    assert call[1]["status"] == 200 and call[1]["body"] == b"code"
+    (call,), went = load(ctx, page, css)
+    assert not went and call[1]["headers"] == {"content-type": "text/css"}
+
+
+def test_subresource_cache_replays_decoded_without_stale_length(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    url = base + "/a.js"
+    load(ctx, page, url, headers={"content-encoding": "gzip", "content-length": "3",
+                                  "content-type": "text/javascript"}, body=b"decoded")
+    (call,), _ = load(ctx, page, url)
+    assert call[1]["headers"] == {"content-type": "text/javascript"}
+
+
+@pytest.mark.parametrize("kw", [
+    {"headers": {"cache-control": "private, No-Store"}},
+    {"status": 404}, {"status": 304}, {"method": "POST"}])
+def test_subresource_is_not_kept_unless_get_200_without_no_store(server, tmp_path, kw):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    url = base + "/x.js"
+    assert load(ctx, page, url, **kw)[1]
+    assert load(ctx, page, url, **kw)[1]  # the second request still goes to the server
+
+
+def test_a_navigation_response_is_never_kept(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    req = Request(base + "/docs/x", page.main_frame, nav=True)
+    ctx.events["response"](Response(req))
+    assert load(ctx, page, base + "/docs/x")[1]
+
+
+def test_subresource_cache_is_bounded_in_bytes_without_eviction(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    nav._cache_limit = 10
+    a, b, c = (base + p for p in ("/a.js", "/b.js", "/c.js"))
+    load(ctx, page, a, body=b"123456")
+    load(ctx, page, b, body=b"123456")  # would pass 10 bytes: passes through unkept
+    load(ctx, page, c, body=b"1234")  # still fits
+    assert not load(ctx, page, a)[1] and not load(ctx, page, c)[1]
+    assert load(ctx, page, b)[1]
+
+
+def test_subresource_body_unreadable_is_not_fatal_but_not_kept(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    req = Request(base + "/g.js", page.main_frame, nav=False)
+    res = Response(req)
+    res.body = lambda: (_ for _ in ()).throw(Exception("No resource with given identifier"))
+    ctx.events["response"](res)
+    assert load(ctx, page, base + "/g.js")[1]

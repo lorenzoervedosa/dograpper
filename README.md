@@ -618,7 +618,9 @@ the `wget` cascade's Playwright:
   against robots.txt nor paced: they are dependencies of a page the policy
   already let through, as in an ordinary visit (a decided exception to the
   profile's rule that every request goes through it). Routing every request
-  turns Chromium's HTTP cache off, so each page fetches them again. A
+  turns Chromium's HTTP cache off, so the run keeps its own in memory: a
+  subresource (GET, status 200, no `Cache-Control: no-store`) is requested once per
+  run, up to 64 MiB in total, and answered from memory to later pages. A
   navigation the page starts itself (meta refresh, `location =`) is aborted and
   queued as a link of that page, as is the target of a `<meta http-equiv=refresh>` in
   the rendered page; an iframe or a popup is not followed, and service workers are

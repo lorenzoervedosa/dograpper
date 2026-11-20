@@ -34,6 +34,11 @@ _DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding",
                       "connection", "keep-alive"})
 
 
+# Subresources the browser fetched, kept in memory for the run (spec 5.2): bounded in total
+# bytes, no eviction. 64 MiB holds the shared scripts and styles of a documentation site.
+SUBRESOURCE_CACHE_BYTES = 64 * 1024 * 1024
+
+
 def _is_page(res) -> bool:
     return mime_type(res.headers.get("content-type")) == "text/html"
 
@@ -51,6 +56,8 @@ class Navigator:
         self._last = None   # (final URL, FetchResult) of the last prepare()
         self._prepared = 0  # URLs prepare() fetched: policy.max_links caps them
         self._frame = None
+        self._cache: dict[str, tuple[int, dict, bytes]] = {}  # subresource URL -> its answer
+        self._cache_bytes, self._cache_limit = 0, SUBRESOURCE_CACHE_BYTES
         self._started: list[str] = []  # navigations the current page started itself
         self._files: dict[str, str] = {}  # saved file -> URL it came from
         self._pages: dict[str, str] = {}  # the HTML pages among them, for relink
@@ -67,6 +74,7 @@ class Navigator:
         """Route every request of `context`; `page` is the one the crawl saves."""
         self._frame = page.main_frame
         context.route("**/*", self._route)
+        context.on("response", self._response)
 
     def follows(self, url: str, page: str) -> bool:
         """Whether the crawl follows `url`, a link of `page`, as mirror_site queues one: in
@@ -153,13 +161,37 @@ class Navigator:
                extended_parsing=policy.extended_parsing)
         stamp(self._files, self.records, self.report)
 
+    def _response(self, response) -> None:
+        """Keep what the server answered a subresource (GET, 200, no `no-store`), read here
+        because the body is gone once the page closes, until the byte bound is reached."""
+        req = response.request
+        if (req.is_navigation_request() or req.method != "GET" or response.status != 200
+                or req.url in self._cache or "no-store" in
+                (response.headers.get("cache-control") or "").lower()):
+            return
+        try:
+            body = response.body()
+        except Exception as e:  # a cache miss only: the page rendered with this response
+            logger.debug("browser: %s not kept: %s", redact_url(req.url), e)
+            return
+        if self._cache_bytes + len(body) > self._cache_limit:
+            return
+        self._cache_bytes += len(body)
+        self._cache[req.url] = (response.status, response.headers, body)
+
     def _route(self, route) -> None:
         req = route.request
         if urlsplit(req.url).path.startswith("/cdn-cgi/"):  # never requested (spec 5.4)
             route.abort("blockedbyclient")
             return
         if not req.is_navigation_request():  # a subresource: the browser's own request
-            route.continue_()
+            kept = self._cache.get(req.url) if req.method == "GET" else None
+            if kept is None:
+                route.continue_()
+            else:  # asked before in this run: answered from memory, nothing sent
+                status, headers, body = kept
+                route.fulfill(status=status, body=body, headers={
+                    k: v for k, v in headers.items() if k not in _DROPPED})
             return
         if req.frame is not self._frame:  # an iframe or a popup: never part of the saved page
             route.abort("blockedbyclient")
