@@ -62,10 +62,10 @@ baseline is the same pack without `--api-records`.
 | Criterion | Bar | ICU (C) | libstdc++ (C++) |
 |---|---|---|---|
 | Lookups in the top 5 | ≥ 80% of ~20 | 11 of 12 | 10 of 12 |
-| Template headers kept | 100% | no templates | 1,063 of 1,063 verbatim |
+| Template headers kept | 100% | no templates | 1,051 of 1,051 verbatim |
 | Member records | p99 ≤ 550 (Doxygen); max ≤ 3,000 | p99 506, max 2,359 | p99 138, max 200 |
-| Container records | max ≤ 5,000 | max 925 | max 771 |
-| Pack time | ≤ 2× baseline | 3.6 s vs 5.2 s | 7.8 s vs 9.7 s |
+| Container records | max ≤ 5,000 | max 925 | max 772 |
+| Pack time | ≤ 2× baseline | 3.2 s vs 5.1 s | 7.4 s vs 9.1 s |
 
 Lookups over both corpora: 21 of 24 (88%). Pack times are the median of 3.
 The #168 brief asked for a member p99 of at most 300. ICU's 506 is over it,
@@ -79,9 +79,9 @@ Records:
   functions, 217 defines, 91 typedefs, 73 enums, 44 variables), 43 pages
   kept whole. Total output 169,613 words; the baseline writes 182,177 words
   in 62 records, the largest 17,726 (`ucnv.h`).
-- libstdc++: 193 pages split into 2,445 records (193 container, 2,252
-  member: 1,817 functions, 306 typedefs, 99 variables, 24 defines, 6
-  enums), 218 pages kept whole. Total output 209,160 words; the baseline
+- libstdc++: 193 pages split into 2,433 records (193 container, 2,240
+  member: 1,790 functions, 306 typedefs, 114 variables, 24 defines, 6
+  enums), 218 pages kept whole. Total output 211,916 words; the baseline
   writes 218,679 words in 411 records, the largest 9,962.
 
 Every page kept whole is a member list (`*-members.html`, or a member list
@@ -94,10 +94,10 @@ topic (group) page or a related page, except `std::optional` and
 | Records | n | Median | p90 | p99 | Max |
 |---|---|---|---|---|---|
 | Member, ICU | 1,034 | 72 | 194 | 506 | 2,359 |
-| Member, libstdc++ | 2,252 | 13 | 73 | 138 | 200 |
-| Member, both | 3,286 | | | 305 | 2,359 |
+| Member, libstdc++ | 2,240 | 13 | 73 | 138 | 200 |
+| Member, both | 3,274 | | | 305 | 2,359 |
 | Container, ICU | 19 | 185 | 758 | 925 | 925 |
-| Container, libstdc++ | 193 | 28 | 120 | 280 | 771 |
+| Container, libstdc++ | 193 | 28 | 120 | 280 | 772 |
 
 - ICU has 35 member records over 300 words: 23 functions, 11 enums and 1
   typedef. The functions are ICU's own API documentation: `ucnv_convertEx`
@@ -108,9 +108,9 @@ topic (group) page or a related page, except `std::optional` and
   words, and 383 for the functions alone, so splitting enumerators into
   records of their own would not bring it to 300.
 - libstdc++ members are short: its doc comments are a sentence or two and a
-  parameter list. 1,137 of the 2,252 members have no documentation of their
+  parameter list. 1,137 of the 2,240 members have no documentation of their
   own and keep only their signature (`HIDE_UNDOC_MEMBERS = NO` lists them).
-- The largest container is `std::deque` (771 words): its member names by
+- The largest container is `std::deque` (772 words): its member names by
   section and its inherited members by base.
 
 ### Lookups
@@ -170,9 +170,12 @@ The other large member in the set, `UErrorCode` (1,587 words), still ranks
 A separate script read every template header straight from the HTML with
 regular expressions: the `div.memtemplate` blocks of each documentation
 section and the `td.memTemplParams` cell of each summary row that holds a
-member's anchor. On the pages that were split, 1,063 of 1,063 headers appear
-verbatim in their member record, both headers of a member template of a
-class template included. The ICU headers declare no templates.
+member's anchor. On the pages that were split, 1,051 of 1,051 headers of
+member records appear verbatim in their record, both headers of a member
+template of a class template included. The 12 other headers belong to friend
+class templates (`template<typename _Tp1, _Lock_policy _Lp1> class
+__weak_ptr`), which get no record: their name is listed under `Friends`. The
+ICU headers declare no templates.
 
 ## Reproduction
 

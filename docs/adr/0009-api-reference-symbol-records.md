@@ -233,7 +233,7 @@ the maintainer on 2026-11-20 above the 300 asked for in #168, after the
 measurement. The evidence comes from the acceptance run
 ([the Doxygen acceptance doc](../discovery/doxygen-api-records-acceptance.md))
 on two corpora generated locally, ICU 74.2 (C, 1,034 member records) and
-libstdc++ 13 (templated C++, 2,252 member records):
+libstdc++ 13 (templated C++, 2,240 member records):
 
 - Member p99 was 506 words on ICU, 138 on libstdc++ and 305 on both
   together; the largest member had 2,359 words (the `UProperty` enum, one
@@ -245,10 +245,10 @@ libstdc++ 13 (templated C++, 2,252 member records):
   top 5. One miss is a large record: `ucnv_open` (325 words) ranks below
   its shorter siblings `ucnv_open*`. `UErrorCode` (1,587 words) still ranks
   3rd.
-- 1,063 of 1,063 template headers were kept verbatim, both headers of a
-  member template of a class template included. The largest container had
-  925 words; both packs were faster than without `--api-records` (3.6 s vs
-  5.2 s, 7.8 s vs 9.7 s).
+- 1,051 of 1,051 template headers of member records were kept verbatim,
+  both headers of a member template of a class template included. The
+  largest container had 925 words; both packs were faster than without
+  `--api-records` (3.2 s vs 5.1 s, 7.4 s vs 9.1 s).
 
 Topic (group) pages, related pages and the other Doxygen languages keep one
 record: their markup was not measured.
