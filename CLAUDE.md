@@ -261,6 +261,21 @@ Skills e comando do projeto (`.claude/`), com fronteira explícita entre irmãs:
   evidência, classificados fix-now / debt / ignore, registrados em
   `docs/audits/structural.md`.
 
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues de `lorenzoervedosa/dograpper`, pelo `gh`. Ver `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Os cinco papéis canônicos com o nome padrão (`needs-triage`, `needs-info`,
+`ready-for-agent`, `ready-for-human`, `wontfix`). Ver `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` e `docs/adr/` na raiz. Ver `docs/agents/domain.md`.
+
 ## Glossário vivo (`docs/glossario.md`)
 
 `docs/glossario.md` é um glossário de APRENDIZADO, em pt-BR: explica em
