@@ -165,6 +165,21 @@ Evidência: `docs/discovery/firecrawl-header-behavior.md`.
   de User-Agent (`single_user_agent()` em `commands/_httrack_profile.py`). A
   validação, guarda de entrada não confiável no fio, mora num lugar só
   (`utils/http_headers.py`).
+- **robots.txt casa com o token fixo `dograpper` (#136, decisão do mantenedor
+  de 2026-11-19).** Os grupos do robots.txt são escolhidos pelo token
+  `dograpper`, nunca pelo User-Agent no fio (o do perfil impersonado, o de
+  `--user-agent` ou o de `--header`), como o Firecrawl casa os grupos com
+  `FirecrawlAgent` e diz na documentação que esse token não é o User-Agent do
+  fetch. Não há opção de User-Agent próprio para o robots.txt (o
+  `robotsUserAgent` do Firecrawl, que é enterprise). Nos dois pontos em que o
+  Firecrawl e o RFC 9309 se afastam (follow-up 6 da pesquisa), o dograpper
+  fica com o comportamento que já tinha, sem mudança:
+  - **token:** um grupo vale quando o seu `User-agent` começa com
+    `dograpper`, sem caixa (`dograpper-bot` vale); o Firecrawl (robots-parser
+    3.0.1) exige o token exato, cortado no `/`. Sem grupo próprio, vale o `*`;
+  - **`/path` e `/path/`:** a regra casa por prefixo, como no RFC 9309, então
+    `Disallow: /path/` não bloqueia `/path`; o Firecrawl bloqueia `/path`
+    também quando `/path/` é proibido.
 
 ## Estado da decisão (2026-11-18)
 
