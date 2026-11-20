@@ -30,7 +30,7 @@ FOREIGN_FLAGS = frozenset({
 
 _FLAG_RE = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 _HEADING_RE = re.compile(r"^### `?(--[a-z][a-z0-9-]*)", re.MULTILINE)
-_DIRECTIVE_RE = re.compile(r"^```\{dograpper-options\}\s+(\S+)\s*$", re.MULTILINE)
+_DIRECTIVE_RE = re.compile(r"^```\{dograpper-options\}[ \t]+(\S+)[ \t]*$", re.MULTILINE)
 
 
 def _flags_in(text: str) -> set[str]:
