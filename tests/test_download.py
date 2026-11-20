@@ -1,6 +1,7 @@
 import io
 import os
 import json
+import sys
 import tempfile
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -774,6 +775,39 @@ def test_download_headless_skips_wget():
                 assert res.exit_code == 0
                 mock_wget.assert_not_called()
                 mock_pw.assert_called()
+
+def _playwright_launch_raises(monkeypatch, message):
+    """A Playwright double whose Chromium launch fails with `message` (no real browser)."""
+    api = MagicMock()
+    api.sync_playwright.return_value.__enter__.return_value.chromium.launch.side_effect = \
+        Exception(message)
+    monkeypatch.setitem(sys.modules, "playwright", MagicMock())
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", api)
+
+
+MISSING_CHROMIUM = ("BrowserType.launch: Executable doesn't exist at /x/chrome\n"
+                    "+------------+\n| Looks like Playwright was just installed |")
+
+
+def test_headless_without_chromium_is_a_one_line_error(monkeypatch):
+    _playwright_launch_raises(monkeypatch, MISSING_CHROMIUM)
+    with tempfile.TemporaryDirectory() as d:
+        res = CliRunner().invoke(download, ['http://example.com', '-o', d, '--headless'])
+    assert res.exit_code == 1
+    assert "Chromium is not installed" in res.output
+    assert "dograpper doctor --install" in res.output
+    assert "Traceback" not in res.output and "+---" not in res.output
+
+
+def test_headless_other_launch_error_shows_its_first_line(monkeypatch):
+    _playwright_launch_raises(monkeypatch, "BrowserType.launch: sandbox failed\ndetails")
+    with tempfile.TemporaryDirectory() as d:
+        res = CliRunner().invoke(download, ['http://example.com', '-o', d, '--headless'])
+    assert res.exit_code == 1
+    assert "BrowserType.launch: sandbox failed" in res.output
+    assert "details" not in res.output and "Traceback" not in res.output
+    assert "doctor --install" not in res.output
+
 
 def test_download_incremental_second_run():
     runner = CliRunner()

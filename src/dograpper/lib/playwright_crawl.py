@@ -112,7 +112,15 @@ def run_playwright_crawl(
                     to_visit.append((absolute_link, current_depth + 1))
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        try:
+            browser = p.chromium.launch(headless=True)
+        except Exception as e:
+            first = (str(e).splitlines() or [type(e).__name__])[0]
+            if "Executable doesn't exist" in first:
+                raise RuntimeError(
+                    "Chromium is not installed for Playwright. "
+                    "Run: dograpper doctor --install") from None
+            raise RuntimeError(first) from None
         context = browser.new_context(**(navigator.context_options() if navigator else {}))
         page = context.new_page()
         if navigator is not None:

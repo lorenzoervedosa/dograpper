@@ -333,6 +333,7 @@ stays `0.0.0.dev0`.
 
 ### Fixed
 
+- `download --headless` (also with `--downloader httrack`, and `sync`) without an installed Chromium prints one line naming `dograpper doctor --install` and exits 1, instead of a Playwright traceback; any other browser launch failure prints Playwright's first line. ([#166])
 - `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
 - `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
 - `drift -o` and `eval -o` on a path that cannot be written print one error line
@@ -576,3 +577,4 @@ stays `0.0.0.dev0`.
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
+[#166]: https://github.com/lorenzoervedosa/dograpper/issues/166

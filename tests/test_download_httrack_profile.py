@@ -6,7 +6,8 @@ No test here touches the network: ``Fetcher`` is replaced by FakeFetcher.
 import json
 import logging
 import os
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -407,6 +408,19 @@ def test_httrack_cache_0_lists_no_unreached_file(crawl):
     res = run(out, "--downloader", "httrack", "--cache", "0")
     assert res.exit_code == 0, res.output
     assert "Not reached" not in res.output
+
+
+def test_httrack_headless_without_chromium_is_a_one_line_error(ht, monkeypatch):
+    out, _, _ = ht
+    api = MagicMock()
+    api.sync_playwright.return_value.__enter__.return_value.chromium.launch.side_effect = \
+        Exception("BrowserType.launch: Executable doesn't exist at /x/chrome\n+----+")
+    monkeypatch.setitem(sys.modules, "playwright", MagicMock())
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", api)
+    res = run(out, "--downloader", "httrack", "--headless")
+    assert res.exit_code == 1
+    assert "dograpper doctor --install" in res.output
+    assert "Traceback" not in res.output and "+----+" not in res.output
 
 
 def test_httrack_headless_runs_playwright_under_the_policy(ht):
