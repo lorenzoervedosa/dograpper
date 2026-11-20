@@ -8,10 +8,10 @@ No test touches the network.
 import base64
 import gzip
 import json
+import logging
 import sys
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from unittest.mock import patch
 
 import pytest
@@ -331,6 +331,65 @@ def test_real_get_goes_through_the_proxy_with_its_credentials(server):
     assert log[0]["Proxy-Authorization"] == "Basic " + base64.b64encode(b"user:pw").decode()
 
 
+OK_REPLY = b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+
+
+def wire_lines(head: bytes) -> list[str]:
+    """The header lines of a raw request head (raw_server), in wire order and case."""
+    return head.decode("latin-1").split("\r\n")[1:-2]
+
+
+def wire_names(head: bytes) -> list[str]:
+    """The header names of a raw request head, in wire order and case."""
+    return [line.split(":", 1)[0] for line in wire_lines(head)]
+
+
+def test_real_plain_http_request_offers_no_h2c_upgrade(raw_server):
+    """#156: no browser asks a cleartext server for an h2c upgrade."""
+    base, heads = raw_server(OK_REPLY)
+
+    res = real_fetcher().get(base + "/p", kind="navigate")
+
+    assert (res.status, res.body) == (200, b"ok")
+    lines = [line.lower() for line in wire_lines(heads[0])]
+    assert not [line for line in lines if line.startswith(("upgrade:", "http2-settings:"))]
+    assert not [line for line in lines if line.startswith("connection:") and "upgrade" in line]
+
+
+def test_real_https_still_offers_http2(raw_server):
+    """#156: HTTP/2 stays on over TLS: the ClientHello's ALPN still lists h2, then http/1.1."""
+    base, heads = raw_server(b"")
+
+    res = real_fetcher().get(base.replace("http://", "https://") + "/p", kind="navigate")
+
+    assert res.status is None  # the server reads the ClientHello and closes
+    assert b"\x02h2\x08http/1.1" in heads[0]
+
+
+@pytest.mark.parametrize("target", ["chrome_android", "chrome131_android"])
+def test_real_android_target_sends_the_mobile_client_hint_in_its_slot(raw_server, target):
+    """#157: curl_cffi's chrome131_android sends sec-ch-ua-mobile: ?0 beside an Android UA;
+    a mobile UA sends ?1 (Client Hints). The value changes, the target's order does not."""
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(impersonate=target).get(base + "/p", kind="navigate")
+
+    assert "sec-ch-ua-mobile: ?1" in wire_lines(heads[0])
+    assert wire_names(heads[0]) == [
+        "Host", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+        "Upgrade-Insecure-Requests", "User-Agent", "Accept", "Sec-Fetch-Site",
+        "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest", "Accept-Encoding",
+        "Accept-Language"]
+
+
+def test_real_desktop_target_keeps_its_desktop_client_hint(raw_server):
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher().get(base + "/p", kind="navigate")
+
+    assert "sec-ch-ua-mobile: ?0" in wire_lines(heads[0])
+
+
 FAST = ["--disable-security-limits", "--max-conn-rate", "1000"]  # local server: no pacing wait
 
 
@@ -358,31 +417,101 @@ def test_real_download_mirrors_the_site(server, tmp_path):
     assert sorted(e["url"] for e in files.values()) == [f"{base}/docs/", f"{base}/docs/a.html"]
 
 
-def test_real_explicit_user_agent_replaces_the_impersonated_one(server):
-    # Maintainer decision: an explicit --user-agent is sent (#136 aligns it with Firecrawl).
-    base, script, _ = server
-    log = []
-    script["/p"] = recorded(log, (200, {"Content-Type": "text/html"}, b"<html>hi</html>"))
-
-    res = real_fetcher(user_agent="MyDocsBot/1.0").get(base + "/p", kind="navigate")
-
-    assert res.status == 200
-    assert log[0]["User-Agent"] == "MyDocsBot/1.0"
+FIREFOX_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+CLIENT_HINTS = ("sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform")
 
 
-def test_real_download_sends_the_user_agent_given_on_the_command_line(server, tmp_path):
+def test_real_explicit_user_agent_takes_the_profile_slot_without_the_client_hints(raw_server):
+    """#136 option B (research probes B, E and J): the UA given replaces the profile's in
+    its slot and the order holds; the profile's sec-ch-ua* describe its own UA, so they go."""
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(user_agent="Custom-UA/1.0").get(base + "/p", kind="navigate")
+
+    assert "User-Agent: Custom-UA/1.0" in wire_lines(heads[0])
+    assert [name.lower() for name in wire_names(heads[0])] == [
+        "upgrade-insecure-requests", "user-agent", "accept", "sec-fetch-site",
+        "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "accept-encoding",
+        "accept-language", "cache-control", "host"]
+
+
+def test_real_firefox_user_agent_sits_in_the_profile_slot_without_the_client_hints(raw_server):
+    """A UA naming Firefox also makes curl_cffi add Firefox's `priority` line (ADR-0011
+    residue), so only the slot and the missing hints are this test's."""
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(user_agent=FIREFOX_UA).get(base + "/p", kind="navigate")
+
+    lines = wire_lines(heads[0])
+    assert lines[:2] == ["upgrade-insecure-requests: 1", f"User-Agent: {FIREFOX_UA}"]
+    assert not [line for line in lines if line.lower().startswith("sec-ch-ua")]
+
+
+def test_real_android_hint_goes_with_an_explicit_user_agent(raw_server):
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(impersonate="chrome_android", user_agent=FIREFOX_UA).get(
+        base + "/p", kind="navigate")
+
+    assert not [line for line in wire_lines(heads[0]) if line.lower().startswith("sec-ch-ua")]
+
+
+def test_real_user_headers_replace_in_place_and_reach_robots_txt(raw_server):
+    """#136 --header under fire-engine: a header named like one of the profile's takes its
+    slot with the user's value; a new one is added; robots.txt requests carry them too."""
+    base, heads = raw_server(OK_REPLY)
+    real_fetcher().get(base + "/p", kind="navigate")
+    profile = wire_names(heads.pop())
+    # chrome writes accept-language in lowercase: the user's spelling has to show
+    policy = build_policy(retries=0, headers=(("Accept-Language", "pt-BR"), ("X-Test", "1")))
+    f = CurlCffiFetcher(policy, sleep=lambda _s: None)
+
+    f.robots_for(base)
+    f.get(base + "/p", kind="navigate")
+
+    robots, page = heads
+    assert "Accept-Language: pt-BR" in wire_lines(page) and "X-Test: 1" in wire_lines(robots)
+    assert wire_names(page) == [
+        "Accept-Language" if n == "accept-language" else n for n in profile] + ["X-Test"]
+
+
+def test_real_client_hint_given_as_a_header_survives_an_explicit_user_agent(raw_server):
+    """A user header always wins: hints dropped for --user-agent come back if given."""
+    pytest.importorskip("curl_cffi")
+    base, heads = raw_server(OK_REPLY)
+    policy = build_policy(retries=0, headers=(("sec-ch-ua-platform", '"Linux"'),))
+
+    CurlCffiFetcher(policy, user_agent="Custom-UA/1.0", sleep=lambda _s: None).get(
+        base + "/p", kind="navigate")
+
+    hints = [line for line in wire_lines(heads[0]) if line.lower().startswith("sec-ch-ua")]
+    assert hints == ['sec-ch-ua-platform: "Linux"']
+
+
+@pytest.mark.parametrize("given", [["--user-agent", FIREFOX_UA],
+                                   ["--header", f"User-Agent: {FIREFOX_UA}"]])
+def test_real_download_sends_the_user_agent_given_on_the_command_line(
+        server, tmp_path, caplog, given):
+    """Every request of the run, robots.txt included, carries the UA and no client hint;
+    the warning that the TLS fingerprint stays the profile's comes once. A User-Agent
+    given with --header follows exactly the same rule (#136)."""
     pytest.importorskip("curl_cffi")
     base, script, _ = server
     _docs_site(script)
     log = []
-    script["/docs/a.html"] = recorded(log, script["/docs/a.html"])
+    for path in ("/robots.txt", "/docs/", "/docs/a.html"):
+        script[path] = recorded(log, script[path])
 
-    result = CliRunner().invoke(
-        cli, ["download", f"{base}/docs/", "-o", str(tmp_path / "m"), "--downloader",
-              "fire-engine", "--user-agent", "MyDocsBot/1.0", *FAST])
+    with caplog.at_level(logging.WARNING):
+        result = CliRunner().invoke(
+            cli, ["download", f"{base}/docs/", "-o", str(tmp_path / "m"), "--downloader",
+                  "fire-engine", *given, *FAST])
 
     assert result.exit_code == 0, result.output
-    assert [h["User-Agent"] for h in log] == ["MyDocsBot/1.0"]
+    assert [h["User-Agent"] for h in log] == [FIREFOX_UA] * 3
+    assert not [n for h in log for n in CLIENT_HINTS if n in h]
+    warned = [r.getMessage() for r in caplog.records if "TLS fingerprint" in r.getMessage()]
+    assert len(warned) == 1 and "chrome" in warned[0]
 
 
 def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp_path):
@@ -542,7 +671,7 @@ def test_real_raw_body_over_the_cap_aborts_the_transfer(server, monkeypatch):
 
 
 @pytest.fixture
-def trickle():
+def trickle(http_server):
     """A server that answers 300 bytes in three pieces 0.5 s apart (the first 1.5 s in
     on /late), or never answers (/hang)."""
     class H(BaseHTTPRequestHandler):
@@ -565,14 +694,7 @@ def trickle():
                 self.wfile.write(b"x" * 100)
                 self.wfile.flush()
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
-    srv.daemon_threads = True
-    t = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}"
-    srv.shutdown()
-    srv.server_close()
-    t.join(5)
+    yield http_server(H)
 
 
 def test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout(trickle):

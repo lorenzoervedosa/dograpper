@@ -25,12 +25,13 @@ from ..lib.spa_detector import is_spa
 from ..utils.atomic_write import atomic_write_bytes
 from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
+from ._profile_headers import checked_user_agent, single_user_agent, user_headers
 
 logger = logging.getLogger(__name__)
 
 # The [httrack] options of `download` (single list; sync forwards these plus --downloader).
-PROFILE_OPTIONS = ('user_agent', 'no_robots', 'connections', 'max_conn_rate', 'max_bandwidth',
-                   'timeout', 'retries', 'max_links', 'max_retry_after',
+PROFILE_OPTIONS = ('user_agent', 'header', 'no_robots', 'connections', 'max_conn_rate',
+                   'max_bandwidth', 'timeout', 'retries', 'max_links', 'max_retry_after',
                    'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
                    'cache', 'updatehack', 'do_not_recatch', 'changes')
 # --no-X flags: the policy holds the positive switch
@@ -40,6 +41,14 @@ _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
 
 def _flag(name: str) -> str:
     return "--" + name.replace('_', '-')
+
+
+FROM_CONFIG = " (from .dograpper.json)"
+
+
+def config_note(from_config: bool) -> str:
+    """The suffix of a usage error about a value read from .dograpper.json."""
+    return FROM_CONFIG if from_config else ""
 
 
 def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
@@ -52,26 +61,38 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     values = {}
     for param in params:
         value = merged_params[param.name]
-        if param.name in from_config and not (value is None and param.default is None):
+        if param.multiple:  # --header: a CLI tuple, or a JSON list of strings
+            # Second copy of download.py's _url_filters list check; a third gets a helper.
+            if not isinstance(value, (list, tuple)) or not all(isinstance(v, str) for v in value):
+                raise click.UsageError(f"{_flag(param.name)}{FROM_CONFIG} must be a "
+                                       "list of 'Name: value' strings")
+            value = tuple(value)
+        elif param.name in from_config and not (value is None and param.default is None):
             try:
                 # The text a user would type: "false" is False, 2.0 is not an int.
                 value = param.type.convert(str(value), param, ctx)
             except click.BadParameter as e:
                 raise click.BadParameter(
                     e.message, ctx,
-                    param_hint=f"'{_flag(param.name)}' (from .dograpper.json)") from None
+                    param_hint=f"'{_flag(param.name)}'{FROM_CONFIG}") from None
         values[param.name] = value
     if downloader == 'wget':
         for param in params:
             if param.name not in from_config or values[param.name] != param.default:
                 raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack or fire-engine")
+    header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
+    user_agent = checked_user_agent(values['user_agent'],
+                                    config_note('user_agent' in from_config))
+    values['user_agent'] = single_user_agent({"--user-agent": user_agent,
+                                              "--header 'User-Agent: …'": header_ua})
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
+    policy_kw['headers'] = headers
     return policy_kw, from_config
 
 
 def _build_policy(delay, policy_kw, from_config):
     """build_policy with failures reported in CLI terms; config-sourced values say so."""
-    src = lambda k: " (from .dograpper.json)" if k in from_config else ""
+    src = lambda k: config_note(k in from_config)
     # --delay is shared with wget, so resolve_profile does not convert it
     if isinstance(delay, bool) or not isinstance(delay, (int, float)):
         raise click.UsageError(f"--delay must be a number, got {delay!r}{src('delay')}")

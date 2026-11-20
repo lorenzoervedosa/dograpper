@@ -88,9 +88,8 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   Chrome é exatamente a incoerência que um WAF detecta. Consequência
   aceita: os `Sec-Fetch-*` são os fixos do perfil (navegação), não os do link
   (`FetchMeta`). Um `--user-agent` dado pelo usuário substitui o
-  `User-Agent` do perfil (decisão do mantenedor, 2026-11-18, provisória: o
-  comportamento exato do Firecrawl está em pesquisa no #136); sem ele, vale o
-  do perfil.
+  `User-Agent` do perfil; sem ele, vale o do perfil. A regra provisória de
+  2026-11-18 foi substituída pela opção B do #136 (seção "Identidade no fio").
 - **Corpo limitado no lado do curl.** A decodificação do curl fica desligada
   (`HTTP_CONTENT_DECODING` 0): o writer do curl (`content_callback`) recebe o
   corpo como veio do fio, aborta a transferência além de `MAX_BODY_BYTES` e
@@ -116,6 +115,75 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   (HTTrack `-%s`) é perguntado no writer do curl, no primeiro pedaço, com o
   status, o `Content-Type` e o `Content-Length` que o curl leu (`CURLINFO`), e
   o writer aborta a transferência sem guardar nem cobrar o corpo.
+
+## Identidade no fio (#156, #157, #136)
+
+Evidência: `docs/discovery/firecrawl-header-behavior.md`.
+
+- **Sem upgrade h2c em `http://` (#156).** A sessão do curl usa
+  `HTTP_VERSION` = `V2TLS` (HTTP/2 só sobre TLS). Num alvo `http://` o curl
+  deixa de mandar `Upgrade: h2c`, `HTTP2-Settings` e `Connection: Upgrade,
+  HTTP2-Settings`, que nenhum navegador manda; no HTTPS o ALPN continua
+  oferecendo `h2`. Resíduo aceito: sob o alvo `chrome`, `Host` é a última
+  linha do pedido HTTP/1.1 em texto claro, onde o Chromium o põe primeiro.
+  Mudar isso abandonaria a ordem de headers do perfil (decisão do mantenedor,
+  2026-11-20). Em HTTP/2 o host vai no pseudo-header `:authority`, na ordem
+  do perfil.
+- **Valores por alvo (#157).** Uma tabela pequena de valores de header por
+  alvo do `curl_cffi` (`_TARGET_HEADERS`) vale antes de qualquer outro header,
+  então o `--header` do usuário ainda vence. Hoje ela só corrige o
+  `chrome131_android` (alias `chrome_android`), que manda `sec-ch-ua-mobile:
+  ?0` ao lado de um User-Agent Android: o dograpper manda `?1`, como a
+  especificação de Client Hints manda um navegador móvel fazer, no lugar que o
+  alvo dá ao header. Decisão do mantenedor (2026-11-20), sem captura de um
+  Chrome Android real; o defeito vai ao `curl_cffi` pelo mantenedor.
+- **User-Agent livre (#136, opção B, decisão do mantenedor de 2026-11-19).**
+  Como o `headers` do Firecrawl, um `--user-agent` explícito é enviado: ele
+  substitui o User-Agent do perfil no lugar que o perfil dá a ele, e os
+  `sec-ch-ua`, `sec-ch-ua-mobile` e `sec-ch-ua-platform` do perfil caem, porque
+  descrevem o User-Agent do perfil e seriam falsos para qualquer outro. A
+  execução avisa uma vez que o fingerprint TLS continua o do perfil. Os engines
+  abertos do Firecrawl não realinham nada além do User-Agent; derrubar os
+  hints é escolha do dograpper, não paridade. Resíduo aceito:
+  - o handshake TLS e as configurações HTTP/2 continuam os do perfil;
+  - a ordem e os demais headers só de Chrome (`Sec-Fetch-*`, `Accept`,
+    `Accept-Language`, `cache-control`, `upgrade-insecure-requests`) ficam os
+    do perfil;
+  - com um User-Agent que nomeia o Firefox, o próprio `curl_cffi` acrescenta a
+    linha `priority: u=0, i` do Firefox (medido no 0.17.0), o que o dograpper
+    não controla.
+- **`--header` repetível (#136, decisão do mantenedor de 2026-11-19).** O
+  equivalente ao mapa `headers` do Firecrawl e ao `-%X` do HTTrack, nos dois
+  perfis. As linhas vão em todo pedido do escopo, inclusive um `http://` do
+  mesmo host alcançado a partir de um start `https://`, como no `-%X` do
+  HTTrack, no `curl -H` e no `wget --header` (decisão do mantenedor,
+  2026-11-20); uma credencial dada por `--header` cruza a rede em texto claro
+  nesse pedido, e o README diz isso junto do `--header`. Ao curl vão, nesta ordem de precedência, os valores por alvo, os
+  headers do pedido (`Referer`, validadores), o User-Agent explícito com os
+  hints derrubados e por último as linhas `--header`: cada camada toma o
+  lugar do header de mesmo nome da anterior, e o `curl_cffi` põe um header de
+  mesmo nome que um do perfil no lugar dele. Um hint dado por `--header`
+  volta mesmo com `--user-agent`. A grafia do nome é a do usuário, visível só
+  em HTTP/1.1 (follow-up 10 da pesquisa). `--header 'User-Agent: X'` é o
+  `--user-agent X`; os dois juntos são exit 2, regra que vale para toda fonte
+  de User-Agent (`single_user_agent()` em `commands/_profile_headers.py`). A
+  validação, guarda de entrada não confiável no fio, mora num lugar só
+  (`utils/http_headers.py`).
+- **robots.txt casa com o token fixo `dograpper` (#136, decisão do mantenedor
+  de 2026-11-19).** Os grupos do robots.txt são escolhidos pelo token
+  `dograpper`, nunca pelo User-Agent no fio (o do perfil impersonado, o de
+  `--user-agent` ou o de `--header`), como o Firecrawl casa os grupos com
+  `FirecrawlAgent` e diz na documentação que esse token não é o User-Agent do
+  fetch. Não há opção de User-Agent próprio para o robots.txt (o
+  `robotsUserAgent` do Firecrawl, que é enterprise). Nos dois pontos em que o
+  Firecrawl e o RFC 9309 se afastam (follow-up 6 da pesquisa), o dograpper
+  fica com o comportamento que já tinha, sem mudança:
+  - **token:** um grupo vale quando o seu `User-agent` começa com
+    `dograpper`, sem caixa (`dograpper-bot` vale); o Firecrawl (robots-parser
+    3.0.1) exige o token exato, cortado no `/`. Sem grupo próprio, vale o `*`;
+  - **`/path` e `/path/`:** a regra casa por prefixo, como no RFC 9309, então
+    `Disallow: /path/` não bloqueia `/path`; o Firecrawl bloqueia `/path`
+    também quando `/path/` é proibido.
 
 ## Estado da decisão (2026-11-18)
 

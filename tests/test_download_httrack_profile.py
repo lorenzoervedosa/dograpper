@@ -738,3 +738,118 @@ def test_escape_sequence_in_robots_sitemap_line_never_reaches_output(tmp_path):
     assert "rejecting cross-host candidate" in res.output  # the hint was logged...
     assert "\x1b" not in res.output                         # ...neutralized
     assert "http://example.com/\x1b[2Jsm.xml" in [u for u, _, _ in calls]
+
+
+# --- #136 --header (repeatable request header, httrack and fire-engine) ---
+
+def test_header_with_wget_is_usage_error(tmp_path):
+    res = run(str(tmp_path / "o"), "--header", "X-Test: 1")
+    assert res.exit_code == 2
+    assert "--header requires --downloader httrack or fire-engine" in res.output
+
+
+def test_header_in_config_with_wget_is_usage_error(tmp_path):
+    res = run(str(tmp_path / "o"), config=_config(tmp_path, header=["X-Test: 1"]))
+    assert res.exit_code == 2
+    assert "--header requires --downloader httrack or fire-engine" in res.output
+
+
+@pytest.mark.parametrize("header,named", [
+    ("X-Token s3cret", "#1"),            # no colon
+    ("Bad Name: s3cret", "#1"),          # the name is not an RFC 9110 token
+    (": s3cret", "#1"),
+    ("X-Token: s3\rcret", "X-Token"),
+    ("X-Token: s3\ncret", "X-Token"),
+    ("X-Token: s3\x00cret", "X-Token"),
+    ("Host: s3cret.example", "Host"),
+    ("content-length: s3cret", "content-length"),
+    ("Transfer-Encoding: s3cret", "Transfer-Encoding"),
+    ("CONNECTION: s3cret", "CONNECTION"),
+])
+def test_invalid_header_is_usage_error_naming_it_never_its_value(ht, header, named):
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", "--header", "X-Ok: 1", "--header", header)
+    assert res.exit_code == 2
+    assert f"--header {named.replace('#1', '#2')}" in res.output
+    assert "s3" not in res.output and "cret" not in res.output
+    fu.assert_not_called()
+
+
+def test_invalid_header_in_config_says_so(ht, tmp_path):
+    out, fu, _ = ht
+    cfg = _config(tmp_path, downloader="httrack", header=["X-Token: s3\ncret"])
+    res = run(out, config=cfg)
+    assert res.exit_code == 2
+    assert "--header X-Token" in res.output and "(from .dograpper.json)" in res.output
+    assert "cret" not in res.output
+
+
+def test_header_config_value_must_be_a_list_of_strings(ht, tmp_path):
+    out, _, _ = ht
+    res = run(out, config=_config(tmp_path, downloader="httrack", header="X-Test: 1"))
+    assert res.exit_code == 2
+    assert "--header (from .dograpper.json) must be a list" in res.output
+
+
+def test_headers_reach_the_policy_and_the_cli_list_replaces_the_config_one(ht, tmp_path):
+    out, fu, _ = ht
+    cfg = _config(tmp_path, downloader="httrack", header=["X-Config: 1"])
+    assert run(out, config=cfg).exit_code == 0
+    assert fu.call_args.args[2].headers == (("X-Config", "1"),)  # config beats default
+    res = run(out, "--header", "X-Cli: 2", "--header", "X-Two:  b ", config=cfg)
+    assert res.exit_code == 0, res.output
+    assert fu.call_args.args[2].headers == (("X-Cli", "2"), ("X-Two", "b"))  # CLI wins
+
+
+def test_header_user_agent_is_the_user_agent(ht):
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", "--header", "user-agent: Bot/1")
+    assert res.exit_code == 0, res.output
+    policy = fu.call_args.args[2]
+    assert (policy.user_agent, policy.headers) == ("Bot/1", ())
+
+
+@pytest.mark.parametrize("config", [False, True])
+def test_user_agent_given_two_ways_is_usage_error(ht, tmp_path, config):
+    out, fu, _ = ht
+    args = ["--header", "User-Agent: B/2"]
+    if config:
+        res = run(out, *args, config=_config(tmp_path, downloader="httrack", **{"user-agent": "A/1"}))
+    else:
+        res = run(out, "--downloader", "httrack", "--user-agent", "A/1", *args)
+    assert res.exit_code == 2
+    assert "--user-agent and --header 'User-Agent: …' both set the User-Agent" in res.output
+    assert "A/1" not in res.output and "B/2" not in res.output
+    fu.assert_not_called()
+
+
+@pytest.mark.parametrize("config", [False, True])
+@pytest.mark.parametrize("bad", ["Bot/1\r\nX-Injected: s3cret", "Bot/1\nX-Injected: s3cret",
+                                 "Bot/1\x00s3cret"])
+def test_user_agent_with_cr_lf_or_nul_is_usage_error(ht, tmp_path, config, bad):
+    """The --user-agent value goes on the wire like a --header one, so the same check
+    guards it: a line break would put a header line of its own on the wire."""
+    out, fu, _ = ht
+    if config:
+        res = run(out, config=_config(tmp_path, downloader="httrack", **{"user-agent": bad}))
+    else:
+        res = run(out, "--downloader", "httrack", "--user-agent", bad)
+    assert res.exit_code == 2
+    assert "--user-agent: User-Agent has a CR, LF or NUL character in its value" in res.output
+    assert ("(from .dograpper.json)" in res.output) is config
+    assert "s3cret" not in res.output and "Bot/1" not in res.output
+    fu.assert_not_called()
+
+
+@pytest.mark.parametrize("first,second,named", [
+    ("X-Test: 1", "x-test: 2", "x-test"),         # names compare without case
+    ("User-Agent: A/1", "User-Agent: B/2", "User-Agent"),
+])
+def test_header_name_given_twice_is_usage_error(ht, first, second, named):
+    """No silent last-one-wins: two lines for one name are refused, naming it."""
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", "--header", first, "--header", second)
+    assert res.exit_code == 2
+    assert f"--header {named} is given more than once" in res.output
+    assert "A/1" not in res.output and "B/2" not in res.output
+    fu.assert_not_called()

@@ -532,6 +532,7 @@ command line, or set away from its default in `.dograpper.json`). Their
 | Flag | Default | Meaning |
 |---|---|---|
 | `--user-agent` | `Mozilla/5.0 (compatible; dograpper/<version>)` | User-Agent header |
+| `--header` | — | Extra request header `'Name: value'`, repeatable (see "Request headers") |
 | `--no-robots` | off | Ignore robots.txt |
 | `--connections` | `4` | Parallel connections (clamped to 8) |
 | `--max-conn-rate` | `5.0` | Max connections opened per second (clamped to 5) |
@@ -547,6 +548,27 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--updatehack` | off | Keep a recorded non-page file when a `200` announces its size (HTTrack `-%s`, see "Update hacks") |
 | `--do-not-recatch` | off | Leave a recorded non-page file erased since empty instead of fetching it (HTTrack `-%n`) |
 | `--changes` | off | Write `hts-changes.json` in `-o`: what this run left new, changed, unchanged or gone (HTTrack `-%d`, see "Change report") |
+
+**Request headers (`--header`, HTTrack `-%X`).** `--header 'Name: value'`,
+repeatable, or a `"header"` list in `.dograpper.json` (a list given on the
+command line replaces the config one), adds a header to every request,
+robots.txt included. Every request means every one in the crawl's scope,
+including a same-host `http://` page reached from an `https://` start URL, as
+HTTrack `-%X`, `curl -H` and `wget --header` do: a credential given with
+`--header` crosses the network in clear text there. A header named like one the profile sends (compared
+without case) takes that header's place in the order, with your value and your
+spelling of the name, which shows on HTTP/1.1 only (HTTP/2 lowercases every
+name); any other header is added after the profile's. `--header 'User-Agent:
+X'` is exactly `--user-agent X`, so it goes out spelled `User-Agent` whatever
+the spelling you gave; giving both is a usage error (exit 2), and so
+is one name on two `--header` lines (no line silently wins). A line
+that is not `Name: value`, a name that is not an RFC 9110 token, a value with
+CR, LF or NUL, and the names `Host`, `Content-Length`, `Transfer-Encoding` and
+`Connection` are refused with exit 2; the message names the header (or its
+position) and never quotes the value, which can carry a credential. A
+`--user-agent` value with CR, LF or NUL is refused the same way. Under
+`--headless`, the headers reach every navigation, which the profile fetches,
+but not the browser's own subresource requests.
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -614,7 +636,8 @@ the `wget` cascade's Playwright:
   script runs; the report lists it as the engine's would. `/cdn-cgi/` is
   never requested, not even by a script of a page.
 - **Subresources** (scripts, styles, XHR the page needs to render) are the
-  browser's own requests, with the profile's User-Agent, neither checked
+  browser's own requests, with the profile's User-Agent and without the
+  `--header` lines, neither checked
   against robots.txt nor paced: they are dependencies of a page the policy
   already let through, as in an ordinary visit (a decided exception to the
   profile's rule that every request goes through it). Routing every request
@@ -661,7 +684,7 @@ request. All `[httrack, fire-engine]` flags above apply, plus:
 | Flag | Default | Meaning |
 |---|---|---|
 | `--proxy` | — | One proxy URL for every request (`http://user:pass@host:port`); its credentials go to curl apart from the URL, so no error or report line shows them |
-| `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`) |
+| `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`). Under `chrome_android` (`chrome131_android`), dograpper sends `sec-ch-ua-mobile: ?1` in the profile's own slot: that `curl_cffi` target sends `?0` beside its Android User-Agent, and per Client Hints a mobile browser sends `?1` |
 
 Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
 'dograpper[fire-engine]'`), which installs `curl_cffi` plus the `br` / `zstd`
@@ -690,10 +713,17 @@ On the wire, the browser profile sends its own identity headers
 (`User-Agent`, `Accept`, `Accept-Language`, `Accept-Encoding`, `Sec-Fetch-*`,
 client hints) in its own order; of the `httrack` header set only the
 request-specific ones are sent: `Referer` and, on an update, `If-None-Match` /
-`If-Modified-Since`. A `--user-agent` you give (on the command line or in
-config) replaces the profile's `User-Agent`; the rest of the identity stays the
-profile's. How this should match Firecrawl exactly is open in
-[#136](https://github.com/lorenzoervedosa/dograpper/issues/136).
+`If-Modified-Since`, then your `--header` lines ("Request headers" above), each
+in the slot of the profile's header of the same name or after the profile's.
+A `--user-agent` you give (on the command line or in
+config) replaces the profile's `User-Agent` in the profile's own slot, as
+Firecrawl's `headers` option lets a custom User-Agent through. Since the
+profile's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` client hints
+describe its own User-Agent, they are dropped (a hint you send with `--header`
+stays), and the run warns once that the
+TLS fingerprint still says the `--impersonate` profile: a WAF that compares the
+handshake with the User-Agent can still tell them apart. Without
+`--user-agent`, the identity is the profile's, coherent end to end.
 
 #### Incremental
 
@@ -1438,7 +1468,7 @@ dograpper sync <url> -o <dir> [options]
 | `--include-extensions` | — | `html,md,txt` | Allowed extensions, comma-separated (passed to `download`) |
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
-| `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
+| `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--header`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1686,7 +1716,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl (or of `httrack --headless`'s Playwright crawl), refused/challenged; `fire-engine`: `--headless`, a result that looks client-rendered, or no `fire-engine` extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
@@ -1841,6 +1871,11 @@ Create a `.dograpper.json` file at the project root to avoid repeating flags:
   }
 }
 ```
+
+A repeatable flag is a list in the file, for instance
+`"header": ["Accept-Language: en-US"]` under `download` (with a `"downloader"`
+of `httrack` or `fire-engine`); the flags given on the command line replace the
+whole list.
 
 **Precedence**: code defaults → `.dograpper.json` → CLI flags.
 CLI flags always win. Internally this uses Click's

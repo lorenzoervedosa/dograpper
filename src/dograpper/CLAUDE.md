@@ -14,6 +14,7 @@ src/dograpper/
 | Arquivo | Quando ler |
 |---|---|
 | `docs/superpowers/specs/2026-11-13-httrack-downloader-profile-design.md` | Antes de alterar `lib/httrack/` ou `commands/_httrack_profile.py`: desvios aprovados em relação ao HTTrack e roteiro dos próximos PRs do perfil. Evidência por comportamento (com citações do código do HTTrack) em `docs/discovery/httrack-mirroring-requirements.md` |
+| `docs/discovery/firecrawl-header-behavior.md` | Antes de alterar os headers do fire-engine (`lib/fire_engine/fetcher.py`) ou o tratamento de `--user-agent` e `--header` (`commands/download.py`, `commands/_profile_headers.py`): evidência do comportamento do Firecrawl e do curl_cffi (#136) e o comportamento-alvo decidido pelo mantenedor (opção B: `--user-agent` livre que derruba os `sec-ch-ua*`, mais `--header` repetível) |
 | `docs/discovery/pack-performance-profile.md` | Antes de otimizar desempenho de `pack` ou `download` (cache de extração #21, worker pool #24): onde o tempo vai por etapa e por corpus, quantas vezes cada página é extraída, e os protótipos medidos |
 | `tests/test_pack.py` | Antes de alterar qualquer coisa em `lib/chunker.py` ou `commands/pack.py` |
 | `tests/test_page_layout.py` | Antes de alterar `lib/page_layout.py`, `commands/_page_layout.py` ou o despacho `--layout` de `commands/pack.py` (nomes, formato do `INDEX.md`, posse de `pages/`, flags rejeitadas) |

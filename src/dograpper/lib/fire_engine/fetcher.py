@@ -17,13 +17,24 @@ imported lazily, only when a session is first created.
 import math
 from urllib.parse import unquote, urlunsplit
 
+from ...utils.http_headers import merge_headers
 from ...utils.redact import redact_url
 from ..httrack.fetcher import MAX_BODY_BYTES, Fetcher, wire_host
 
 # Of the httrack request headers, only the request-specific ones go to curl; the
 # impersonated browser sends its own identity (User-Agent, Accept*, Sec-Fetch-*) (ADR-0011),
-# except a User-Agent the user gave, which replaces the profile's (#136 aligns it with Firecrawl).
+# except what the user gave: a User-Agent and --header lines, which replace the profile's (#136).
 _FORWARDED = frozenset({"referer", "if-none-match", "if-modified-since"})
+
+# Per-target header values, set before any other header so a user's still wins (#157).
+# curl_cffi 0.17's chrome131_android (the chrome_android alias) sends sec-ch-ua-mobile: ?0
+# beside an Android UA; a mobile UA sends ?1 (Client Hints). A same-named header takes the
+# target's slot, so the order stays the target's.
+_TARGET_HEADERS = {target: {"sec-ch-ua-mobile": "?1"}
+                   for target in ("chrome_android", "chrome131_android")}
+
+# The profile's client hints, which describe its own User-Agent: an explicit one drops them (#136)
+_CLIENT_HINTS = ("sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform")
 
 _WRITE_ABORT = 0xFFFFFFFF  # libcurl's CURL_WRITEFUNC_ERROR: the writer stops the transfer
 
@@ -74,11 +85,13 @@ class CurlCffiMissing(RuntimeError):
 
 def _default_session_factory(impersonate: str, timeout: float):
     try:
-        from curl_cffi import CurlOpt
+        from curl_cffi import CurlHttpVersion, CurlOpt
         from curl_cffi import requests as cffi_requests
     except ImportError as exc:
         raise CurlCffiMissing(_MISSING) from exc
     return cffi_requests.Session(impersonate=impersonate, curl_options={
+        # HTTP/2 over TLS only: on http:// a browser never offers curl's h2c upgrade (#156)
+        CurlOpt.HTTP_VERSION: CurlHttpVersion.V2TLS,
         CurlOpt.HTTP_CONTENT_DECODING: 0,  # the raw body: Fetcher.get decodes it, bounded
         # the stdlib socket timeout: to connect, then with nothing received. libcurl counts
         # bytes in 1 s rate records, so one reaches its check up to a second late: the
@@ -117,9 +130,14 @@ class CurlCffiFetcher(Fetcher):
         # wire, so curl targets exactly what the scope/robots checks validated.
         netloc = wire_host(parts)  # the port included; ValueError on a host the checks reject
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
-        req_headers = {k: v for k, v in headers if k.lower() in _FORWARDED}
+        # each layer replaces a same-named header of the one before; the user's --header last
+        pairs = merge_headers(_TARGET_HEADERS.get(self._impersonate, {}).items(),
+                              [(k, v) for k, v in headers if k.lower() in _FORWARDED])
         if self._user_agent:
-            req_headers["User-Agent"] = self._user_agent
+            pairs = merge_headers(pairs, [("User-Agent", self._user_agent),
+                                          # None: curl_cffi drops the profile's line
+                                          *((hint, None) for hint in _CLIENT_HINTS)])
+        req_headers = dict(merge_headers(pairs, self.policy.headers))
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
         session = self._session()  # outside the try: a missing curl_cffi is no transport error

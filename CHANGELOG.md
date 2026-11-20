@@ -268,6 +268,14 @@ stays `0.0.0.dev0`.
   Requires `--strategy size`.
 - `pack --report` — writes `readiness-report.html` with per-page before/after
   extraction data and the cause of each score penalty. Implies `--score`.
+- `download --header 'Name: value'` (and on `sync`, and as a `"header"` list in
+  `.dograpper.json`), repeatable, under `--downloader httrack` and
+  `fire-engine`: adds a request header to every request, robots.txt included,
+  in the place of the profile's header of the same name or after the
+  profile's. `--header 'User-Agent: X'` acts as `--user-agent X`; giving both,
+  one name on two lines, a malformed header, a CR, LF or NUL in a value, `Host`, `Content-Length`,
+  `Transfer-Encoding` or `Connection`, and `--header` under `wget` are usage
+  errors (exit 2) whose message never quotes the value. ([#136])
 
 ### Changed
 
@@ -340,6 +348,11 @@ stays `0.0.0.dev0`.
   words, such as rustdoc's re-export pages): one stderr warning per page, a
   `Redirect stubs: N` summary line, counted in `Files excluded`, in both layouts
   and under `--dry-run`; an input of stubs only fails. ([#163])
+- `download --downloader fire-engine --user-agent X` now also drops the
+  profile's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` client
+  hints, which describe the profile's own User-Agent, and warns once per run
+  that the TLS fingerprint stays the `--impersonate` profile's; the User-Agent
+  keeps the profile's slot. ([#136], [ADR-0011](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0011-fire-engine-downloader.md))
 
 ### Removed
 
@@ -545,6 +558,12 @@ stays `0.0.0.dev0`.
 - `dograpper docs` shows `none` as the default of an option that has none,
   instead of `Sentinel.UNSET` (click 8.3).
 - `dograpper docs` lists `-h` next to `--help`, as every command accepts both.
+- `download --downloader fire-engine` no longer offers an h2c upgrade on plain
+  `http://` URLs (`Upgrade: h2c`, `HTTP2-Settings`, `Connection: Upgrade, …`),
+  which no browser sends; HTTPS still offers HTTP/2. ([#156])
+- `download --downloader fire-engine --impersonate chrome_android` sends
+  `sec-ch-ua-mobile: ?1` instead of the `?0` that `curl_cffi`'s target puts
+  beside its Android User-Agent; the header keeps its position. ([#157])
 
 ### Security
 
@@ -557,6 +576,10 @@ stays `0.0.0.dev0`.
   otherwise `"url": null`. Logs and failure reports show the value of
   credential-like parameters (`token`, `secret`, `key`, `sig`, `jwt`,
   `X-Amz-*`, ...) as `REDACTED`. ([#94])
+- `download --user-agent` (httrack and fire-engine, on the command line or in
+  `.dograpper.json`) with a CR, LF or NUL is a usage error (exit 2) that never
+  quotes the value; under fire-engine a line break in it used to put a header
+  line of its own on the wire. ([#136])
 
 [#1]: https://github.com/lorenzoervedosa/dograpper/issues/1
 [#2]: https://github.com/lorenzoervedosa/dograpper/issues/2
@@ -592,6 +615,9 @@ stays `0.0.0.dev0`.
 [#130]: https://github.com/lorenzoervedosa/dograpper/issues/130
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
+[#156]: https://github.com/lorenzoervedosa/dograpper/issues/156
+[#157]: https://github.com/lorenzoervedosa/dograpper/issues/157
+[#136]: https://github.com/lorenzoervedosa/dograpper/issues/136
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159

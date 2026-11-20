@@ -281,3 +281,19 @@ def test_sync_policy_error_label_follows_value_source(config_delay, expect_label
         assert result.exit_code != 0
         assert "--delay must not be negative" in result.output
         assert ("(from .dograpper.json)" in result.output) is expect_label
+
+
+def test_sync_header_cli_list_replaces_the_json_one():
+    """#136: sync forwards --header; the CLI list wins over the config list (contract 6)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        with open(".dograpper.json", "w", encoding="utf-8") as f:
+            json.dump({"download": {"downloader": "httrack", "header": ["X-Json: 1"]}}, f)
+        result, seen = _sync_httrack(runner, [])
+        assert result.exit_code == 0, result.output
+        assert seen["policy_kw"]["headers"] == (("X-Json", "1"),)
+        result, seen = _sync_httrack(runner, ["--header", "X-Cli: 2"])
+        assert result.exit_code == 0, result.output
+        assert seen["policy_kw"]["headers"] == (("X-Cli", "2"),)
+        assert "header" not in seen["from_config"]

@@ -1,12 +1,11 @@
 import gzip
 import random
-import socket
 import logging
 import threading
 import zlib
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlsplit
 
 import pytest
@@ -39,7 +38,9 @@ class FakeTime:
 
 
 @pytest.fixture
-def server():
+def server(http_server):
+    """The conftest `server` with queued replies, dropped connections and the request
+    headers recorded (on the conftest http_server mold); raw_server is in conftest."""
     script, seen = {}, []
 
     class H(BaseHTTPRequestHandler):
@@ -65,52 +66,7 @@ def server():
             self.end_headers()
             self.wfile.write(body)
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
-    srv.daemon_threads = True
-    t = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}", script, seen
-    srv.shutdown()
-    srv.server_close()
-    t.join(5)
-
-
-@pytest.fixture
-def raw_server():
-    """Answer every connection with fixed bytes, then close: replies http.server cannot fake."""
-    stops, threads = [], []
-
-    def start(reply: bytes):
-        hits, stop = [], threading.Event()
-        lsock = socket.create_server(("127.0.0.1", 0))
-        lsock.settimeout(0.05)
-
-        def serve():
-            with lsock:
-                while not stop.is_set():
-                    try:
-                        conn, _ = lsock.accept()
-                    except socket.timeout:
-                        continue
-                    with conn:
-                        conn.settimeout(5)
-                        data = b""
-                        while b"\r\n\r\n" not in data and (got := conn.recv(65536)):
-                            data += got
-                        hits.append(data.split(b"\r\n", 1)[0])
-                        conn.sendall(reply)
-
-        t = threading.Thread(target=serve, daemon=True)
-        t.start()
-        stops.append(stop)
-        threads.append(t)
-        return f"http://127.0.0.1:{lsock.getsockname()[1]}", hits
-
-    yield start
-    for stop in stops:
-        stop.set()
-    for t in threads:
-        t.join(5)
+    yield http_server(H), script, seen
 
 
 @pytest.fixture(autouse=True)
@@ -738,3 +694,28 @@ def test_stop_drops_the_connection_before_the_body(server):
     assert asked == [(200, "50000")] and sum(ft.sleeps) < 1  # reading it costs 50 s
     assert f.get(base + "/big", kind="navigate").body == b"x" * 50_000
     assert len(opened) == 2
+
+
+def _wire_names(head: bytes) -> list[str]:
+    # Second copy of test_fire_engine.py's wire_names (raw_server heads); a third goes to conftest.
+    return [line.split(":", 1)[0] for line in head.decode("latin-1").split("\r\n")[1:-2]]
+
+
+def test_user_headers_go_on_pages_and_robots_txt_replacing_in_place(raw_server):
+    """#136 --header: a header named like one of the profile's takes its slot, with the
+    user's spelling and value; a new one is added at the end; robots.txt gets them too."""
+    ok = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+    base, heads = raw_server(ok)
+    Fetcher(build_policy(retries=0)).get(base + "/p", kind="navigate")
+    profile = _wire_names(heads.pop())
+    user = (("accept-language", "pt-BR"), ("X-Test", "1"))
+
+    f = Fetcher(build_policy(retries=0, headers=user))
+    f.robots_for(base)
+    f.get(base + "/p", kind="navigate")
+
+    robots, page = heads
+    assert _wire_names(page) == [
+        "accept-language" if n == "Accept-Language" else n for n in profile] + ["X-Test"]
+    assert b"\r\naccept-language: pt-BR\r\n" in page and b"\r\nX-Test: 1\r\n" in page
+    assert robots.startswith(b"GET /robots.txt ") and b"\r\nX-Test: 1\r\n" in robots

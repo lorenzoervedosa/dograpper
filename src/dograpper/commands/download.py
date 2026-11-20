@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List, Tuple
 
 from ._fire_engine_profile import run_fire_engine
-from ._httrack_profile import resolve_profile, run_httrack
+from ._httrack_profile import config_note, resolve_profile, run_httrack
 from ..utils.output import say
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import normalize_extensions
@@ -70,7 +70,7 @@ def _compute_stats(
 
 def _url_filters(ctx: click.Context, rules) -> UrlFilters:
     """The --filter rules (CLI tuple or JSON list) as UrlFilters; a bad value is a usage error."""
-    src = "" if is_explicit(ctx, 'filter') else " (from .dograpper.json)"
+    src = config_note(not is_explicit(ctx, 'filter'))
     if not isinstance(rules, (list, tuple)) or not all(isinstance(r, str) for r in rules):
         raise click.UsageError(f"--filter{src} must be a list of rules, got {rules!r}")
     try:
@@ -299,7 +299,14 @@ def _run_download_cascade(
 @click.option('--impersonate', type=str, default='chrome', show_default=True,
               help="[fire-engine] curl_cffi browser profile to impersonate (e.g. chrome124)")
 @click.option('--user-agent', type=str, default=None,
-              help="[httrack, fire-engine] User-Agent header. Default: the dograpper identifier under httrack; the impersonated browser profile's own User-Agent under fire-engine. A value given here replaces it.")
+              help="[httrack, fire-engine] User-Agent header. Default: the dograpper identifier under httrack; the impersonated browser profile's own User-Agent under fire-engine. A value given here replaces it; under fire-engine it also drops the profile's sec-ch-ua client hints.")
+@click.option('--header', multiple=True, default=(), metavar="'NAME: VALUE'",
+              help="[httrack, fire-engine] Extra request header, repeatable; also the "
+                   "\"header\" list in .dograpper.json. A header named like one the profile "
+                   "sends takes its place (your spelling of the name is kept), any other is "
+                   "added; robots.txt requests carry them too. 'User-Agent: X' acts exactly "
+                   "as --user-agent X. Host, Content-Length, Transfer-Encoding and Connection "
+                   "are refused, as are values with CR, LF or NUL.")
 @click.option('--no-robots', is_flag=True, default=False,
               help="[httrack, fire-engine] Ignore robots.txt")
 @click.option('--connections', type=click.IntRange(min=1), default=4, show_default=True,
@@ -346,7 +353,7 @@ def _run_download_cascade(
                    "reported (HTTrack -%n). Default: off, fetched again in full, as in "
                    "HTTrack")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool, changes: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, header: Tuple[str, ...], no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool, changes: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -371,6 +378,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'proxy': proxy,
         'impersonate': impersonate,
         'user_agent': user_agent,
+        'header': header,
         'no_robots': no_robots,
         'connections': connections,
         'max_conn_rate': max_conn_rate,
