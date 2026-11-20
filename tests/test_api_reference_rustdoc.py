@@ -307,7 +307,7 @@ def test_record_url_carries_the_member_anchor():
     ('id="trait-implementations"', 'id="deref-methods-T"', "unknown section deref-methods-T"),
     ('<section id="method.map"', '<section id="method.put"', "duplicate member id"),
     ('data-rustdoc-version="1.96.1', 'data-rustdoc-version="1.98.0-nightly',
-     r"version 1.98.0-nightly \(.*\) \(measured: 1\.96\., 1\.102\.0-nightly"),
+     r"version 1.98.0-nightly \(.*\) \(measured: 1\.96\.x, 1\.102\.0-nightly 6905905bb\)"),
 ])
 def test_a_page_with_other_markup_is_not_split(old, new, problem):
     page = _page("struct.Boxed.html")

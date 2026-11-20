@@ -24,6 +24,7 @@ from ._html import Regions, Text, line
 GENERATOR = "rustdoc"
 # Accepted data-rustdoc-version prefixes: the stable 1.96 line and the one measured nightly build.
 MEASURED_VERSIONS = ("1.96.", "1.102.0-nightly (6905905bb ")
+MEASURED_LABEL = "1.96.x, 1.102.0-nightly 6905905bb"  # for the NotSplit reason
 # In <meta name="rustdoc-vars">, next to the generator meta; bounded, so linear.
 _VERSION = re.compile(r'\bdata-rustdoc-version="([^"]{0,100})"')
 
@@ -172,7 +173,7 @@ def records(html: str) -> List[ApiRecord]:
     version = _VERSION.search(html, 0, SCAN_CHARS)
     if not version or not version.group(1).startswith(MEASURED_VERSIONS):
         raise _unsupported(f"version {version.group(1) if version else 'missing'} "
-                           f"(measured: {', '.join(MEASURED_VERSIONS)})")
+                           f"(measured: {MEASURED_LABEL})")
     page = _Page()
     page.feed(html)
     page.close()
