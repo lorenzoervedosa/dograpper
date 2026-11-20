@@ -453,6 +453,36 @@ def test_real_android_hint_goes_with_an_explicit_user_agent(raw_server):
     assert not [line for line in wire_lines(heads[0]) if line.lower().startswith("sec-ch-ua")]
 
 
+def test_real_user_headers_replace_in_place_and_reach_robots_txt(raw_server):
+    """#136 --header under fire-engine: a header named like one of the profile's takes its
+    slot with the user's value; a new one is added; robots.txt requests carry them too."""
+    base, heads = raw_server(OK_REPLY)
+    real_fetcher().get(base + "/p", kind="navigate")
+    profile = [line.split(":", 1)[0] for line in wire_lines(heads.pop())]
+    policy = build_policy(retries=0, headers=(("accept-language", "pt-BR"), ("X-Test", "1")))
+    f = CurlCffiFetcher(policy, sleep=lambda _s: None)
+
+    f.robots_for(base)
+    f.get(base + "/p", kind="navigate")
+
+    robots, page = (wire_lines(h) for h in heads)
+    assert "accept-language: pt-BR" in page and "X-Test: 1" in page and "X-Test: 1" in robots
+    assert [line.split(":", 1)[0] for line in page if line != "X-Test: 1"] == profile
+
+
+def test_real_client_hint_given_as_a_header_survives_an_explicit_user_agent(raw_server):
+    """A user header always wins: hints dropped for --user-agent come back if given."""
+    pytest.importorskip("curl_cffi")
+    base, heads = raw_server(OK_REPLY)
+    policy = build_policy(retries=0, headers=(("sec-ch-ua-platform", '"Linux"'),))
+
+    CurlCffiFetcher(policy, user_agent="Custom-UA/1.0", sleep=lambda _s: None).get(
+        base + "/p", kind="navigate")
+
+    hints = [line for line in wire_lines(heads[0]) if line.lower().startswith("sec-ch-ua")]
+    assert hints == ['sec-ch-ua-platform: "Linux"']
+
+
 def test_real_download_sends_the_user_agent_given_on_the_command_line(server, tmp_path, caplog):
     """Every request of the run, robots.txt included, carries the UA and no client hint;
     the warning that the TLS fingerprint stays the profile's comes once."""

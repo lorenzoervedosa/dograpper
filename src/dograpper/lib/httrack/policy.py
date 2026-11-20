@@ -10,6 +10,7 @@ from typing import NamedTuple
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from urllib.parse import urlsplit
 
+from ...utils.http_headers import merge_headers
 from ...utils.redact import drop_userinfo
 from .escape import escape_unsafe, request_target
 
@@ -71,6 +72,8 @@ class HttrackPolicy:
     updatehack: bool = False  # HTTrack -%s: a 200 announcing the size on disk keeps the file
     do_not_recatch: bool = False  # HTTrack -%n: an erased file stays empty, not fetched
     changes: bool = False  # HTTrack -%d: write hts-changes.json (lib/httrack/changes.py)
+    # --header pairs, checked by utils/http_headers.py; request_headers() merges them in place
+    headers: tuple[tuple[str, str], ...] = ()
 
 
 def _clamp(name, value, cap, disabled):
@@ -88,7 +91,7 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  disable_security_limits: bool = False, parse_scripts: bool = True,
                  extended_parsing: bool = True, cache: int | None = None,
                  updatehack: bool = False, do_not_recatch: bool = False,
-                 changes: bool = False) -> HttrackPolicy:
+                 changes: bool = False, headers=()) -> HttrackPolicy:
     # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
     for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
                         ("max_bandwidth", max_bandwidth), ("timeout", timeout),
@@ -123,6 +126,7 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         updatehack=updatehack,
         do_not_recatch=do_not_recatch,
         changes=changes,
+        headers=tuple(headers),
     )
 
 
@@ -287,7 +291,8 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
             h.append(("Sec-Fetch-User", "?1"))
         h.append(("Sec-Fetch-Dest", meta.dest))
     h += [("Accept-Language", ACCEPT_LANGUAGE), ("Accept-Encoding", accept_encoding(secure))]
-    return h
+    # HTTrack -%X: a user line replaces the engine's own of the same name, robots.txt included
+    return merge_headers(h, policy.headers)
 
 
 def make_ssl_context() -> ssl.SSLContext:

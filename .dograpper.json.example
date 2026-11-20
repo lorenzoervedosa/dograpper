@@ -3,7 +3,8 @@
     "downloader": "wget",
     "depth": 3,
     "include-extensions": "html,md",
-    "manifest": ".dograpper-manifest.json"
+    "manifest": ".dograpper-manifest.json",
+    "header": []
   },
   "pack": {
     "max-words-per-chunk": 400000,

@@ -17,12 +17,13 @@ imported lazily, only when a session is first created.
 import math
 from urllib.parse import unquote, urlunsplit
 
+from ...utils.http_headers import merge_headers
 from ...utils.redact import redact_url
 from ..httrack.fetcher import MAX_BODY_BYTES, Fetcher, wire_host
 
 # Of the httrack request headers, only the request-specific ones go to curl; the
 # impersonated browser sends its own identity (User-Agent, Accept*, Sec-Fetch-*) (ADR-0011),
-# except a User-Agent the user gave, which replaces the profile's (#136 aligns it with Firecrawl).
+# except what the user gave: a User-Agent and --header lines, which replace the profile's (#136).
 _FORWARDED = frozenset({"referer", "if-none-match", "if-modified-since"})
 
 # Per-target header values, set before any other header so a user's still wins (#157).
@@ -129,11 +130,13 @@ class CurlCffiFetcher(Fetcher):
         # wire, so curl targets exactly what the scope/robots checks validated.
         netloc = wire_host(parts)  # the port included; ValueError on a host the checks reject
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
-        req_headers = dict(_TARGET_HEADERS.get(self._impersonate, {}))
-        req_headers.update((k, v) for k, v in headers if k.lower() in _FORWARDED)
-        if self._user_agent:
-            req_headers["User-Agent"] = self._user_agent
-            req_headers.update(dict.fromkeys(_CLIENT_HINTS))  # None: curl_cffi drops the line
+        # each layer replaces a same-named header of the one before; the user's --header last
+        req = merge_headers(_TARGET_HEADERS.get(self._impersonate, {}).items(),
+                            [(k, v) for k, v in headers if k.lower() in _FORWARDED])
+        if self._user_agent:  # a None value makes curl_cffi drop the profile's line
+            req = merge_headers(req, [("User-Agent", self._user_agent),
+                                      *((hint, None) for hint in _CLIENT_HINTS)])
+        req_headers = dict(merge_headers(req, self.policy.headers))
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
         session = self._session()  # outside the try: a missing curl_cffi is no transport error

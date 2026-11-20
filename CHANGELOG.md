@@ -268,6 +268,14 @@ stays `0.0.0.dev0`.
   Requires `--strategy size`.
 - `pack --report` — writes `readiness-report.html` with per-page before/after
   extraction data and the cause of each score penalty. Implies `--score`.
+- `download --header 'Name: value'` (and on `sync`, and as a `"header"` list in
+  `.dograpper.json`), repeatable, under `--downloader httrack` and
+  `fire-engine`: adds a request header to every request, robots.txt included,
+  in the place of the profile's header of the same name or after the
+  profile's. `--header 'User-Agent: X'` acts as `--user-agent X`; giving both,
+  a malformed header, a CR, LF or NUL in a value, `Host`, `Content-Length`,
+  `Transfer-Encoding` or `Connection`, and `--header` under `wget` are usage
+  errors (exit 2) whose message never quotes the value. ([#136])
 
 ### Changed
 

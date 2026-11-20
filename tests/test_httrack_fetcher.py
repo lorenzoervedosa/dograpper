@@ -694,3 +694,27 @@ def test_stop_drops_the_connection_before_the_body(server):
     assert asked == [(200, "50000")] and sum(ft.sleeps) < 1  # reading it costs 50 s
     assert f.get(base + "/big", kind="navigate").body == b"x" * 50_000
     assert len(opened) == 2
+
+
+def _wire_names(head: bytes) -> list[str]:
+    return [line.split(":", 1)[0] for line in head.decode("latin-1").split("\r\n")[1:-2]]
+
+
+def test_user_headers_go_on_pages_and_robots_txt_replacing_in_place(raw_server):
+    """#136 --header: a header named like one of the profile's takes its slot, with the
+    user's spelling and value; a new one is added at the end; robots.txt gets them too."""
+    ok = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+    base, heads = raw_server(ok)
+    Fetcher(build_policy(retries=0)).get(base + "/p", kind="navigate")
+    profile = _wire_names(heads.pop())
+    user = (("accept-language", "pt-BR"), ("X-Test", "1"))
+
+    f = Fetcher(build_policy(retries=0, headers=user))
+    f.robots_for(base)
+    f.get(base + "/p", kind="navigate")
+
+    robots, page = heads
+    assert _wire_names(page) == [
+        "accept-language" if n == "Accept-Language" else n for n in profile] + ["X-Test"]
+    assert b"\r\naccept-language: pt-BR\r\n" in page and b"\r\nX-Test: 1\r\n" in page
+    assert robots.startswith(b"GET /robots.txt ") and b"\r\nX-Test: 1\r\n" in robots
