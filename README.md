@@ -814,7 +814,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
-| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc, rustdoc) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
+| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc, rustdoc, TypeDoc) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
 
 #### Pack internal pipeline
 
@@ -1129,13 +1129,32 @@ dograpper serve ./pack   # search_chunks now ranks member records
     pages from another rustdoc version and other page kinds (primitive,
     keyword, derive or attribute macro) keep one record, as does a page with
     a section that was not measured, such as `Methods from Deref<Target = …>`.
+- **TypeDoc**: TypeDoc 0.28 pages (default theme, English), one page per
+  symbol. TypeDoc writes no generator meta either, so a page is
+  recognised by its title block (`<div class="tsd-page-title">`); the
+  qualified name is its breadcrumb path (`QueryClient`, `shapes.Box`). A
+  module, namespace, class, interface or enum page (or a type alias page
+  whose type has members) gets a container record: the title with its type
+  parameters (`Class Box<T>`), comment, type parameters, hierarchy and
+  implemented interfaces, the member names by group (`Methods: ...`) and the
+  inherited members by base (`Inherited from Box: ...`). Each own member
+  gets a member record (`QueryClient.invalidateQueries`, its flags such as
+  `Static Readonly`, every signature with its type parameters, the doc
+  comment, parameters, returns and notes; the "Defined in" source locations
+  are dropped), anchored at the member's HTML id (`#invalidatequeries`).
+  A function, variable or type alias page is one member record with id
+  `NN_path` and `container` the module or namespace above it (none when
+  the breadcrumb starts at the symbol, as in a single-entry-point project).
+  The readme, the hierarchy page, the project index and pages from TypeDoc
+  0.25-0.27 (their breadcrumb marks no current page) keep one record.
 - **Container record** (`id` `NN_path` for the page's main container,
   `NN_path#anchor` for a Sphinx class or exception): qualified name and kind,
   inheritance, implemented interfaces and known subclasses, signature,
   description, the declared member names, and the "inherited from" lists.
   Summary tables are dropped.
 - **Member record** (`id` `NN_path#anchor`; `NN_path` for a rustdoc
-  function, constant, static or macro page): the qualified name
+  function, constant, static or macro page and a TypeDoc function, variable
+  or type alias page): the qualified name
   (`zombie.characters.IsoGameCharacter#getInventory()`,
   `packaging.version.parse`, `itertools::Itertools::interleave`), the full
   signature with its type parameters, the doc comment and the notes

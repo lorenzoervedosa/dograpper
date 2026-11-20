@@ -2,8 +2,9 @@
 
 A page is split only when an adapter here recognises its generator and its markup
 is the measured one. Javadoc and rustdoc declare themselves in ``<meta name="generator">``;
-Sphinx writes no such meta, so its object markup tells. Any other page keeps one record and
-is reported, with the reason, by ``format_kept_whole``.
+Sphinx writes no such meta, so its object markup tells, and TypeDoc's page title block does
+the same for TypeDoc. Any other page keeps one record and is reported, with the reason, by
+``format_kept_whole``.
 """
 
 import os
@@ -18,8 +19,9 @@ NO_ADAPTER = "no supported generator"
 # Shown before "... N more (use --verbose)"; same cap as lib/source_urls.py MAX_SHOWN_MISSING.
 MAX_SHOWN_KEPT_WHOLE = 10
 # Records repeat their container's qualified name (every Javadoc member the type's, every Sphinx
-# object its ancestors', every rustdoc member also its impl block's header), so a huge or deeply
-# nested name would make the output quadratic in the page size; no real qualified name is this long.
+# object its ancestors', every rustdoc member also its impl block's header, every TypeDoc member
+# its page's), so a huge or deeply nested name would make the output quadratic in the page size;
+# no real qualified name is this long.
 MAX_SYMBOL = 1000
 
 
@@ -59,7 +61,7 @@ class ApiRecord:
     symbol_kind: str     # e.g. "class", "method"
     breadcrumb: List[str]
     generator: str
-    anchor: str = ""     # "" for the page's main container
+    anchor: str = ""     # "" for the page's first record: its main container or a TypeDoc member page
     container: str = ""  # qualified name of the container, member records only
 
     def url(self, page_url: str) -> str:
@@ -81,7 +83,9 @@ class ApiSplit:
 
 
 def split_page(html: str) -> List[ApiRecord]:
-    """Records of one page, its main container first. Raises NotSplit when it is not split."""
+    """Records of one page, its main container (or a TypeDoc member page's one record) first.
+
+    Raises NotSplit when it is not split."""
     generator = page_generator(html)
     if generator and generator.startswith("javadoc/"):
         from . import javadoc
@@ -92,6 +96,9 @@ def split_page(html: str) -> List[ApiRecord]:
     from . import sphinx
     if sphinx.SIGNATURE in html:  # Sphinx writes no generator meta: its object markup tells
         return sphinx.records(html)
+    from . import typedoc
+    if typedoc.TITLE in html:  # nor does TypeDoc: its page title block tells
+        return typedoc.records(html)
     raise NotSplit(NO_ADAPTER)
 
 
