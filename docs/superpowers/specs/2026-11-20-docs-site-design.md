@@ -125,8 +125,8 @@ The options were:
 
 **Site generator.**
 - **A. Sphinx + MyST + Furo + sphinx-click (chosen).** Stays in uv.
-  sphinx-click renders each command from the click objects with no code of
-  ours, and search is built in and works from local files. The cost is Sphinx's
+  The options rendering was revised to our own `dograpper-options` directive
+  (see the Revision note at the top); sphinx-click is no longer used. Search is built in and works from local files. The cost is Sphinx's
   learning curve and directive syntax inside Markdown.
 - B. Docusaurus. Brings Node 20+ into a pure-Python repo, needs our own Python
   generator for the option tables, and a v4 migration is ahead.
