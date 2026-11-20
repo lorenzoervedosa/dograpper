@@ -670,3 +670,15 @@ picked option (a).
 - **Rejected:** prefixing `./` (an unrecorded deviation).
 - **Pending:** maintainer: keep HTTrack's form, or deviate (spec §5) to keep
   module imports working offline.
+
+## 2026-11-20 — browser lane (feat/httrack-browser-pass)
+
+- #166: a launch error is matched on "Executable doesn't exist" in its first line; the
+  install hint is only for that case (maintainer decision), any other keeps Playwright's line.
+- #159: a meta refresh is read from the rendered DOM by the same `evaluate` that reads
+  `a[href]`; a seeded run still follows links of its seeds (as before), it only opens no start URL.
+- #167: the subresource cache is capped at 64 MiB, keyed by URL (no `Vary`, no `Range`),
+  replays without `set-cookie`; a body that cannot be read is a cache miss (debug log).
+- #160: the cap of the engine's response store is 128 MiB; it keeps every 2xx body (non-HTML too);
+  a start URL that redirected is fetched again, since only a fetch re-bases the scope.
+  `run_profile` (owner: `fire`) gained the sink creation and the `responses=` argument.

@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 # The Fetcher hands the body over decoded; fulfill() sets its own length.
 _DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding",
                       "connection", "keep-alive"})
+# a replayed subresource sets no cookie again: the first answer already did
+_NOT_REPLAYED = _DROPPED | {"set-cookie"}
 
 
 # Subresources the browser fetched, kept in memory for the run (spec 5.2): bounded in total
@@ -174,7 +176,7 @@ class Navigator:
         """Keep what the server answered a subresource (GET, 200, no `no-store`), read here
         because the body is gone once the page closes, until the byte bound is reached."""
         req = response.request
-        if (req.is_navigation_request() or req.method != "GET" or response.status != 200
+        if (self._cache_bytes >= self._cache_limit or req.is_navigation_request() or req.method != "GET" or response.status != 200
                 or req.url in self._cache or "no-store" in
                 (response.headers.get("cache-control") or "").lower()):
             return
@@ -200,7 +202,7 @@ class Navigator:
             else:  # asked before in this run: answered from memory, nothing sent
                 status, headers, body = cached
                 route.fulfill(status=status, body=body, headers={
-                    k: v for k, v in headers.items() if k not in _DROPPED})
+                    k: v for k, v in headers.items() if k not in _NOT_REPLAYED})
             return
         if req.frame is not self._frame:  # an iframe or a popup: never part of the saved page
             route.abort("blockedbyclient")

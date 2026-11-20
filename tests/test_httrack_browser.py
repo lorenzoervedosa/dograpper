@@ -508,7 +508,8 @@ def test_subresource_cache_replays_decoded_without_stale_length(server, tmp_path
     nav, ctx, page = navigator(base, tmp_path)
     url = base + "/a.js"
     load(ctx, page, url, headers={"content-encoding": "gzip", "content-length": "3",
-                                  "content-type": "text/javascript"}, body=b"decoded")
+                                  "set-cookie": "a=1", "content-type": "text/javascript"},
+         body=b"decoded")
     (call,), _ = load(ctx, page, url)
     assert call[1]["headers"] == {"content-type": "text/javascript"}
 
