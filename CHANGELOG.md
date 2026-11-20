@@ -74,7 +74,7 @@ stays `0.0.0.dev0`.
   pacing, robots.txt, link rewriting and update mode (a re-run revalidates the
   previous run's files, and the manifest records their validators) as
   `httrack`; automatic challenge/CAPTCHA solving is a non-goal.
-  ([ADR-0011](docs/adr/0011-fire-engine-downloader.md), [#130])
+  ([ADR-0011](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0011-fire-engine-downloader.md), [#130])
 
 - `dograpper docs`: serves a self-contained, offline reference page for every
   command and option on `127.0.0.1` (`--port`, default 8000; `--no-browser`),
@@ -145,13 +145,13 @@ stays `0.0.0.dev0`.
   `cross_refs.json`, `llm-readiness.json` and `delta_manifest.json` name pages
   by path. Chunk-only settings, `--bundle`, `--for-queries`, `--format jsonl`
   and `--dedup` other than `off` exit 2; a `pages/` without `INDEX.md` exits
-  1. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md), [#84])
+  1. ([ADR-0010](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0010-per-page-pack-layout.md), [#84])
 - `pack --layout page --context-header` writes exactly one
   `dograpper-context-v1` header per page file, at line 1, with a new
   optional `title` field first: the `<title>` minus the site suffix shared by
   more than half of the pages, else the raw page's first `h1`, else the file
   stem. The page header holds no `chunk_index`, `total_chunks` or
-  `context_breadcrumb`. ([ADR-0010](docs/adr/0010-per-page-pack-layout.md),
+  `context_breadcrumb`. ([ADR-0010](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0010-per-page-pack-layout.md),
   [#85])
 - `init --target claude-code`: a config for Claude Code (`layout: page`,
   `format: md`, `context-header`, `dedup: off`, no chunk-only key) and a
@@ -181,7 +181,7 @@ stays `0.0.0.dev0`.
   record, is listed in a warning with the reason and is counted in the
   summary's `API records:` line. With `--format md`/`txt`, `--bundle
   notebooklm` or `--layout page` it exits 2.
-  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
   [#76](https://github.com/lorenzoervedosa/dograpper/issues/76))
 - `pack --api-records` also splits Sphinx autodoc pages (Python domain,
   Sphinx 9.1/9.2, recognised by their object markup since Sphinx writes no
@@ -194,7 +194,7 @@ stays `0.0.0.dev0`.
   `exception`, `function`, `property`, `attribute` and `data`; `generator` is
   `sphinx`. A page with a `:no-index:` object or unmeasured markup keeps one
   record and is listed in the warning.
-  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
   [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
 - `pack --api-records` also splits TypeDoc 0.28 pages (default theme,
   recognised by their page title block since TypeDoc writes no generator
@@ -208,7 +208,7 @@ stays `0.0.0.dev0`.
   `enum_member`, `variable`, `type_alias` and `accessor`; `generator` is
   `typedoc`. Pages from TypeDoc 0.25-0.27
   and other unmeasured markup keep one record and are listed in the warning.
-  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
   [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
 - `pack` cleans MediaWiki pages (detected by their `<meta name="generator">`)
   before extraction: navigation boxes (`navbox`), section edit links
@@ -221,7 +221,7 @@ stays `0.0.0.dev0`.
   redirect alias (a page saved through a redirect, with its target's
   content) is skipped when its target page is packed too, listed on stderr
   and counted as `Redirect aliases: N` in the summary. Pages from any other
-  generator are extracted exactly as before. ([schema](docs/schema-v1.md),
+  generator are extracted exactly as before. ([schema](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/schema-v1.md),
   [#88])
 - `download` (and so `sync`) prints `[progress]` lines while pages are
   fetched: at most one every 5 s per fetch step, only on change, plus a final
@@ -247,7 +247,7 @@ stays `0.0.0.dev0`.
   `associated_constant`, `associated_type`, `constant`, `static` and `macro`;
   `generator` is `rustdoc`. `all.html`, source pages, redirect stubs and
   unmeasured markup (such as `Methods from Deref`) keep one record.
-  ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
   [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
 - `dograpper eval` — offline validation of a packed context: deterministic
   golden Q&A generated from heading breadcrumbs, BM25 retrieval, and
@@ -317,7 +317,7 @@ stays `0.0.0.dev0`.
   pack decides *whether* the run happens, not *which* files it packs. Nothing
   changed, nothing is written; anything changed, the pack runs in full. Partial
   runs used to renumber chunks from `01` and overwrite the artifacts of the
-  files they did not touch. ([#39], [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md))
+  files they did not touch. ([#39], [ADR-0008](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0008-delta-as-a-change-gate.md))
 - `pack --delta` records `pack_state.json` in the output directory and diffs
   against it on the next run, so delta now works in pack-only flows. ([#39])
 - `pack --manifest` no longer drives the delta comparison; its remaining role is
@@ -486,7 +486,7 @@ stays `0.0.0.dev0`.
 - `pack --context-header` writes `>` in header values as the JSON escape
   `\u003e`, so a heading or source path holding `-->` no longer closes the
   `dograpper-context-v1` comment early; JSON parsers read the same value.
-  ([ADR-0010](docs/adr/0010-per-page-pack-layout.md))
+  ([ADR-0010](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0010-per-page-pack-layout.md))
 - `pack` keeps the line breaks and indentation of HTML `<pre>` blocks in
   `md`, `txt` and `jsonl` instead of flattening each one to a single line.
   `md` writes them as fenced code blocks tagged with the language named by a

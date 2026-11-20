@@ -22,7 +22,7 @@ preinstalled) and that the docs mirror (`input-dir`, which holds the
 `.dograpper-manifest.json` that `download` writes there) and the chunks
 directory (with `llm-readiness.json`) are **versioned in your repo**: that is
 what carries state across stateless CI runners (see
-[Incremental maintenance](https://github.com/lorenzoervedosa/dograpper/blob/main/README.md#incremental-maintenance-cicd)).
+[Incremental maintenance](../guides/incremental.md)).
 
 ```yaml
 name: Context freshness

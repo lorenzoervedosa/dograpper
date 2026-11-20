@@ -2,7 +2,7 @@
 
 Detects, reports, and installs the heavy dependencies (`wget`, chromium)
 dograpper needs but doesn't bundle, into `DOGRAPPER_HOME` (default
-`~/.dograpper`; see [Storage layout](https://github.com/lorenzoervedosa/dograpper/blob/main/README.md#storage-layout)).
+`~/.dograpper`; see [Storage layout](../install.md#storage-layout)).
 
 ```bash
 dograpper doctor [options]

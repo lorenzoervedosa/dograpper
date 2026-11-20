@@ -39,12 +39,20 @@ URL → Mirror → Extract → Dedup → Score → Chunk → Export (MD/JSONL)
 :caption: Getting started
 :hidden:
 :maxdepth: 2
+
+install
+quickstart
 ```
 
 ```{toctree}
 :caption: Guides
 :hidden:
 :maxdepth: 2
+
+guides/notebooklm
+guides/rag
+guides/incremental
+guides/air-gapped
 ```
 
 ```{toctree}
@@ -81,4 +89,7 @@ reference/github-action
 :caption: More
 :hidden:
 :maxdepth: 2
+
+troubleshooting
+changelog
 ```
