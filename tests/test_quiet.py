@@ -2,10 +2,21 @@
 
 import json
 import logging
+import pytest
 from click.testing import CliRunner
 
 from dograpper.cli import cli
 from dograpper.utils.logger import setup_logger
+
+@pytest.fixture(autouse=True)
+def _restore_logger():
+    """`-q` leaves the dograpper logger at ERROR with a handler; later caplog tests need it as it was."""
+    log = logging.getLogger("dograpper")
+    level, handlers = log.level, list(log.handlers)
+    yield
+    log.setLevel(level)
+    log.handlers[:] = handlers
+
 
 HTML = {"content-type": "text/html"}
 WORDS = " ".join(["documentation"] * 40)
@@ -52,9 +63,11 @@ def test_quiet_download_and_sync_print_nothing(server, tmp_path):
     assert "Download complete" in loud.output
     assert quiet.exit_code == loud.exit_code == 0
     assert quiet.stdout == ""
-    sync = CliRunner().invoke(cli, ["-q", "sync", url, "-o", str(tmp_path / "s"),
-                                    "--downloader", "httrack"])
-    assert sync.exit_code == 0, sync.output
+    sync_args = ["sync", url, "--downloader", "httrack", "-o"]
+    loud_sync = CliRunner().invoke(cli, [*sync_args, str(tmp_path / "s0")])
+    sync = CliRunner().invoke(cli, ["-q", *sync_args, str(tmp_path / "s")])
+    assert "=== Step 1: Download ===" in loud_sync.stdout
+    assert sync.exit_code == loud_sync.exit_code == 0, sync.output
     assert sync.stdout == ""
 
 
@@ -66,19 +79,22 @@ def test_eval_quiet_prints_nothing(tmp_path):
            "breadcrumb": ["Guide", "Installation"], "readiness_grade": "A"}
     (chunks / "docs_chunk_01.jsonl").write_text(json.dumps(rec) + "\n")
     out = tmp_path / "report.json"
+    loud = CliRunner().invoke(cli, ["eval", str(chunks)])
     r = CliRunner().invoke(cli, ["-q", "eval", str(chunks), "-o", str(out)])
-    assert r.exit_code == 0 and r.stdout == ""
+    assert r.exit_code == loud.exit_code == 0 and r.stdout == ""
     assert out.exists()
 
 
 def test_logger_writes_to_stderr(capsys):
     log = setup_logger(verbose=True)
-    try:
-        log.debug("probe")
-        log.error("boom")
-    finally:  # the handler holds capsys' stream; do not leak it into other tests
-        log.handlers.clear()
-        log.setLevel(logging.NOTSET)
+    log.debug("probe")
+    log.error("boom")
     out = capsys.readouterr()
     assert out.out == ""
     assert "DEBUG: probe" in out.err and "ERROR: boom" in out.err
+
+
+def test_eval_quiet_keeps_its_error_on_stderr(tmp_path):
+    (tmp_path / "empty").mkdir()
+    r = CliRunner().invoke(cli, ["-q", "eval", str(tmp_path / "empty")])
+    assert r.exit_code == 1 and "no JSONL chunks" in r.stderr and r.stdout == ""
