@@ -9,9 +9,8 @@ import base64
 import gzip
 import json
 import sys
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from unittest.mock import patch
 
 import pytest
@@ -542,7 +541,7 @@ def test_real_raw_body_over_the_cap_aborts_the_transfer(server, monkeypatch):
 
 
 @pytest.fixture
-def trickle():
+def trickle(http_server):
     """A server that answers 300 bytes in three pieces 0.5 s apart (the first 1.5 s in
     on /late), or never answers (/hang)."""
     class H(BaseHTTPRequestHandler):
@@ -565,14 +564,7 @@ def trickle():
                 self.wfile.write(b"x" * 100)
                 self.wfile.flush()
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
-    srv.daemon_threads = True
-    t = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}"
-    srv.shutdown()
-    srv.server_close()
-    t.join(5)
+    yield http_server(H)
 
 
 def test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout(trickle):
