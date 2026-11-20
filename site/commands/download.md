@@ -578,6 +578,10 @@ Max bytes/second (clamped to 10000000)
 
 Max seconds honored from `Retry-After` / `Crawl-delay` (hard cap 3600)
 
+### `--user-agent`
+
+User-Agent header. Default: `Mozilla/5.0 (compatible; dograpper/<version>)`
+
 ### `--no-extended-parsing`
 
 Do not follow quoted strings that look like links (HTTrack `-%P0`, or `-j8`)
