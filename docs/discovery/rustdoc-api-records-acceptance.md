@@ -138,8 +138,9 @@ appear verbatim in their member record.
   installed on the measuring machine, so the standard library was not packed.
 - Primitive, keyword, attribute-macro and derive-macro pages keep one record
   for the same reason.
-- docs.rs builds with nightly rustdoc, whose markup can differ from 1.96, so
-  its pages keep one record until a nightly corpus is measured.
+- docs.rs builds with nightly rustdoc, and its builds change daily: only the
+  nightly measured below is accepted; every other build keeps one record
+  per page.
 - The container bound (≤ 5,000 words) is measured, not enforced: the `impl`
   header lists grow with the number of implementations (`Zip`, 1,604 words,
   is mostly headers), so a trait implemented across a large crate such as
@@ -148,3 +149,26 @@ appear verbatim in their member record.
   trait's) is dropped with the others.
 - Redirect stubs are packed as one record each and can take top-5 slots for
   a name lookup (see above); `pack` now skips them as redirect stubs (#163).
+
+## Nightly run (2026-11-20, [#162](https://github.com/lorenzoervedosa/dograpper/issues/162))
+
+Same corpus and recipe as above, with `rustdoc 1.102.0-nightly (6905905bb
+2026-11-19)` and `rustc` of the same build (`rustup toolchain install
+nightly --profile minimal`). Same split: 252 pages, 125 split into 400
+records (84 container, 316 member), 127 kept whole.
+
+| Criterion | Bar | Result |
+|---|---|---|
+| Lookups in the top 5 | ≥ 80% of ~20 | 22 of 22 (rank 1 in 18, 2 in 3, 3 in 1); the 22 queries of the table above |
+| Signatures with type parameters | 100% | 254 of 254 kept verbatim (inherent and trait members; impl-of-trait members are dropped by design) |
+| Member records | p99 ≤ 300; max ≤ 3,000 | p99 226 words, max 419 |
+| Container records | max ≤ 5,000 | max 2,589 |
+| Pack time | ≤ 2× baseline | 2.3–4.5 s (median 3.0 s) vs 12.7–18.5 s (median 14.4 s) |
+
+- Markup difference: the notable-trait mark `ⓘ` is `<span class="tooltip">`
+  on the nightly (`<a class="tooltip">` on 1.96). The adapter left it in the
+  signature (146 records) until it dropped both.
+- Total output 41,460 words (451,931 for the baseline).
+- The bar holds, so the adapter accepts the prefix
+  `1.102.0-nightly (6905905bb `. The fixture for the test is
+  `tests/fixtures/rustdoc/nightly/`.

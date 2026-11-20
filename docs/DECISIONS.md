@@ -107,6 +107,18 @@ Entry format:
   every page whole until a nightly corpus is measured and the accepted
   versions widen.
 
+## 2026-11-20 — rustdoc accepts one measured nightly build (#162)
+
+- **Decision:** `MEASURED_VERSIONS` accepts `1.96.` and the exact prefix
+  `1.102.0-nightly (6905905bb `; the notable-trait mark is dropped as
+  `span.tooltip` as well as `a.tooltip`.
+- **Why:** the nightly passed the ADR-0009 bar on itertools 0.14.0 (see the
+  acceptance doc); the issue says to accept only measured prefixes, and a
+  nightly's markup moves daily.
+- **Rejected:** `1.102.` or any `-nightly` (unmeasured builds).
+- **Pending:** docs.rs builds change daily, so most docs.rs pages stay
+  whole; widening again means measuring another build.
+
 ## 2026-11-19 — rustdoc adapter: corpus, test file, shared helpers (#75)
 
 - **Decision:** the acceptance corpus is `itertools` 0.14.0 from the local

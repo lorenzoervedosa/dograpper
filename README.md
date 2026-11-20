@@ -1099,8 +1099,9 @@ dograpper serve ./pack   # search_chunks now ranks member records
   annotations, overloads included, then the docstring and its fields). The
   anchor is the object's HTML id (`#packaging.version.parse`). A page with a
   `:no-index:` object or an object type outside those keeps one record.
-- **rustdoc**: rustdoc 1.96 pages (`<meta name="generator" content="rustdoc">`
-  and `data-rustdoc-version="1.96.…"`; the page kind comes from
+- **rustdoc**: rustdoc 1.96 pages and the nightly build `1.102.0-nightly
+  (6905905bb 2026-11-19)` (`<meta name="generator" content="rustdoc">` and
+  `data-rustdoc-version="1.96.…"`; the page kind comes from
   `<body class="rustdoc struct">`). rustdoc writes one page per symbol:
   - A struct, enum, union, trait or type alias page is a container record:
     the declaration, the doc comment, the member names, then the `impl`
@@ -1119,7 +1120,8 @@ dograpper serve ./pack   # search_chunks now ranks member records
   - A function, constant, static or macro page is one member record, under
     the page's own id (`NN_path`), with the module as its container.
   - `all.html`, help and source pages, redirect stubs (no generator meta),
-    pages from another rustdoc version and other page kinds (primitive,
+    pages from another rustdoc version (including other nightlies, so docs.rs
+    pages stay whole unless they come from the measured build) and other page kinds (primitive,
     keyword, derive or attribute macro) keep one record, as does a page with
     a section that was not measured, such as `Methods from Deref<Target = …>`.
 - **TypeDoc**: TypeDoc 0.28 pages (default theme, English), one page per
