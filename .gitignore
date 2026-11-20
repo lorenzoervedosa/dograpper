@@ -87,3 +87,4 @@ test-output/
 
 # Local download/pack artifacts (e.g. OWASP WSTG ingestion runs)
 wstg-*/
+site/_build/

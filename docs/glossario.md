@@ -67,3 +67,24 @@ Entradas abaixo, uma seção `##` por termo.
 **Onde apareceu:** adaptador rustdoc do `pack --api-records` (#75 fase 3, 2026-11-19): no corpus `itertools`, cada struct repete a doc de `Itertools` inteira por causa da blanket implementation (e a de `Iterator` pela implementação de trait); o adaptador descarta as blanket implementations e os itens das implementações de trait, e guarda só o cabeçalho `impl` de cada implementação de trait.
 **Por que importa pra decisão:** manter essas cópias infla cada registro e faz a mesma doc concorrer na busca em dezenas de páginas; descartar perde só texto que já está, uma vez, na página do trait.
 **Nível:** 🆕 novo
+
+## docs-as-code
+**Em uma frase:** tratar a documentação como código: arquivos de texto no repositório, revisados em PR e construídos por um comando que falha se algo estiver quebrado.
+**Analogia:** a documentação passa pela mesma linha de montagem do software, com inspeção de qualidade no fim.
+**Onde apareceu:** site de docs em `site/` (spec `docs/superpowers/specs/2026-11-20-docs-site-design.md`, 2026-11-20).
+**Por que importa pra decisão:** o build com `-W` transforma link quebrado e referência inválida em erro, então a doc não apodrece em silêncio; o custo é manter o build verde.
+**Nível:** 🆕 novo
+
+## Sphinx
+**Em uma frase:** gerador de sites de documentação que lê arquivos de texto e produz um site HTML navegável, com índice, busca e links verificados.
+**Analogia:** uma gráfica que recebe os manuscritos e devolve o livro paginado, com sumário e remissões conferidas.
+**Onde apareceu:** `site/conf.py` (spec `docs/superpowers/specs/2026-11-20-docs-site-design.md`, 2026-11-20).
+**Por que importa pra decisão:** é Python e entra como extra `docs` no `uv`, sem Node.js; uma diretiva própria em `site/conf.py` gera a tabela de opções de cada comando a partir do próprio CLI.
+**Nível:** 🆕 novo
+
+## MyST
+**Em uma frase:** dialeto de Markdown que o Sphinx entende, com diretivas extras (como `toctree`) para estruturar o site.
+**Analogia:** Markdown com um vocabulário a mais, o suficiente para dizer à gráfica como montar o sumário.
+**Onde apareceu:** `site/index.md` e `myst-parser` no extra `docs` (spec `docs/superpowers/specs/2026-11-20-docs-site-design.md`, 2026-11-20).
+**Por que importa pra decisão:** permite reaproveitar o texto do README em Markdown sem reescrever em reStructuredText.
+**Nível:** 🆕 novo
