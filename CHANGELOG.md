@@ -271,6 +271,7 @@ stays `0.0.0.dev0`.
 
 ### Changed
 
+- `download --downloader httrack --headless` follows a navigation a page starts itself (meta refresh, `location =`) as a link of that page, within scope, `--filter`, `--depth` and `--max-links`, instead of dropping it. ([#159])
 - `pack --token-encoding` with an unknown name is a usage error (exit 2) before anything is packed, from the command line and from the `token-encoding` config key; before, it packed, warned once per chunk and exited 0 without the token lines. ([#144])
 - `pack --dedup-threshold` outside 0 to 10, or not an integer in the config, is a usage error (exit 2), from the command line and from the `dedup-threshold` config key; before, any integer was accepted. ([#142])
 - `pack` now packs documentation formats only by default (`.html`, `.htm`,
@@ -578,3 +579,4 @@ stays `0.0.0.dev0`.
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
+[#159]: https://github.com/lorenzoervedosa/dograpper/issues/159

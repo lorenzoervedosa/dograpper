@@ -575,9 +575,6 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- The Playwright pass (§7, PR 4) does not follow a navigation a page starts
-  itself (meta refresh, `location =`), where §5.5 counts meta refresh as a
-  link. Decided: queue it as a link. Tracked in [#159](https://github.com/lorenzoervedosa/dograpper/issues/159).
 
 ## 6. Code layout (proposal; the plan may refine)
 
@@ -636,9 +633,10 @@ README and CHANGELOG.
      Playwright 1.58's Chromium), which would leave the policy.
    - Subresources are Chromium's own requests: the §5.2 **deviation** (user
      decision, 2026-11-19); `/cdn-cgi/` is aborted for every request.
-   - Not followed: iframes, popups and navigations a page starts itself (meta
-     refresh, `location =`). Decided (2026-11-19): queue them as links, not
-     implemented yet, tracked in [#159](https://github.com/lorenzoervedosa/dograpper/issues/159) (Known gaps). A seeded run opens its seeds alone; followed links carry their
+   - Not followed: iframes and popups. A navigation a page starts itself (meta
+     refresh, `location =`) is aborted and queued as a link of that page
+     (decided 2026-11-19; the route handler captures it, and the rendered DOM's
+     meta refresh is read too, for one that fires after the render wait). A seeded run opens its seeds alone; followed links carry their
      page as `Referer` and pass mirror's scope and extension pre-filter; a
      non-HTML answer is saved as fetched, never opened. After an engine fetch
      the browser pass has its own report and is no front (§5.8); a shallow

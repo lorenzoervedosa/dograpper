@@ -51,6 +51,7 @@ class Navigator:
         self._last = None   # (final URL, FetchResult) of the last prepare()
         self._prepared = 0  # URLs prepare() fetched: policy.max_links caps them
         self._frame = None
+        self._started: list[str] = []  # navigations the current page started itself
         self._files: dict[str, str] = {}  # saved file -> URL it came from
         self._pages: dict[str, str] = {}  # the HTML pages among them, for relink
         self._local: dict[str, str] = {}  # url_key -> saved file
@@ -90,6 +91,7 @@ class Navigator:
         (fetch_page); return the URL the browser is to open, its answer armed for that
         navigation, or None when the policy refused it (the report says why)."""
         self._armed = None  # never a stale answer for whatever the browser opens next
+        self._started = []  # a capture belongs to the page that produced it
         if self._prepared >= self.fetcher.policy.max_links:
             self.report.partial = True
             return None
@@ -104,6 +106,12 @@ class Navigator:
             self._local[url_key(url)] = saved
         self._armed, self._last = res, (final, res)
         return final
+
+    def initiated(self) -> list[str]:
+        """The main-frame navigations the page just crawled started itself (aborted, never
+        opened), once: the crawl queues them as links of that page."""
+        started, self._started = self._started, []
+        return started
 
     @property
     def renders(self) -> bool:
@@ -157,8 +165,9 @@ class Navigator:
             route.abort("blockedbyclient")
             return
         res, self._armed = self._armed, None
-        if res is None:  # one the page started itself (meta refresh, script): not followed
-            logger.debug("browser: navigation to %s not followed", redact_url(req.url))
+        if res is None:  # one the page started itself (meta refresh, script): a link instead
+            logger.debug("browser: navigation to %s queued as a link", redact_url(req.url))
+            self._started.append(req.url)
             route.abort("blockedbyclient")
             return
         route.fulfill(status=res.status, body=res.body,

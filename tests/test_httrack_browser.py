@@ -163,9 +163,25 @@ def test_route_scope_of_requests_that_are_no_crawl_navigation(server, tmp_path):
         ("abort", "blockedbyclient")]
     # the crawled page still gets its armed answer
     assert navigate(ctx, page, base + "/docs/")[0][0] == "fulfill"
-    # and a navigation the page starts itself (meta refresh, script) is not followed
+    # and a navigation the page starts itself (meta refresh, script) is aborted, not opened
     assert navigate(ctx, page, base + "/docs/next") == [("abort", "blockedbyclient")]
     assert seen == ["/robots.txt", "/docs/"]
+
+
+def test_page_started_navigation_is_captured_for_that_page_only(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"<p>page</p>")
+    nav, ctx, page = navigator(base, tmp_path)
+    nav.prepare(base + "/docs/")
+    navigate(ctx, page, base + "/docs/")
+    navigate(ctx, page, base + "/docs/next")
+    navigate(ctx, page, base + "/docs/frame", frame=Frame())  # an iframe is no capture
+    assert nav.initiated() == [base + "/docs/next"]
+    assert nav.initiated() == []  # taken once
+    navigate(ctx, page, base + "/docs/stale")
+    nav.prepare(base + "/docs/")  # the next page starts clean
+    assert nav.initiated() == []
 
 
 def test_rendered_pages_are_named_recorded_and_relinked_like_the_engine(server, tmp_path):
@@ -368,3 +384,72 @@ def test_raw_file_gets_its_last_modified_time_too(server, tmp_path):
     path = nav.save(base + "/docs/n.txt", "<pre>n</pre>")
     nav.finish()
     assert os.path.getmtime(path) == calendar.timegm((2026, 11, 18, 10, 0, 0))
+
+
+def _starts_navigation(ctx, page, base, target):
+    """A page whose render starts a navigation to `target` (a script or a meta refresh)."""
+    def goto(u, **_):
+        if u == base + "/docs/":
+            handler = ctx.route.call_args.args[1]
+            for url in (u, target):
+                handler(Route(Request(url, page.main_frame)))
+    page.goto.side_effect = goto
+
+
+def test_crawl_queues_the_navigation_a_page_started_as_its_link(server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    referers = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"shell")
+    script["/docs/next"] = lambda h: referers.append(h.get("Referer")) or (200, HTML, b"n")
+    _starts_navigation(ctx, page, base, base + "/docs/next")
+    nav, res = crawl_with(base, tmp_path)
+    assert seen == ["/robots.txt", "/docs/", "/docs/next"]  # fetched by the profile, later
+    assert referers == [base + "/docs/"]
+    assert len(res.files_downloaded) == 2
+
+
+def test_crawl_never_requests_a_started_navigation_out_of_scope_or_filtered(
+        server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"shell")
+    for target in ("http://other.invalid/x", base + "/docs/no-1", base + "/blog/x"):
+        _starts_navigation(ctx, page, base, target)
+        crawl_with(base, tmp_path, filters=UrlFilters(["-*/no-*"]))
+    assert seen.count("/docs/") == 3 and not [u for u in seen if u not in ("/robots.txt", "/docs/")]
+
+
+def _chain(ctx, page, base, nexts):
+    """Each page the browser opens starts a navigation to nexts[its URL]."""
+    def goto(u, **_):
+        if u.startswith("http"):
+            handler = ctx.route.call_args.args[1]
+            handler(Route(Request(u, page.main_frame)))
+            if u in nexts:
+                handler(Route(Request(nexts[u], page.main_frame)))
+    page.goto.side_effect = goto
+
+
+def test_crawl_started_navigation_holds_depth(server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    for p in ("/docs/", "/docs/a", "/docs/b"):
+        script[p] = (200, HTML, b"shell")
+    _chain(ctx, page, base, {base + "/docs/": base + "/docs/a", base + "/docs/a": base + "/docs/b"})
+    crawl_with(base, tmp_path, depth=1)
+    assert seen == ["/robots.txt", "/docs/", "/docs/a"]  # /docs/b is a hop too far
+
+
+def test_crawl_started_navigation_of_a_seeded_run_opens_no_start_url(server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    for p in ("/docs/a", "/docs/b"):
+        script[p] = (200, HTML, b"shell")
+    _chain(ctx, page, base, {base + "/docs/a": base + "/docs/b"})
+    crawl_with(base, tmp_path, seed_urls=[base + "/docs/a"])
+    assert seen == ["/robots.txt", "/docs/a", "/docs/b"]  # never the start URL /docs/

@@ -618,10 +618,11 @@ the `wget` cascade's Playwright:
   against robots.txt nor paced: they are dependencies of a page the policy
   already let through, as in an ordinary visit (a decided exception to the
   profile's rule that every request goes through it). Routing every request
-  turns Chromium's HTTP cache off, so each page fetches them again. An
-  iframe, a popup or a navigation the page starts itself (meta refresh,
-  `location =`) is not followed yet ([#159](https://github.com/lorenzoervedosa/dograpper/issues/159)),
-  and service workers are blocked.
+  turns Chromium's HTTP cache off, so each page fetches them again. A
+  navigation the page starts itself (meta refresh, `location =`) is aborted and
+  queued as a link of that page, as is the target of a `<meta http-equiv=refresh>` in
+  the rendered page; an iframe or a popup is not followed, and service workers are
+  blocked.
 - **Scope, names, links:** a seeded run opens its seeds alone, as the seeded
   fetch does; links of a rendered page follow the crawl's scope (start host,
   start directory, `--filter`, `--depth`, `--max-links`, a known non-page type
