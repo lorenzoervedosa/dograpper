@@ -11,6 +11,8 @@ misreports itself.
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -20,7 +22,8 @@ ALLOWED_SECTIONS = {
 }
 
 _UNRELEASED_RE = re.compile(r"^## \[Unreleased\]\s*$", re.MULTILINE)
-_RELEASE_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})\s*$",
+# Dated versions: YYYY.M or YYYY.M.N, month without a leading zero.
+_RELEASE_RE = re.compile(r"^## \[(\d{4}\.[1-9]\d?(?:\.\d+)?)\] - (\d{4}-\d{2}-\d{2})\s*$",
                          re.MULTILINE)
 _VERSION_HEADING_RE = re.compile(r"^## \[.*$", re.MULTILINE)
 _SECTION_RE = re.compile(r"^### (.+?)\s*$", re.MULTILINE)
@@ -58,6 +61,40 @@ def test_released_versions_are_well_formed_and_descending():
     assert versions == sorted(versions, reverse=True), (
         f"released versions are not in descending order: {[v for v, _ in releases]}")
     assert len(set(versions)) == len(versions), "a version is listed twice"
+
+
+def _release_heading_problems(text):
+    """Release headings that break the dated-version rule, one message each."""
+    problems = []
+    for heading in _VERSION_HEADING_RE.findall(text):
+        if _UNRELEASED_RE.match(heading):
+            continue
+        match = _RELEASE_RE.match(heading)
+        if not match:
+            problems.append(f"{heading!r} is not '## [YYYY.M] - YYYY-MM-DD'")
+            continue
+        version, date = match.groups()
+        year, month = date.split("-")[:2]
+        if version.split(".")[:2] != [year, str(int(month))]:
+            problems.append(f"{heading!r}: the version is not YYYY.M of its date")
+    return problems
+
+
+def test_release_headings_use_the_dated_version_of_their_month():
+    problems = _release_heading_problems(_text())
+    assert not problems, problems
+
+
+@pytest.mark.parametrize("heading, ok", [
+    ("## [2027.3] - 2027-03-14", True),
+    ("## [2027.3.1] - 2027-03-28", True),
+    ("## [2027.12] - 2027-12-01", True),
+    ("## [2027.03] - 2027-03-14", False),  # leading zero, normalized away
+    ("## [2027.4] - 2027-03-14", False),   # version month differs from the date
+    ("## [0.4.0] - 2026-08-15", False),    # semantic version
+])
+def test_release_heading_rule(heading, ok):
+    assert (not _release_heading_problems(heading + "\n")) is ok
 
 
 def test_newest_release_matches_the_packaged_version():

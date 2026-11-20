@@ -22,6 +22,20 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-20 — Dated versions for the first release
+
+- **Decision:** releases are versioned by date: `YYYY.M` for the release month
+  (`2027.3`), `YYYY.M.N` for a further release in the same month, tagged
+  `vYYYY.M`. Contract 10, the CHANGELOG header, `tests/test_changelog.py`
+  (heading format and the version matching its date's month) and the release
+  workflow's tag filter (`v*.*`, since `v2027.3` has a single dot) follow.
+- **Why:** the maintainer chose month/year versions (2026-11-20). The month has
+  no leading zero because Python packaging normalizes `2027.03` to `2027.3`, so
+  `--version` would disagree with a `v2027.03` tag.
+- **Rejected:** `YYYY.MM` with a leading zero, for the mismatch above. The
+  old pre-1.0 semantic versioning rule.
+- **Pending:** none.
+
 ## 2026-11-20 — Withdraw the published releases (#151)
 
 - **Decision:** dograpper is treated as unreleased. The GitHub releases v0.4.0

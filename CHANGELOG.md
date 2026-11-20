@@ -1,8 +1,9 @@
 # Changelog
 
 All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions are
+dated: `YYYY.M` for the month of the release (`2027.3`), `YYYY.M.N` for a
+further release in the same month (`2027.3.1`).
 
 Nothing has been released yet, so every entry sits under `## [Unreleased]`.
 Entries start after the withdrawn v0.3.3 release (commit `71870e0`,
@@ -37,12 +38,14 @@ behaviour, so it is a `feat:` or a `fix:`.
 **Granularity.** One line per user-visible change, not per commit: five commits
 that build one flag are one entry. A contract change links its ADR and issue.
 
-**Releasing.** Rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, open a
-fresh empty `## [Unreleased]` above it, and bump `version` in `pyproject.toml`
-in the same commit — `dograpper --version` reads the installed package
-metadata, so a tag without the bump ships a binary that misreports itself.
-While the project is pre-1.0, new surface or a contract change is a MINOR bump
-and fixes alone are a PATCH bump.
+**Releasing.** Rename `## [Unreleased]` to `## [YYYY.M] - YYYY-MM-DD`, open a
+fresh empty `## [Unreleased]` above it, and set `version` in `pyproject.toml`
+to the same `YYYY.M` in the same commit — `dograpper --version` reads the
+installed package metadata, so a tag without the bump ships a binary that
+misreports itself. Tag it `vYYYY.M`. Write the month without a leading zero
+(`2027.3`, not `2027.03`): Python packaging normalizes it away, so the
+installed version would not match the tag. Until the first release, `version`
+stays `0.0.0.dev0`.
 
 `tests/test_changelog.py` enforces the mechanical half of these rules.
 
