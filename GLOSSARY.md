@@ -68,6 +68,11 @@ A page produced by a generator from source code, documenting one or more
 symbols.
 _Avoid_: Javadoc page (unless the generator matters), API doc
 
+**Redirect stub**:
+A page whose only job is to send the browser elsewhere: a meta refresh with a URL
+and at most 40 visible words. `pack` skips it.
+_Avoid_: redirect alias (a MediaWiki page that carries its target's content)
+
 **Generator**:
 The tool that produced an API reference page, such as Javadoc, TypeDoc,
 rustdoc, Sphinx autodoc or Doxygen.

@@ -96,8 +96,23 @@ Entry format, grouped under one heading per issue or PR:
   when curl_cffi exposes it, or when a real crawl is slowed by servers that
   stall mid-body.**
 
+## `commands/pack.py` size budget (#139, #163, 2026-11-20)
+
+- **`commands/pack.py` is 869 lines, above the 800-line budget of the size
+  sentinel** (868 before the `--quiet` and redirect-stub work; the stub stage
+  now costs one call to `commands/_skip_pages.py`).
+  ⏸ **accepted: the file was already over budget and the new code is a call.
+  Extract the later stages (dedup, scoring, summary) into their own modules
+  when the next stage lands in `pack.py`.**
+
 ## httrack browser pass, in-memory stores (#160, #167, 2026-11-20)
 
 - **The engine's response store also keeps non-HTML bodies.** `RunResponses.keep` (`src/dograpper/lib/httrack/crawl.py`) stores every 2xx body, so images, PDFs or stylesheets of a seeded list can fill the 128 MiB cap before the pages the browser pass needs. ⏸ **accepted: the pages of a documentation site are small and a non-HTML answer is reused too (saved as fetched); fix by keeping only `text/html` when a run is seen to hit the cap, or when memory use of a real crawl matters.**
 - **The subresource cache is keyed by URL alone.** `Navigator._response`/`_route` (`src/dograpper/lib/httrack/browser.py`) ignore `Vary` and `Range`, so a GET 200 whose answer depends on a request header (or a dynamic XHR) is replayed to every later page of the run. ⏸ **accepted: the issue defines a per-run cache keyed by URL, and only GET 200 without `no-store` is kept; fix when a crawled site is seen to render differently because of a replayed answer (key by URL plus the `Vary` headers then).**
 - **The engine's responses sit in memory up to 128 MiB during the engine fetch even when no browser pass follows.** `run_profile` (`src/dograpper/commands/_httrack_profile.py`) creates the store before it knows whether the result looks client-rendered. ⏸ **accepted: the cap bounds it and it is released after the run; fix by keeping only when `is_spa` is likely, or when the peak memory of a large crawl is a problem.**
+
+## rustdoc nightly (#162, 2026-11-20)
+
+- **The nightly lock is one exact build, so every new nightly needs a code, fixture, ADR and DECISIONS change.** `MEASURED_VERSIONS` in `src/dograpper/utils/api_reference/rustdoc.py` pins `1.102.0-nightly (6905905bb `. ⏸ **accepted: ADR-0009 and the maintainer accept only measured builds; fix (a measured range, or a refresh script) when a user mirrors docs.rs and reports pages kept whole.**
+- **The nightly fixture is one struct and exercises only the notable-trait tooltip difference.** `tests/fixtures/rustdoc/nightly/`. ⏸ **accepted: the rest of the nightly markup is covered by the acceptance measurement, not a test; fix when a nightly markup change slips past the measured build.**
+- **`span.tooltip` is skipped in every section, not only in signatures.** `rustdoc.py` skip rule. ⏸ **accepted: the `a.tooltip` rule was already section-wide and no measured page has another tooltip span; fix if a split record loses text to a tooltip span.**

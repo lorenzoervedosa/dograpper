@@ -154,6 +154,18 @@ evidence comes from the acceptance run
   container had 2,545 words; the pack took 1.9 s against 12.1 s without
   `--api-records`.
 
+## Amendment (2026-11-20): rustdoc nightly
+
+The rustdoc version lock is now a list of accepted prefixes: `1.96.` and
+`1.102.0-nightly (6905905bb ` (the build of 2026-11-19). The nightly was
+measured on the same `itertools` 0.14.0 corpus and passed the bar (see the
+[case study](../discovery/rustdoc-api-records-acceptance.md)). Any other
+version, including another nightly, keeps its pages whole with the version in
+the warning: a nightly's markup can change from one day to the next, so the
+lock widens by measured build, not by range. One markup difference was
+handled: the notable-trait mark is a `<span class="tooltip">` on the nightly
+and an `<a class="tooltip">` on 1.96; both are dropped.
+
 ## Amendment (2026-11-19): TypeDoc
 
 The member record p99 bound for TypeDoc

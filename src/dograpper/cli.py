@@ -25,7 +25,7 @@ except PackageNotFoundError:
 @click.option('--verbose', '-v', is_flag=True, default=False,
               help="Detailed (DEBUG) logging of each operation")
 @click.option('--quiet', '-q', is_flag=True, default=False,
-              help="Suppress output except critical errors")
+              help="Silence summaries and info lines; errors stay on stderr")
 @click.option('--config', default=".dograpper.json", show_default=True,
               type=click.Path(),
               help="JSON config file (sections `download` and `pack`)")

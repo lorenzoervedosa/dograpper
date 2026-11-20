@@ -19,6 +19,7 @@ src/dograpper/
 | `tests/test_page_layout.py` | Antes de alterar `lib/page_layout.py`, `commands/_page_layout.py` ou o despacho `--layout` de `commands/pack.py` (nomes, formato do `INDEX.md`, posse de `pages/`, flags rejeitadas) |
 | `tests/test_query_packer.py` | Antes de alterar `lib/query_packer.py` ou a integração `--for-queries` em `commands/pack.py` |
 | `tests/test_pack_error_pages.py` | Antes de alterar `utils/error_page.py` ou a etapa 6a-1 de `commands/pack.py` |
+| `tests/test_pack_redirect_stubs.py` | Antes de alterar `utils/redirect_stub.py`, `utils/html_scan.py` ou a etapa 6a-3 de `commands/pack.py`; a fixture sai de `tests/fixtures/rustdoc_redirect/regenerate.sh` (rustdoc 1.96), nunca editar o HTML à mão |
 | `tests/test_pack_challenge.py` | Antes de alterar `utils/challenge.py` ou a etapa 6a de `commands/pack.py` |
 | `tests/test_pack_scoring.py` | Antes de alterar `lib/pack_scoring.py` ou a etapa 9c de `commands/pack.py` |
 | `tests/test_pack_artifacts.py` | Antes de alterar `lib/pack_artifacts.py` ou as escritas de sidecar (9d, 10b, 10d–10e) de `commands/pack.py` |

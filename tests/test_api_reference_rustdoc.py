@@ -20,6 +20,7 @@ from dograpper.utils.api_reference import NotSplit, split_api_pages, split_page
 from tests.linearity import assert_linear
 
 RUSTDOC = Path(__file__).parent / "fixtures" / "rustdoc" / "html"
+NIGHTLY = Path(__file__).parent / "fixtures" / "rustdoc" / "nightly" / "html"
 
 
 @pytest.fixture(autouse=True)
@@ -276,6 +277,20 @@ def test_notable_trait_marks_are_dropped_from_signatures():
         _records("struct.Boxed.html")["fixture::Boxed::put"].text
 
 
+def test_the_measured_nightly_is_split_and_its_notable_trait_mark_dropped():
+    # rustdoc 1.102.0-nightly writes the mark as <span class="tooltip">, not the <a> of 1.96.
+    page = (NIGHTLY / "nightly_fixture" / "struct.Bag.html").read_text(encoding="utf-8")
+    assert "ⓘ" in page
+    recs = {r.symbol: r for r in split_page(page)}
+    assert set(recs) == {"nightly_fixture::Bag", "nightly_fixture::Bag::drain_all", "nightly_fixture::Bag::len"}
+    assert recs["nightly_fixture::Bag::drain_all"].text == "\n".join([
+        "nightly_fixture::Bag::drain_all",
+        "impl<T> Bag<T>",
+        "pub fn drain_all(self) -> IntoIter<T>",
+        "Takes the items out, one by one.",
+    ])
+
+
 def test_record_url_carries_the_member_anchor():
     recs = _records("struct.Boxed.html")
     page = "https://example.com/fixture/struct.Boxed.html"
@@ -292,7 +307,7 @@ def test_record_url_carries_the_member_anchor():
     ('id="trait-implementations"', 'id="deref-methods-T"', "unknown section deref-methods-T"),
     ('<section id="method.map"', '<section id="method.put"', "duplicate member id"),
     ('data-rustdoc-version="1.96.1', 'data-rustdoc-version="1.98.0-nightly',
-     r"version 1.98.0-nightly \(.*\) \(measured: 1.96.x\)"),
+     r"version 1.98.0-nightly \(.*\) \(measured: 1\.96\.x, 1\.102\.0-nightly 6905905bb\)"),
 ])
 def test_a_page_with_other_markup_is_not_split(old, new, problem):
     page = _page("struct.Boxed.html")

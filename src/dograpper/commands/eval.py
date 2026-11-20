@@ -10,6 +10,7 @@ import json
 import click
 import logging
 
+from ..utils.output import say
 from ..lib.pack_reader import load_chunks
 from ..lib.retrieval import build_index
 from ..lib.golden_qa import generate_golden_qa
@@ -63,14 +64,14 @@ def eval(ctx, chunks_dir, top_k, output, prefix):
     index = build_index(chunks)
     report = evaluate(index, chunks, pairs, k=top_k)
 
-    click.echo(f"Chunks:        {len(chunks)}")
-    click.echo(f"Golden Q&A:    {report.total_questions}")
-    click.echo(f"Hit-rate@{top_k}:   {report.hit_rate:.1%} ({report.hits}/{report.total_questions})")
-    click.echo(f"MRR:           {report.mrr:.3f}")
+    say(f"Chunks:        {len(chunks)}")
+    say(f"Golden Q&A:    {report.total_questions}")
+    say(f"Hit-rate@{top_k}:   {report.hit_rate:.1%} ({report.hits}/{report.total_questions})")
+    say(f"MRR:           {report.mrr:.3f}")
     if report.per_grade:
-        click.echo("By readiness grade:")
+        say("By readiness grade:")
         for grade, stats in report.per_grade.items():
-            click.echo(f"  {grade}: {stats['hit_rate']:.1%} ({stats['hits']}/{stats['questions']})")
+            say(f"  {grade}: {stats['hit_rate']:.1%} ({stats['hits']}/{stats['questions']})")
 
     if output:
         payload = {
@@ -87,4 +88,4 @@ def eval(ctx, chunks_dir, top_k, output, prefix):
         except OSError as e:  # second copy, with commands/drift.py: a third one extracts the shape
             click.echo(f"Error: cannot write {output}: {e.strerror or e}", err=True)
             ctx.exit(1)
-        click.echo(f"Report written to {output}")
+        say(f"Report written to {output}")

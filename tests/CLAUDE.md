@@ -67,6 +67,8 @@ tests/
 ├── test_pack_challenge.py  # Pack: páginas de challenge (Cloudflare) detectadas, avisadas e fora dos chunks; falso positivo em prosa
 ├── test_pack_error_pages.py # Pack: páginas de erro HTTP salvas (404…) puladas, avisadas e contadas nos dois layouts e no dry-run; falsos positivos (página sobre 404, corpo que cita o status, página longa) mantidos
 ├── test_pack_artifacts.py  # Sidecars: cross-refs, delta manifest, snapshot de readiness, contagem de tokens
+├── test_quiet.py           # `-q` silencia o sucesso de pack, download, sync e eval (stdout vazio, mesmo exit code); `pack --dry-run` e erros em stderr ficam; logger em stderr
+├── test_pack_redirect_stubs.py # Pack: redirect stubs (meta refresh + ≤ 40 palavras visíveis, fixture rustdoc 1.96) detectados, avisados, contados e fora dos chunks nos dois layouts e no dry-run; refresh com mais texto mantido; só stubs → falha
 ├── test_pack_reader.py     # load_chunks: campos, linhas malformadas, ordem determinística entre arquivos
 ├── test_pack_scoring.py    # score_chunks: ids, report pages, overrides de texto, tolerância a falha
 ├── test_progress.py       # ProgressReporter: formas lista fixa/total crescente, ETA após 10 URLs, throttle com relógio fake, finish() único, URL redigida, logger INFO

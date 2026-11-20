@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple
 
 from ._fire_engine_profile import run_fire_engine
 from ._httrack_profile import resolve_profile, run_httrack
+from ..utils.output import say
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import normalize_extensions
 from ..lib.llms_txt_parser import fetch_llms_txt
@@ -422,7 +423,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
     os.makedirs(output, exist_ok=True)
     if (not os.path.isabs(manifest_name) and not os.path.exists(manifest_path)
             and os.path.isfile(manifest_name)):
-        click.echo(f"Note: ignoring {manifest_name} in the current directory (the old "
+        say(f"Note: ignoring {manifest_name} in the current directory (the old "
                    f"default location); the manifest is now kept in -o: {manifest_path}",
                    err=True)
     manifest_data = load_manifest(manifest_path)
@@ -456,14 +457,14 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
 
     total_size = sum(f.size_bytes for f in final_manifest.files.values())
 
-    click.echo("Download complete:")
-    click.echo(f"  URL:              {url}")
-    click.echo(f"  Output:           {output}")
-    click.echo(f"  Files downloaded: {files_downloaded}")
-    click.echo(f"  Files skipped:    {files_skipped} (cached)")
-    click.echo(f"  Total size:       {total_size / 1024 / 1024:.1f} MB")
-    click.echo(f"  Manifest:         {manifest_path}")
+    say("Download complete:")
+    say(f"  URL:              {url}")
+    say(f"  Output:           {output}")
+    say(f"  Files downloaded: {files_downloaded}")
+    say(f"  Files skipped:    {files_skipped} (cached)")
+    say(f"  Total size:       {total_size / 1024 / 1024:.1f} MB")
+    say(f"  Manifest:         {manifest_path}")
     if filters.rules:
-        click.echo(f"  Filtered by --filter: {len(filters.excluded)}")
+        say(f"  Filtered by --filter: {len(filters.excluded)}")
     for line in report_lines:
-        click.echo(f"  {line}")
+        say(f"  {line}")
