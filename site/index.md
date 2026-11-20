@@ -68,6 +68,13 @@ commands/sync
 :caption: Reference
 :hidden:
 :maxdepth: 2
+
+reference/global-options
+reference/exit-codes
+reference/configuration
+reference/output
+reference/schema-v1
+reference/github-action
 ```
 
 ```{toctree}

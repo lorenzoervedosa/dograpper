@@ -117,3 +117,12 @@ def test_every_flag_on_the_site_exists():
 
 def test_every_command_has_a_page():
     assert set(cli.commands) == set(_command_pages())
+
+
+@pytest.mark.parametrize("rel", ["docs/schema-v1.md"])
+def test_included_docs_have_no_relative_links(rel):
+    # A file included into the site resolves its links from site/reference/, not from its own directory.
+    text = _read(REPO_ROOT / rel)
+    targets = re.findall(r"\]\(([^)\s]+)", text) + re.findall(r"^\[[^\]]+\]:\s*(\S+)", text, re.MULTILINE)
+    relative = [t for t in targets if not t.startswith(("http://", "https://", "#", "mailto:"))]
+    assert not relative, f"{rel}: relative links break when included: {relative}"

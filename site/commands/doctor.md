@@ -11,7 +11,7 @@ dograpper doctor [options]
 Without flags, prints a status table (`WGET`/`CHROMIUM`, path, version) and
 exits 0 if both are present, 1 if either is missing.
 
-Exit codes: see [Exit codes](https://github.com/lorenzoervedosa/dograpper/blob/main/README.md#exit-codes).
+Exit codes: see [Exit codes](../reference/exit-codes.md#exit-codes).
 
 ## Examples
 

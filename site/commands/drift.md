@@ -4,7 +4,7 @@ Compare two `llm-readiness.json` snapshots (produced by `pack --score`)
 and render a human-readable **context drift report**: chunks added,
 modified (grade/score transitions) and removed, plus the exact
 source-file lists from `delta_manifest.json` when available. Built for
-CI — it powers the [GitHub Action](https://github.com/lorenzoervedosa/dograpper/blob/main/README.md#github-action).
+CI — it powers the [GitHub Action](../reference/github-action.md#github-action).
 
 ```bash
 # Keep the previous snapshot, fully re-pack, then diff

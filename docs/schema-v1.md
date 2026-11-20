@@ -41,7 +41,7 @@ holds `title`, `source`, `url` (when known), the page metadata (`version`,
 `total_chunks` or `context_breadcrumb`, and it carries no heading outline:
 `grep -n '^#' page.md` gives the headings with their line numbers. Page
 metadata fields are flat and optional, and follow `url`
-([ADR-0010](adr/0010-per-page-pack-layout.md)); the chunk layout writes them
+([ADR-0010](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0010-per-page-pack-layout.md)); the chunk layout writes them
 in every header of the page's sub-chunks.
 
 ```
@@ -100,7 +100,7 @@ content.
 With `pack --format jsonl --api-records`, an API reference page that a
 generator adapter recognises is written as one container record followed by
 one member record per documented member, in page order, instead of one
-record per page ([ADR-0009](adr/0009-api-reference-symbol-records.md)). All
+record per page ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md)). All
 records of a page sit in that page's chunk. Pages that are not recognised
 keep the plain record above, without the API fields.
 
