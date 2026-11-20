@@ -108,8 +108,8 @@ def test_detail_headings_are_options_of_their_command():
 def test_every_flag_on_the_site_exists():
     known = _cli_flags() | FOREIGN_FLAGS
     unknown = sorted(
-        (str(p.relative_to(SITE)), flag)
-        for p in _site_pages()
+        (str(p.relative_to(REPO_ROOT)), flag)
+        for p in [*_site_pages(), REPO_ROOT / "docs" / "schema-v1.md"]  # the schema is included on the site
         for flag in _flags_in(_read(p)) - known
     )
     assert not unknown, f"flags on the site that the CLI does not have: {unknown}"
@@ -119,12 +119,24 @@ def test_every_command_has_a_page():
     assert set(cli.commands) == set(_command_pages())
 
 
+def _relative_links(text: str) -> list[str]:
+    text = re.sub(r"`[^`]*`", "", text)  # link syntax inside code spans (possibly wrapped) is not a link
+    targets = re.findall(r"\]\(([^)\s]+)", text) + re.findall(r"^\[[^\]]+\]:\s*(\S+)", text, re.MULTILINE)
+    return [t for t in targets if not t.startswith(("http://", "https://", "#", "mailto:"))]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("x `foo\nbar` and [ADR](docs/adr/0012-x.md)", ["docs/adr/0012-x.md"]),
+    ("use `[a](b.md)` here", []),
+])
+def test_relative_links(text, expected):
+    assert _relative_links(text) == expected
+
+
 @pytest.mark.parametrize("rel", ["docs/schema-v1.md", "CHANGELOG.md"])
 def test_included_docs_have_no_relative_links(rel):
     # A file included into the site resolves its links from site/reference/, not from its own directory.
-    text = re.sub(r"`[^`\n]*`", "", _read(REPO_ROOT / rel))  # link syntax inside code spans is not a link
-    targets = re.findall(r"\]\(([^)\s]+)", text) + re.findall(r"^\[[^\]]+\]:\s*(\S+)", text, re.MULTILINE)
-    relative = [t for t in targets if not t.startswith(("http://", "https://", "#", "mailto:"))]
+    relative = _relative_links(_read(REPO_ROOT / rel))
     assert not relative, f"{rel}: relative links break when included: {relative}"
 
 
@@ -133,6 +145,6 @@ def test_site_does_not_link_the_readme():
     linking = sorted(
         str(p.relative_to(SITE))
         for p in _site_pages()
-        if re.search(r"\]\([^)\s]*README\.md", _read(p))
+        if re.search(r"\]\([^)\s]*README\.md|^\[[^\]]+\]:\s*\S*README\.md", _read(p), re.MULTILINE)
     )
     assert not linking, f"pages linking the README: {linking}"
