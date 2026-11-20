@@ -483,9 +483,13 @@ def test_real_client_hint_given_as_a_header_survives_an_explicit_user_agent(raw_
     assert hints == ['sec-ch-ua-platform: "Linux"']
 
 
-def test_real_download_sends_the_user_agent_given_on_the_command_line(server, tmp_path, caplog):
+@pytest.mark.parametrize("given", [["--user-agent", FIREFOX_UA],
+                                   ["--header", f"User-Agent: {FIREFOX_UA}"]])
+def test_real_download_sends_the_user_agent_given_on_the_command_line(
+        server, tmp_path, caplog, given):
     """Every request of the run, robots.txt included, carries the UA and no client hint;
-    the warning that the TLS fingerprint stays the profile's comes once."""
+    the warning that the TLS fingerprint stays the profile's comes once. A User-Agent
+    given with --header follows exactly the same rule (#136)."""
     pytest.importorskip("curl_cffi")
     base, script, _ = server
     _docs_site(script)
@@ -496,7 +500,7 @@ def test_real_download_sends_the_user_agent_given_on_the_command_line(server, tm
     with caplog.at_level(logging.WARNING):
         result = CliRunner().invoke(
             cli, ["download", f"{base}/docs/", "-o", str(tmp_path / "m"), "--downloader",
-                  "fire-engine", "--user-agent", FIREFOX_UA, *FAST])
+                  "fire-engine", *given, *FAST])
 
     assert result.exit_code == 0, result.output
     assert [h["User-Agent"] for h in log] == [FIREFOX_UA] * 3
