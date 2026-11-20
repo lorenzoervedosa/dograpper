@@ -559,7 +559,8 @@ HTTrack `-%X`, `curl -H` and `wget --header` do: a credential given with
 without case) takes that header's place in the order, with your value and your
 spelling of the name, which shows on HTTP/1.1 only (HTTP/2 lowercases every
 name); any other header is added after the profile's. `--header 'User-Agent:
-X'` is exactly `--user-agent X`; giving both is a usage error (exit 2), and so
+X'` is exactly `--user-agent X`, so it goes out spelled `User-Agent` whatever
+the spelling you gave; giving both is a usage error (exit 2), and so
 is one name on two `--header` lines (no line silently wins). A line
 that is not `Name: value`, a name that is not an RFC 9110 token, a value with
 CR, LF or NUL, and the names `Host`, `Content-Length`, `Transfer-Encoding` and
