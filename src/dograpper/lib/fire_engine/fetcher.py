@@ -131,12 +131,12 @@ class CurlCffiFetcher(Fetcher):
         netloc = wire_host(parts)  # the port included; ValueError on a host the checks reject
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
         # each layer replaces a same-named header of the one before; the user's --header last
-        req = merge_headers(_TARGET_HEADERS.get(self._impersonate, {}).items(),
-                            [(k, v) for k, v in headers if k.lower() in _FORWARDED])
+        pairs = merge_headers(_TARGET_HEADERS.get(self._impersonate, {}).items(),
+                              [(k, v) for k, v in headers if k.lower() in _FORWARDED])
         if self._user_agent:  # a None value makes curl_cffi drop the profile's line
-            req = merge_headers(req, [("User-Agent", self._user_agent),
-                                      *((hint, None) for hint in _CLIENT_HINTS)])
-        req_headers = dict(merge_headers(req, self.policy.headers))
+            pairs = merge_headers(pairs, [("User-Agent", self._user_agent),
+                                          *((hint, None) for hint in _CLIENT_HINTS)])
+        req_headers = dict(merge_headers(pairs, self.policy.headers))
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
         session = self._session()  # outside the try: a missing curl_cffi is no transport error

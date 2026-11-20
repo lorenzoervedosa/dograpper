@@ -91,7 +91,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  disable_security_limits: bool = False, parse_scripts: bool = True,
                  extended_parsing: bool = True, cache: int | None = None,
                  updatehack: bool = False, do_not_recatch: bool = False,
-                 changes: bool = False, headers=()) -> HttrackPolicy:
+                 changes: bool = False,
+                 headers: tuple[tuple[str, str], ...] = ()) -> HttrackPolicy:
     # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
     for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
                         ("max_bandwidth", max_bandwidth), ("timeout", timeout),
