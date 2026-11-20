@@ -43,6 +43,14 @@ def _flag(name: str) -> str:
     return "--" + name.replace('_', '-')
 
 
+FROM_CONFIG = " (from .dograpper.json)"
+
+
+def config_note(from_config: bool) -> str:
+    """The suffix of a usage error about a value read from .dograpper.json."""
+    return FROM_CONFIG if from_config else ""
+
+
 def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     """Return (policy_kw, from_config) for the profile options. A value not set on the
     command line goes through its option's click type (ranges, booleans), so config
@@ -55,7 +63,7 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
         value = merged_params[param.name]
         if param.multiple:  # --header: a CLI tuple, or a JSON list of strings
             if not isinstance(value, (list, tuple)) or not all(isinstance(v, str) for v in value):
-                raise click.UsageError(f"{_flag(param.name)} (from .dograpper.json) must be a "
+                raise click.UsageError(f"{_flag(param.name)}{FROM_CONFIG} must be a "
                                        "list of 'Name: value' strings")
             value = tuple(value)
         elif param.name in from_config and not (value is None and param.default is None):
@@ -65,13 +73,13 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
             except click.BadParameter as e:
                 raise click.BadParameter(
                     e.message, ctx,
-                    param_hint=f"'{_flag(param.name)}' (from .dograpper.json)") from None
+                    param_hint=f"'{_flag(param.name)}'{FROM_CONFIG}") from None
         values[param.name] = value
     if downloader == 'wget':
         for param in params:
             if param.name not in from_config or values[param.name] != param.default:
                 raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack or fire-engine")
-    header_ua, headers = _user_headers(values.pop('header'), 'header' in from_config)
+    header_ua, headers = _user_headers(values.pop('header'), config_note('header' in from_config))
     values['user_agent'] = single_user_agent({"--user-agent": values['user_agent'],
                                               "--header 'User-Agent: …'": header_ua})
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
@@ -79,10 +87,10 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     return policy_kw, from_config
 
 
-def _user_headers(lines, from_config: bool):
+def _user_headers(lines, src: str):
     """The --header lines, each checked by parse_header (the shared wire guard), as
-    (the User-Agent among them or None, the other (name, value) pairs)."""
-    src = " (from .dograpper.json)" if from_config else ""
+    (the User-Agent among them or None, the other (name, value) pairs); `src` is the
+    config_note of the lines."""
     pairs = []
     for position, line in enumerate(lines, 1):
         try:
@@ -106,7 +114,7 @@ def single_user_agent(sources: Dict[str, str | None]) -> str | None:
 
 def _build_policy(delay, policy_kw, from_config):
     """build_policy with failures reported in CLI terms; config-sourced values say so."""
-    src = lambda k: " (from .dograpper.json)" if k in from_config else ""
+    src = lambda k: config_note(k in from_config)
     # --delay is shared with wget, so resolve_profile does not convert it
     if isinstance(delay, bool) or not isinstance(delay, (int, float)):
         raise click.UsageError(f"--delay must be a number, got {delay!r}{src('delay')}")

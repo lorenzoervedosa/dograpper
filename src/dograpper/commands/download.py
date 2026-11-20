@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List, Tuple
 
 from ._fire_engine_profile import run_fire_engine
-from ._httrack_profile import resolve_profile, run_httrack
+from ._httrack_profile import config_note, resolve_profile, run_httrack
 from ..utils.output import say
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import normalize_extensions
@@ -70,7 +70,7 @@ def _compute_stats(
 
 def _url_filters(ctx: click.Context, rules) -> UrlFilters:
     """The --filter rules (CLI tuple or JSON list) as UrlFilters; a bad value is a usage error."""
-    src = "" if is_explicit(ctx, 'filter') else " (from .dograpper.json)"
+    src = config_note(not is_explicit(ctx, 'filter'))
     if not isinstance(rules, (list, tuple)) or not all(isinstance(r, str) for r in rules):
         raise click.UsageError(f"--filter{src} must be a list of rules, got {rules!r}")
     try:
