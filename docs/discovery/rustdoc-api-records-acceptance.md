@@ -159,15 +159,16 @@ records (84 container, 316 member), 127 kept whole.
 
 | Criterion | Bar | Result |
 |---|---|---|
-| Lookups in the top 5 | ≥ 80% of ~20 | 22 of 22 (rank 1 in 18, 2 in 3, 3 in 1); the 22 queries of the table above |
-| Signatures with type parameters | 100% | 254 of 254 kept verbatim (inherent and trait members; impl-of-trait members are dropped by design) |
+| Lookups in the top 5 | ≥ 80% of ~20 | 22 of 22 hit the declaring member, with the same ranks as the table above (17 at rank 1, 2 at rank 2, 1 at rank 3, `kmerge_by` at 4, `merge_join_by` at 5; 20 in the top 3) |
+| Signatures with type parameters | 100% | 254 of 254 kept verbatim (a stricter count than the 263 above: only headers with type parameters in the sections the adapter keeps, trait implementations excluded) |
 | Member records | p99 ≤ 300; max ≤ 3,000 | p99 226 words, max 419 |
 | Container records | max ≤ 5,000 | max 2,589 |
-| Pack time | ≤ 2× baseline | 2.3–4.5 s (median 3.0 s) vs 12.7–18.5 s (median 14.4 s) |
+| Pack time | ≤ 2× baseline | 2.3–4.5 s (median 3.0 s) vs 12.7–18.5 s (median 14.4 s), 3 runs each |
 
 - Markup difference: the notable-trait mark `ⓘ` is `<span class="tooltip">`
   on the nightly (`<a class="tooltip">` on 1.96). The adapter left it in the
   signature (146 records) until it dropped both.
+- The container bound above (≤ 5,000) held here too: max 2,589.
 - Total output 41,460 words (451,931 for the baseline).
 - The bar holds, so the adapter accepts the prefix
   `1.102.0-nightly (6905905bb `. The fixture for the test is

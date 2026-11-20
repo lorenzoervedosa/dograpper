@@ -1100,8 +1100,8 @@ dograpper serve ./pack   # search_chunks now ranks member records
   anchor is the object's HTML id (`#packaging.version.parse`). A page with a
   `:no-index:` object or an object type outside those keeps one record.
 - **rustdoc**: rustdoc 1.96 pages and the nightly build `1.102.0-nightly
-  (6905905bb 2026-11-19)` (`<meta name="generator" content="rustdoc">` and
-  `data-rustdoc-version="1.96.…"`; the page kind comes from
+  (6905905bb 2026-11-19)` (`<meta name="generator" content="rustdoc">` and a measured
+  `data-rustdoc-version`; the page kind comes from
   `<body class="rustdoc struct">`). rustdoc writes one page per symbol:
   - A struct, enum, union, trait or type alias page is a container record:
     the declaration, the doc comment, the member names, then the `impl`
