@@ -462,15 +462,17 @@ def test_real_user_headers_replace_in_place_and_reach_robots_txt(raw_server):
     base, heads = raw_server(OK_REPLY)
     real_fetcher().get(base + "/p", kind="navigate")
     profile = wire_names(heads.pop())
-    policy = build_policy(retries=0, headers=(("accept-language", "pt-BR"), ("X-Test", "1")))
+    # chrome writes accept-language in lowercase: the user's spelling has to show
+    policy = build_policy(retries=0, headers=(("Accept-Language", "pt-BR"), ("X-Test", "1")))
     f = CurlCffiFetcher(policy, sleep=lambda _s: None)
 
     f.robots_for(base)
     f.get(base + "/p", kind="navigate")
 
     robots, page = heads
-    assert "accept-language: pt-BR" in wire_lines(page) and "X-Test: 1" in wire_lines(robots)
-    assert wire_names(page) == profile + ["X-Test"]
+    assert "Accept-Language: pt-BR" in wire_lines(page) and "X-Test: 1" in wire_lines(robots)
+    assert wire_names(page) == [
+        "Accept-Language" if n == "accept-language" else n for n in profile] + ["X-Test"]
 
 
 def test_real_client_hint_given_as_a_header_survives_an_explicit_user_agent(raw_server):
