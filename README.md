@@ -816,6 +816,7 @@ Operation order (each stage reads the output of the previous one):
 list files → apply .docsignore → skip bot-challenge pages
            → skip saved HTTP error pages
            → skip MediaWiki redirect aliases of packed pages
+           → skip redirect stubs
            → --api-records? split API reference pages into records
              (those pages skip extraction and dedup)
            → --no-extract? yes: full HTML / no: extract
@@ -1688,7 +1689,7 @@ Stop the server with Ctrl+C.
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |
 | 2 | pack --api-records | `--format` other than `jsonl`, or `--bundle notebooklm` | use `--format jsonl`; drop the bundle |
-| 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge or saved error page; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run` | fix the input or the flags |
+| 1 | pack | no input file, or every file excluded by the ignore rules or skipped as a bot-challenge page, saved error page or redirect stub; `--for-queries` with `--strategy semantic` or with an unreadable or empty file; `--report` with `--dry-run` | fix the input or the flags |
 | 1 | download | the manifest cannot be written | fix permissions or free space in `--output`; the mirror itself is complete |
 | 1 | pack --delta | `pack_state.json` cannot be written | fix permissions or free space in `--output`; the chunks are complete, the next `--delta` run packs in full |
 | 2 | pack | `--dedup-threshold` outside 0 to 10, or an unknown `--token-encoding` (command line or config) | use a value in range; `cl100k`, `o200k`, `p50k` or a full tiktoken name |
@@ -1923,6 +1924,7 @@ Conditional extra lines (per enabled flag):
 | bot-challenge pages found | `Challenge pages: N` |
 | saved HTTP error pages found | `Error pages: N` |
 | MediaWiki redirect aliases of packed pages found | `Redirect aliases: N` |
+| redirect stubs found | `Redirect stubs: N` |
 | `--for-queries` | `Query packing: ...` |
 | `--context-header` or `--layout page` | `Source URLs: N from manifest, M from page markers, K without`, `Rejected markers: ...`, files without a URL |
 | `--layout page` | `Pages written: N` and `Index: <path>` replace `Chunks generated` and `Words per chunk`; no chunk-limit warnings |
@@ -1940,6 +1942,13 @@ Warnings appear when:
   stderr and leaves them out, in both layouts and in `--dry-run`; the pack
   summary counts them (`Error pages: N`, and in `Files excluded`); if every file is one, `pack` fails. A page about HTTP
   errors or one that merely mentions the status is not affected.
+- Input `.html`/`.htm` files are redirect stubs: a `<meta http-equiv="refresh">`
+  with a URL and at most 40 visible words (scripts and styles excluded), such as
+  the pages rustdoc writes for every re-export. `pack` lists them once on stderr
+  and leaves them out, in both layouts and in `--dry-run`; the summary counts
+  them (`Redirect stubs: N`, and in `Files excluded`), apart from the MediaWiki
+  `Redirect aliases`; if every file is one, `pack` fails. A page with a refresh
+  and more text is packed. Links to a skipped stub are not rewritten.
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
   into a chunk, overshooting the stated limit).
 - Total chunks exceed `--max-chunks` (nothing is discarded — every

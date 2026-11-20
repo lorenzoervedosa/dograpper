@@ -96,6 +96,14 @@ Entry format, grouped under one heading per issue or PR:
   when curl_cffi exposes it, or when a real crawl is slowed by servers that
   stall mid-body.**
 
+- **`commands/pack.py` is 884 lines, above the 800-line budget of the size
+  sentinel.** The `--quiet` helper swap (#139) and the redirect-stub step 6a-3
+  (#163) added to a file that was already at 868. The skip steps 6a to 6a-3
+  repeat one block (find, warn with the listing, filter, fail when empty).
+  ⏸ **accepted: moving the four steps into one module is a refactor of
+  stages that other lanes' tests pin. Extract them when the next skip stage
+  (a fifth) is added, or when `pack.py` crosses 900 lines.**
+
 ## httrack browser pass, in-memory stores (#160, #167, 2026-11-20)
 
 - **The engine's response store also keeps non-HTML bodies.** `RunResponses.keep` (`src/dograpper/lib/httrack/crawl.py`) stores every 2xx body, so images, PDFs or stylesheets of a seeded list can fill the 128 MiB cap before the pages the browser pass needs. ⏸ **accepted: the pages of a documentation site are small and a non-HTML answer is reused too (saved as fetched); fix by keeping only `text/html` when a run is seen to hit the cap, or when memory use of a real crawl matters.**

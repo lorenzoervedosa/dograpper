@@ -10,6 +10,7 @@ from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import exclude_subtree, filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
 from ..utils.error_page import find_error_page_files
+from ..utils.redirect_stub import find_redirect_stub_files
 from ..lib.chunker import chunk_by_size, chunk_by_semantic, write_chunks, chunk_id, is_html, read_source_text
 from ..utils.word_counter import count_words
 
@@ -396,6 +397,18 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                    f"(the page they redirect to is packed):\n{listed}", err=True)
         alias_set = set(alias_paths)
         filtered_paths = [p for p in filtered_paths if p not in alias_set]
+
+    # 6a-3. Redirect stubs (meta refresh + a line of text, e.g. rustdoc's re-export pages): no content of their own (#163)
+    stub_paths = find_redirect_stub_files(filtered_paths)
+    if stub_paths:
+        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
+                           for p in stub_paths)
+        say(f"Warning: {len(stub_paths)} redirect stub page(s) skipped "
+            f"(they only redirect to another page):\n{listed}", err=True)
+        stub_set = set(stub_paths)
+        filtered_paths = [p for p in filtered_paths if p not in stub_set]
+        if not filtered_paths:
+            raise click.ClickException("Every input file is a redirect stub; nothing to pack.")
 
     # 6b. Delta gate (opt-in, after filter, before dedup)
     #
@@ -784,6 +797,8 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         say(f"  Error pages:     {len(error_paths)} (skipped, counted in Files excluded)")
     if alias_paths:
         say(f"  Redirect aliases: {len(alias_paths)} (skipped, counted in Files excluded)")
+    if stub_paths:
+        say(f"  Redirect stubs: {len(stub_paths)} (skipped, counted in Files excluded)")
     if page_layout:
         say(f"  Pages written:   {generated_chunk_count}")
         say(f"  Index:           {index_path}")

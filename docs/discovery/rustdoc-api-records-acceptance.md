@@ -147,4 +147,4 @@ appear verbatim in their member record.
 - A trait implementation member with a doc comment of its own (not the
   trait's) is dropped with the others.
 - Redirect stubs are packed as one record each and can take top-5 slots for
-  a name lookup (see above); `pack` does not recognise them yet.
+  a name lookup (see above); `pack` now skips them as redirect stubs (#163).

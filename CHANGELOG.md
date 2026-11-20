@@ -331,6 +331,10 @@ stays `0.0.0.dev0`.
   `download`, `sync` and `eval` (errors stay on stderr, `pack --dry-run` keeps
   its report; `eval -o` keeps the report), and log lines go to stderr instead
   of stdout. ([#139])
+- `pack` skips redirect stubs (a meta refresh with a URL and at most 40 visible
+  words, such as rustdoc's re-export pages): one stderr warning per page, a
+  `Redirect stubs: N` summary line, counted in `Files excluded`, in both layouts
+  and under `--dry-run`; an input of stubs only fails. ([#163])
 
 ### Removed
 
@@ -589,3 +593,4 @@ stays `0.0.0.dev0`.
 [#167]: https://github.com/lorenzoervedosa/dograpper/issues/167
 [#160]: https://github.com/lorenzoervedosa/dograpper/issues/160
 [#139]: https://github.com/lorenzoervedosa/dograpper/issues/139
+[#163]: https://github.com/lorenzoervedosa/dograpper/issues/163
