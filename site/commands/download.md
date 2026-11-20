@@ -322,7 +322,7 @@ again: a missing one is created empty, and its URL is listed under `Errors` as
 stylesheet is fetched again in full (HTTrack restores it from the body its
 cache holds).
 
-`[httrack, fire-engine]` flags (an error under `--downloader wget` when given on the
+`[httrack, fire-engine]` flags (see [Options](#options)) (an error under `--downloader wget` when given on the
 command line, or set away from its default in `.dograpper.json`). Their
 `.dograpper.json` keys get the same type and range checks as the flags, so
 `"no-robots": "false"` means false and `"retries": 1.5` is rejected.
@@ -429,7 +429,7 @@ the `wget` cascade's Playwright:
 `--downloader fire-engine` runs the `httrack` crawl with its wire client
 replaced by `curl_cffi`, which sends a real browser's TLS/HTTP-2 fingerprint so
 a WAF that checks the handshake (common in front of public docs) accepts the
-request. All `[httrack, fire-engine]` flags above apply, plus `--proxy` and `--impersonate`.
+request. All `[httrack, fire-engine]` flags in [Options](#options) apply, plus `--proxy` and `--impersonate`.
 
 Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
 'dograpper[fire-engine]'`), which installs `curl_cffi` plus the `br` / `zstd`
@@ -483,7 +483,7 @@ The manifest lives in the output directory: a relative `--manifest`
 resolves against `-o`, an absolute one is used as is, so a re-run from any
 directory finds it and two mirrors never share one. It never lists itself,
 `delta_manifest.json`, `pack_state.json` or `hts-changes.json`. `pack` reads it the same way,
-relative to `INPUT_DIR` (its `--manifest` row says how a subdirectory of a
+relative to `INPUT_DIR` (its [`--manifest`](pack.md#--manifest) row says how a subdirectory of a
 mirror finds the mirror's manifest). Up to 0.4.0 the default was relative to the current
 directory; a manifest left there is not read (it may belong to another
 mirror) and `download` says so in one line, then writes the new one in `-o`.
