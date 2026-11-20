@@ -52,6 +52,7 @@ URL → Mirror → Extract → Dedup → Score → Chunk → Export (MD/JSONL)
 :hidden:
 :maxdepth: 2
 
+commands/download
 commands/pack
 ```
 
