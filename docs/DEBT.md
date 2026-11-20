@@ -96,13 +96,12 @@ Entry format, grouped under one heading per issue or PR:
   when curl_cffi exposes it, or when a real crawl is slowed by servers that
   stall mid-body.**
 
-- **`commands/pack.py` is 884 lines, above the 800-line budget of the size
-  sentinel.** The `--quiet` helper swap (#139) and the redirect-stub step 6a-3
-  (#163) added to a file that was already at 868. The skip steps 6a to 6a-3
-  repeat one block (find, warn with the listing, filter, fail when empty).
-  ⏸ **accepted: moving the four steps into one module is a refactor of
-  stages that other lanes' tests pin. Extract them when the next skip stage
-  (a fifth) is added, or when `pack.py` crosses 900 lines.**
+- **`commands/pack.py` is 869 lines, above the 800-line budget of the size
+  sentinel** (868 before the `--quiet` and redirect-stub work; the stub stage
+  now costs one call to `commands/_skip_pages.py`).
+  ⏸ **accepted: the file was already over budget and the new code is a call.
+  Extract the later stages (dedup, scoring, summary) into their own modules
+  when the next stage lands in `pack.py`.**
 
 ## httrack browser pass, in-memory stores (#160, #167, 2026-11-20)
 

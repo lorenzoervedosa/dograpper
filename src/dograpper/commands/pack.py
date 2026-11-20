@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..utils.output import say
+from ._skip_pages import skip_pages
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import exclude_subtree, filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
@@ -364,51 +365,35 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
     # 6a. Bot-challenge interstitials saved instead of the real page: no content, so keep them out
     challenge_paths = find_challenge_files(filtered_paths)
-    if challenge_paths:
-        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
-                           for p in challenge_paths)
-        say(f"Warning: {len(challenge_paths)} bot-challenge page(s) skipped "
-                   f"(the source is missing their real content):\n{listed}", err=True)
-        challenge_set = set(challenge_paths)
-        filtered_paths = [p for p in filtered_paths if p not in challenge_set]
-        if not filtered_paths:
-            raise click.ClickException("Every input file is a bot-challenge page; nothing to pack.")
+    filtered_paths = skip_pages(
+        filtered_paths, challenge_paths, input_dir,
+        f"Warning: {len(challenge_paths)} bot-challenge page(s) skipped "
+        "(the source is missing their real content)",
+        "Every input file is a bot-challenge page; nothing to pack.")
 
     # 6a-1. Saved HTTP error pages (404 Not Found...): same handling as the challenge pages above (#121)
     error_paths = find_error_page_files(filtered_paths)
-    if error_paths:
-        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
-                           for p in error_paths)
-        say(f"Warning: {len(error_paths)} saved HTTP error page(s) skipped "
-                   f"(the source is missing their real content):\n{listed}", err=True)
-        error_set = set(error_paths)
-        filtered_paths = [p for p in filtered_paths if p not in error_set]
-        if not filtered_paths:
-            raise click.ClickException("Every input file is a saved HTTP error page; nothing to pack.")
+    filtered_paths = skip_pages(
+        filtered_paths, error_paths, input_dir,
+        f"Warning: {len(error_paths)} saved HTTP error page(s) skipped "
+        "(the source is missing their real content)",
+        "Every input file is a saved HTTP error page; nothing to pack.")
 
     # 6a-2. MediaWiki redirect aliases: the content of a page that is packed too, under another name (#88)
     from ..utils.mediawiki import find_redirect_aliases
     alias_paths = find_redirect_aliases(filtered_paths)
-    if alias_paths:
-        # Listed like the challenge pages above.
-        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
-                           for p in alias_paths)
-        say(f"Note: {len(alias_paths)} redirect alias page(s) skipped "
-                   f"(the page they redirect to is packed):\n{listed}", err=True)
-        alias_set = set(alias_paths)
-        filtered_paths = [p for p in filtered_paths if p not in alias_set]
+    filtered_paths = skip_pages(
+        filtered_paths, alias_paths, input_dir,
+        f"Note: {len(alias_paths)} redirect alias page(s) skipped "
+        "(the page they redirect to is packed)")
 
     # 6a-3. Redirect stubs (meta refresh + a line of text, e.g. rustdoc's re-export pages): no content of their own (#163)
     stub_paths = find_redirect_stub_files(filtered_paths)
-    if stub_paths:
-        listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
-                           for p in stub_paths)
-        say(f"Warning: {len(stub_paths)} redirect stub page(s) skipped "
-            f"(they only redirect to another page):\n{listed}", err=True)
-        stub_set = set(stub_paths)
-        filtered_paths = [p for p in filtered_paths if p not in stub_set]
-        if not filtered_paths:
-            raise click.ClickException("Every input file is a redirect stub; nothing to pack.")
+    filtered_paths = skip_pages(
+        filtered_paths, stub_paths, input_dir,
+        f"Warning: {len(stub_paths)} redirect stub page(s) skipped "
+        "(they only redirect to another page)",
+        "Every input file is a redirect stub; nothing to pack.")
 
     # 6b. Delta gate (opt-in, after filter, before dedup)
     #
