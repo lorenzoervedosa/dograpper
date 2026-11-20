@@ -173,47 +173,51 @@ $(document).ready(function() { init_codefold(0); });
 <div class="line"><a id="l00152" name="l00152"></a><span class="lineno">  152</span> </div>
 <div class="line"><a id="l00159" name="l00159"></a><span class="lineno"><a class="line" href="classshapes_1_1Box.html#ab2891378a0b4fbbe5df3843bcd81c3b8">  159</a></span>    <a class="code hl_class" href="classshapes_1_1Box.html">friend</a> <span class="keywordtype">bool</span> <a class="code hl_class" href="classshapes_1_1Box.html">operator</a>!=(<a class="code hl_class" href="classshapes_1_1Box.html">const</a> <a class="code hl_class" href="classshapes_1_1Box.html">Box</a>&amp; <a class="code hl_class" href="classshapes_1_1Box.html">a</a>, <a class="code hl_class" href="classshapes_1_1Box.html">const</a> <a class="code hl_class" href="classshapes_1_1Box.html">Box</a>&amp; <a class="code hl_class" href="classshapes_1_1Box.html">b</a>) { <span class="keywordflow">return</span> !(<a class="code hl_class" href="classshapes_1_1Box.html">a</a> == <a class="code hl_function" href="classshapes_1_1Box.html#af1c1de9aff590ce1dc357fe009f799bd">b</a>); }</div>
 <div class="line"><a id="l00160" name="l00160"></a><span class="lineno">  160</span> </div>
-<div class="line"><a id="l00162" name="l00162"></a><span class="lineno"><a class="line" href="classshapes_1_1Box.html#a322a55234360c720cf6ad195b17d0f37">  162</a></span>    <span class="keyword">static</span> <span class="keyword">constexpr</span> std::size_t <a class="code hl_variable" href="classshapes_1_1Box.html#a322a55234360c720cf6ad195b17d0f37">limit</a> = <a class="code hl_function" href="classshapes_1_1Box.html#af1c1de9aff590ce1dc357fe009f799bd">N</a>;</div>
+<div class="line"><a id="l00162" name="l00162"></a><span class="lineno"><a class="line" href="classshapes_1_1Box.html#a898342fe8db565e495e828f6cbc932f8">  162</a></span>    <span class="keyword">friend</span> <span class="keyword">class </span><a class="code hl_class" href="classshapes_1_1Square.html">Square</a>;</div>
 <div class="line"><a id="l00163" name="l00163"></a><span class="lineno">  163</span> </div>
-<div class="line"><a id="l00169" name="l00169"></a><span class="lineno">  169</span>    <span class="keyword">template</span> &lt;<span class="keyword">typename</span> U&gt;</div>
-<div class="foldopen" id="foldopen00170" data-start="{" data-end="};">
-<div class="line"><a id="l00170" name="l00170"></a><span class="lineno"><a class="line" href="classshapes_1_1Box_1_1View.html">  170</a></span>    <span class="keyword">class </span><a class="code hl_class" href="classshapes_1_1Box_1_1View.html">View</a> {</div>
-<div class="line"><a id="l00171" name="l00171"></a><span class="lineno">  171</span>    <span class="keyword">public</span>:</div>
-<div class="line"><a id="l00173" name="l00173"></a><span class="lineno"><a class="line" href="classshapes_1_1Box_1_1View.html#a0885cb7ebc0e7d80bd440afe084248f3">  173</a></span>        <a class="code hl_class" href="classshapes_1_1Box.html">U</a> <a class="code hl_function" href="classshapes_1_1Box_1_1View.html#a0885cb7ebc0e7d80bd440afe084248f3">at</a>(std::size_t <a class="code hl_class" href="classshapes_1_1Box.html">index</a>) <span class="keyword">const</span>;</div>
-<div class="line"><a id="l00174" name="l00174"></a><span class="lineno">  174</span>    };</div>
+<div class="line"><a id="l00165" name="l00165"></a><span class="lineno"><a class="line" href="classshapes_1_1Box.html#a322a55234360c720cf6ad195b17d0f37">  165</a></span>    <span class="keyword">static</span> <span class="keyword">constexpr</span> std::size_t <a class="code hl_variable" href="classshapes_1_1Box.html#a322a55234360c720cf6ad195b17d0f37">limit</a> = <a class="code hl_function" href="classshapes_1_1Box.html#af1c1de9aff590ce1dc357fe009f799bd">N</a>;</div>
+<div class="line"><a id="l00166" name="l00166"></a><span class="lineno">  166</span> </div>
+<div class="line"><a id="l00172" name="l00172"></a><span class="lineno">  172</span>    <span class="keyword">template</span> &lt;<span class="keyword">typename</span> U&gt;</div>
+<div class="foldopen" id="foldopen00173" data-start="{" data-end="};">
+<div class="line"><a id="l00173" name="l00173"></a><span class="lineno"><a class="line" href="classshapes_1_1Box_1_1View.html">  173</a></span>    <span class="keyword">class </span><a class="code hl_class" href="classshapes_1_1Box_1_1View.html">View</a> {</div>
+<div class="line"><a id="l00174" name="l00174"></a><span class="lineno">  174</span>    <span class="keyword">public</span>:</div>
+<div class="line"><a id="l00176" name="l00176"></a><span class="lineno"><a class="line" href="classshapes_1_1Box_1_1View.html#a0885cb7ebc0e7d80bd440afe084248f3">  176</a></span>        <a class="code hl_class" href="classshapes_1_1Box.html">U</a> <a class="code hl_function" href="classshapes_1_1Box_1_1View.html#a0885cb7ebc0e7d80bd440afe084248f3">at</a>(std::size_t <a class="code hl_class" href="classshapes_1_1Box.html">index</a>) <span class="keyword">const</span>;</div>
+<div class="line"><a id="l00177" name="l00177"></a><span class="lineno">  177</span>    };</div>
 </div>
-<div class="line"><a id="l00175" name="l00175"></a><span class="lineno">  175</span> </div>
-<div class="line"><a id="l00176" name="l00176"></a><span class="lineno">  176</span><span class="keyword">private</span>:</div>
-<div class="line"><a id="l00177" name="l00177"></a><span class="lineno">  177</span>    std::vector&lt;T&gt; items_;</div>
-<div class="line"><a id="l00178" name="l00178"></a><span class="lineno">  178</span>};</div>
+<div class="line"><a id="l00178" name="l00178"></a><span class="lineno">  178</span> </div>
+<div class="line"><a id="l00179" name="l00179"></a><span class="lineno">  179</span><span class="keyword">private</span>:</div>
+<div class="line"><a id="l00180" name="l00180"></a><span class="lineno">  180</span>    std::vector&lt;T&gt; items_;</div>
+<div class="line"><a id="l00181" name="l00181"></a><span class="lineno">  181</span>};</div>
 </div>
-<div class="line"><a id="l00179" name="l00179"></a><span class="lineno">  179</span> </div>
-<div class="line"><a id="l00181" name="l00181"></a><span class="lineno"><a class="line" href="namespaceshapes.html#a5309b00b6c4845b667783a1a0fabc2c6">  181</a></span><span class="keyword">using </span><a class="code hl_class" href="classshapes_1_1Box.html">IntBox</a> = <a class="code hl_class" href="classshapes_1_1Box.html">Box&lt;int&gt;</a>;</div>
 <div class="line"><a id="l00182" name="l00182"></a><span class="lineno">  182</span> </div>
-<div class="line"><a id="l00184" name="l00184"></a><span class="lineno">  184</span><span class="keyword">extern</span> <span class="keywordtype">int</span> <a class="code hl_variable" href="namespaceshapes.html#a150e1ce8f27bb49ade0a44a63d388311">boxes_made</a>;</div>
+<div class="line"><a id="l00184" name="l00184"></a><span class="lineno"><a class="line" href="namespaceshapes.html#a5309b00b6c4845b667783a1a0fabc2c6">  184</a></span><span class="keyword">using </span><a class="code hl_class" href="classshapes_1_1Box.html">IntBox</a> = <a class="code hl_class" href="classshapes_1_1Box.html">Box&lt;int&gt;</a>;</div>
 <div class="line"><a id="l00185" name="l00185"></a><span class="lineno">  185</span> </div>
-<div class="line"><a id="l00193" name="l00193"></a><span class="lineno">  193</span><span class="keyword">template</span> &lt;<span class="keyword">typename</span> T&gt;</div>
-<div class="line"><a id="l00194" name="l00194"></a><span class="lineno"><a class="line" href="namespaceshapes.html#a73c3d72c17606023e8f711295dd9e72e">  194</a></span><a class="code hl_class" href="classshapes_1_1Box.html">Box&lt;T&gt;</a> <a class="code hl_function" href="namespaceshapes.html#a73c3d72c17606023e8f711295dd9e72e">make_box</a>(<a class="code hl_class" href="classshapes_1_1Box.html">T</a> <a class="code hl_class" href="classshapes_1_1Box.html">item</a>);</div>
-<div class="line"><a id="l00195" name="l00195"></a><span class="lineno">  195</span> </div>
-<div class="line"><a id="l00196" name="l00196"></a><span class="lineno">  196</span>}  <span class="comment">// namespace shapes</span></div>
-</div>
-<div class="line"><a id="l00197" name="l00197"></a><span class="lineno">  197</span> </div>
-<div class="line"><a id="l00203" name="l00203"></a><span class="lineno"><a class="line" href="shapes_8hpp.html#a286ef0a8b3810a8da2799a4886993d28">  203</a></span><span class="keywordtype">void</span> <a class="code hl_function" href="shapes_8hpp.html#a286ef0a8b3810a8da2799a4886993d28">reset_boxes</a>();</div>
-<div class="line"><a id="l00204" name="l00204"></a><span class="lineno">  204</span> </div>
-<div class="line"><a id="l00205" name="l00205"></a><span class="lineno">  205</span><span class="keyword">namespace </span><a class="code hl_namespace" href="namespaceshapes.html">shapes</a> {</div>
+<div class="line"><a id="l00187" name="l00187"></a><span class="lineno">  187</span><span class="keyword">extern</span> <span class="keywordtype">int</span> <a class="code hl_variable" href="namespaceshapes.html#a150e1ce8f27bb49ade0a44a63d388311">boxes_made</a>;</div>
+<div class="line"><a id="l00188" name="l00188"></a><span class="lineno">  188</span> </div>
+<div class="line"><a id="l00196" name="l00196"></a><span class="lineno">  196</span><span class="keyword">template</span> &lt;<span class="keyword">typename</span> T&gt;</div>
+<div class="line"><a id="l00197" name="l00197"></a><span class="lineno"><a class="line" href="namespaceshapes.html#a73c3d72c17606023e8f711295dd9e72e">  197</a></span><a class="code hl_class" href="classshapes_1_1Box.html">Box&lt;T&gt;</a> <a class="code hl_function" href="namespaceshapes.html#a73c3d72c17606023e8f711295dd9e72e">make_box</a>(<a class="code hl_class" href="classshapes_1_1Box.html">T</a> <a class="code hl_class" href="classshapes_1_1Box.html">item</a>);</div>
+<div class="line"><a id="l00198" name="l00198"></a><span class="lineno">  198</span> </div>
+<div class="line"><a id="l00205" name="l00205"></a><span class="lineno"><a class="line" href="classshapes_1_1Box.html#a79c8d999634bb802477b6f489390519e">  205</a></span><span class="keyword">using </span><a class="code hl_class" href="classshapes_1_1Box.html">PointBox</a> = <a class="code hl_class" href="classshapes_1_1Box.html">Box&lt;Point&gt;</a>;</div>
 <div class="line"><a id="l00206" name="l00206"></a><span class="lineno">  206</span> </div>
-<div class="foldopen" id="foldopen00208" data-start="{" data-end="}">
-<div class="line"><a id="l00208" name="l00208"></a><span class="lineno"><a class="line" href="namespaceshapes_1_1detail.html">  208</a></span><span class="keyword">namespace </span>detail {</div>
-<div class="line"><a id="l00209" name="l00209"></a><span class="lineno">  209</span> </div>
-<div class="line"><a id="l00211" name="l00211"></a><span class="lineno"><a class="line" href="namespaceshapes_1_1detail.html#a466bbb15319930e4f5c8fedadac834d7">  211</a></span><span class="keyword">constexpr</span> <span class="keywordtype">bool</span> <a class="code hl_function" href="namespaceshapes_1_1detail.html#a466bbb15319930e4f5c8fedadac834d7">fits</a>(std::size_t <a class="code hl_class" href="classshapes_1_1Box.html">a</a>, std::size_t <a class="code hl_class" href="classshapes_1_1Box.html">b</a>) <span class="keyword">noexcept</span>;</div>
-<div class="line"><a id="l00212" name="l00212"></a><span class="lineno">  212</span> </div>
-<div class="line"><a id="l00213" name="l00213"></a><span class="lineno">  213</span>}  <span class="comment">// namespace detail</span></div>
+<div class="line"><a id="l00207" name="l00207"></a><span class="lineno">  207</span>}  <span class="comment">// namespace shapes</span></div>
 </div>
-<div class="line"><a id="l00214" name="l00214"></a><span class="lineno">  214</span> </div>
-<div class="line"><a id="l00215" name="l00215"></a><span class="lineno">  215</span>}  <span class="comment">// namespace shapes</span></div>
-<div class="line"><a id="l00216" name="l00216"></a><span class="lineno">  216</span> </div>
-<div class="line"><a id="l00217" name="l00217"></a><span class="lineno">  217</span><span class="preprocessor">#endif</span></div>
-<div class="ttc" id="aclassshapes_1_1Box_1_1View_html"><div class="ttname"><a href="classshapes_1_1Box_1_1View.html">shapes::Box::View</a></div><div class="ttdoc">A view over the items of a box, converted on the fly.</div><div class="ttdef"><b>Definition</b> shapes.hpp:170</div></div>
+<div class="line"><a id="l00208" name="l00208"></a><span class="lineno">  208</span> </div>
+<div class="line"><a id="l00214" name="l00214"></a><span class="lineno"><a class="line" href="shapes_8hpp.html#a286ef0a8b3810a8da2799a4886993d28">  214</a></span><span class="keywordtype">void</span> <a class="code hl_function" href="shapes_8hpp.html#a286ef0a8b3810a8da2799a4886993d28">reset_boxes</a>();</div>
+<div class="line"><a id="l00215" name="l00215"></a><span class="lineno">  215</span> </div>
+<div class="line"><a id="l00216" name="l00216"></a><span class="lineno">  216</span><span class="keyword">namespace </span><a class="code hl_namespace" href="namespaceshapes.html">shapes</a> {</div>
+<div class="line"><a id="l00217" name="l00217"></a><span class="lineno">  217</span> </div>
+<div class="foldopen" id="foldopen00219" data-start="{" data-end="}">
+<div class="line"><a id="l00219" name="l00219"></a><span class="lineno"><a class="line" href="namespaceshapes_1_1detail.html">  219</a></span><span class="keyword">namespace </span>detail {</div>
+<div class="line"><a id="l00220" name="l00220"></a><span class="lineno">  220</span> </div>
+<div class="line"><a id="l00222" name="l00222"></a><span class="lineno"><a class="line" href="namespaceshapes_1_1detail.html#a466bbb15319930e4f5c8fedadac834d7">  222</a></span><span class="keyword">constexpr</span> <span class="keywordtype">bool</span> <a class="code hl_function" href="namespaceshapes_1_1detail.html#a466bbb15319930e4f5c8fedadac834d7">fits</a>(std::size_t <a class="code hl_class" href="classshapes_1_1Box.html">a</a>, std::size_t <a class="code hl_class" href="classshapes_1_1Box.html">b</a>) <span class="keyword">noexcept</span>;</div>
+<div class="line"><a id="l00223" name="l00223"></a><span class="lineno">  223</span> </div>
+<div class="line"><a id="l00224" name="l00224"></a><span class="lineno">  224</span>}  <span class="comment">// namespace detail</span></div>
+</div>
+<div class="line"><a id="l00225" name="l00225"></a><span class="lineno">  225</span> </div>
+<div class="line"><a id="l00226" name="l00226"></a><span class="lineno">  226</span>}  <span class="comment">// namespace shapes</span></div>
+<div class="line"><a id="l00227" name="l00227"></a><span class="lineno">  227</span> </div>
+<div class="line"><a id="l00228" name="l00228"></a><span class="lineno">  228</span><span class="preprocessor">#endif</span></div>
+<div class="ttc" id="aclassshapes_1_1Box_1_1View_html"><div class="ttname"><a href="classshapes_1_1Box_1_1View.html">shapes::Box::View</a></div><div class="ttdoc">A view over the items of a box, converted on the fly.</div><div class="ttdef"><b>Definition</b> shapes.hpp:173</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_1_1View_html_a0885cb7ebc0e7d80bd440afe084248f3"><div class="ttname"><a href="classshapes_1_1Box_1_1View.html#a0885cb7ebc0e7d80bd440afe084248f3">shapes::Box::View::at</a></div><div class="ttdeci">U at(std::size_t index) const</div><div class="ttdoc">The item at a position, converted to U.</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_html"><div class="ttname"><a href="classshapes_1_1Box.html">shapes::Box</a></div><div class="ttdoc">A generic box that stores items in insertion order.</div><div class="ttdef"><b>Definition</b> shapes.hpp:84</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_html_a01f18ac2971596678134b031230cf527"><div class="ttname"><a href="classshapes_1_1Box.html#a01f18ac2971596678134b031230cf527">shapes::Box::Lid</a></div><div class="ttdeci">Lid</div><div class="ttdoc">How the box was closed.</div><div class="ttdef"><b>Definition</b> shapes.hpp:97</div></div>
@@ -223,7 +227,7 @@ $(document).ready(function() { init_codefold(0); });
 <div class="ttc" id="aclassshapes_1_1Box_html_a1859c1549bc929f88edf5e78c5803846"><div class="ttname"><a href="classshapes_1_1Box.html#a1859c1549bc929f88edf5e78c5803846">shapes::Box::count</a></div><div class="ttdeci">std::size_t count() const noexcept</div><div class="ttdoc">The number of items.</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_html_a289998e3021313acbfa802df17bd0f1d"><div class="ttname"><a href="classshapes_1_1Box.html#a289998e3021313acbfa802df17bd0f1d">shapes::Box::put_all</a></div><div class="ttdeci">void put_all(It first, It last)</div><div class="ttdoc">Stores every item of a range, in order.</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_html_a2c8dc659a9f0482aab3554a693b8c71c"><div class="ttname"><a href="classshapes_1_1Box.html#a2c8dc659a9f0482aab3554a693b8c71c">shapes::Box::size_type</a></div><div class="ttdeci">std::size_t size_type</div><div class="ttdoc">The type of sizes and positions.</div><div class="ttdef"><b>Definition</b> shapes.hpp:94</div></div>
-<div class="ttc" id="aclassshapes_1_1Box_html_a322a55234360c720cf6ad195b17d0f37"><div class="ttname"><a href="classshapes_1_1Box.html#a322a55234360c720cf6ad195b17d0f37">shapes::Box::limit</a></div><div class="ttdeci">static constexpr std::size_t limit</div><div class="ttdoc">The most items any box of this type holds.</div><div class="ttdef"><b>Definition</b> shapes.hpp:162</div></div>
+<div class="ttc" id="aclassshapes_1_1Box_html_a322a55234360c720cf6ad195b17d0f37"><div class="ttname"><a href="classshapes_1_1Box.html#a322a55234360c720cf6ad195b17d0f37">shapes::Box::limit</a></div><div class="ttdeci">static constexpr std::size_t limit</div><div class="ttdoc">The most items any box of this type holds.</div><div class="ttdef"><b>Definition</b> shapes.hpp:165</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_html_a8d3c008457f75735d700d3ed5e084290"><div class="ttname"><a href="classshapes_1_1Box.html#a8d3c008457f75735d700d3ed5e084290">shapes::Box::map</a></div><div class="ttdeci">auto map(F f) const -&gt; Box&lt; decltype(f(std::declval&lt; T &gt;())), N &gt;</div><div class="ttdoc">Applies a function to every item.</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_html_a9b2c9af7709c2bb0ffabf015a63b470a"><div class="ttname"><a href="classshapes_1_1Box.html#a9b2c9af7709c2bb0ffabf015a63b470a">shapes::Box::put</a></div><div class="ttdeci">BoxError put(const T &amp;item)</div><div class="ttdoc">Stores one item.</div></div>
 <div class="ttc" id="aclassshapes_1_1Box_html_ab1ff8e2bd6b1b6d72d3413e74051d165"><div class="ttname"><a href="classshapes_1_1Box.html#ab1ff8e2bd6b1b6d72d3413e74051d165">shapes::Box::put</a></div><div class="ttdeci">BoxError put(T &amp;&amp;item)</div><div class="ttdoc">Stores one item, moving it in.</div></div>

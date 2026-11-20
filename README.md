@@ -1188,7 +1188,9 @@ dograpper serve ./pack   # search_chunks now ranks member records
     and the documentation (parameters, returns, notes, examples). A member
     with only a brief description has no section on the page, so its record
     is its summary row and brief. The anchor is Doxygen's member id
-    (`#a9b2c9af7709c2bb0ffabf015a63b470a`). A file page leaves out the
+    (`#a9b2c9af7709c2bb0ffabf015a63b470a`). Friend functions and related
+    symbols (`\relates`) are member records under the class that documents
+    them; a friend class is only a name under `Friends`. A file page leaves out the
     members of the namespaces it lists, which each namespace's page
     documents; the members of a namespace without a page (libstdc++'s `std`)
     are the file page's own, under their qualified names.

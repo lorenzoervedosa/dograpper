@@ -95,6 +95,11 @@ Entry format:
 - **Rejected:** splitting group pages without a measured rule for their kind; merging the records of a shared anchor.
 - **Pending:** none.
 
+- **Decision:** a friend or related symbol gets its symbol_kind from its declaration (`typedef`/`using`, `enum`, `#define`, a parameter list for a function, else a variable), named under the class that documents it (`shapes::Box< T, N >::operator!=`). A friend class (`friend class Peer`) gets no record; its name stays under `Friends`.
+- **Why:** the review found a friend class and a `\relates` typedef or variable written as `function`. A friend class is a relation, documented on the class's own page.
+- **Rejected:** keeping every friend a function; a friend class as a member record with symbol_kind `class` (a member kind the brief does not list).
+- **Pending:** none.
+
 - **Decision:** `Regions.copy_until_end()` in `_html.py` is the shared form of the "second copy of the text" that `sphinx.py` and `typedoc.py` each implement as `_tap`; the Doxygen adapter is its first user. The two existing copies stay as they are.
 - **Why:** the Doxygen adapter needed it (the name inside a summary row), which made it the third copy; the wave gave `sphinx.py` and `typedoc.py` to no lane, so this lane could not touch them.
 - **Rejected:** a third private copy in `doxygen.py`.

@@ -76,7 +76,7 @@ def test_class_template_records_keep_page_order_with_the_container_first():
         ("operator==", "member", "function"), ("limit", "member", "variable"),
         ("size_type", "member", "typedef"), ("Lid", "member", "enum"), ("count", "member", "function"),
         ("map", "member", "function"), ("put", "member", "function"), ("put", "member", "function"),
-        ("operator!=", "member", "function"),
+        ("operator!=", "member", "function"), ("PointBox", "member", "typedef"),
     ]
 
 
@@ -101,7 +101,8 @@ def test_class_template_container_record():
         "Public Types: Lid, value_type, size_type",
         "Public Member Functions: Box, put, put_all, map, size, operator==, count",
         "Static Public Attributes: limit",
-        "Friends: operator!=",
+        "Friends: Square, operator!=",
+        "Related Symbols: PointBox",
     ])
     # A member's documentation lives on its member record only.
     assert "Stores one item." not in box.text
@@ -137,6 +138,18 @@ def test_a_member_template_documented_in_the_summary_keeps_its_template_header()
     assert put_all.text == "\n".join([
         f"{BOX}::put_all", "template<typename It >", "void put_all (It first, It last)",
         "Stores every item of a range, in order."])
+
+
+def test_friend_classes_are_names_and_related_symbols_keep_their_kind():
+    recs = _records("cpp/classshapes_1_1Box.html")
+    box = recs[""]
+    # A friend class is a relation, not a member: its documentation lives on its own page.
+    assert "a898342fe8db565e495e828f6cbc932f8" not in recs
+    assert box.text.split("\n")[-2:] == ["Friends: Square, operator!=", "Related Symbols: PointBox"]
+    point_box = recs["a79c8d999634bb802477b6f489390519e"]
+    assert (point_box.symbol, point_box.symbol_kind) == (f"{BOX}::PointBox", "typedef")
+    assert point_box.text.split("\n")[:5] == [
+        f"{BOX}::PointBox", CLASS_TEMPLATE, "using PointBox = Box<Point>", "related", "A box of points."]
 
 
 def test_a_link_without_a_value_is_read_as_any_link():
@@ -440,7 +453,7 @@ def test_pack_writes_doxygen_records(tmp_path):
     assert (ring_push["symbol"], ring_push["container"]) == ("ring_push", "ring.h")
     assert "symbol" not in by_id["01_cpp/classshapes_1_1Box-members.html"]
     assert "c/annotated.html: Doxygen index, listing, source or topic page" in result.stderr
-    assert "API records:     11 pages split into 55 records (11 container, 44 member), 45 pages kept whole" \
+    assert "API records:     11 pages split into 56 records (11 container, 45 member), 45 pages kept whole" \
         in result.output
 
 

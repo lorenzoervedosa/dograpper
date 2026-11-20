@@ -39,19 +39,19 @@ _PAGES = {
 _LISTING_PAGES = ("Directory",)
 _REFERENCE = " Reference"
 # How a section's members get their symbol_kind: _BY_TYPE_WORD, a type's declaration starts with
-# typedef, using or enum.
-_BY_TYPE_WORD = "by type word"
+# typedef, using or enum; _BY_DECLARATION, a friend or related symbol can be anything (_declared_kind).
+_BY_TYPE_WORD, _BY_DECLARATION = "by type word", "by declaration"
 _TYPE_WORDS = {"typedef": "typedef", "using": "typedef", "enum": "enum"}
 # Summary section -> symbol_kind of a member documented in its row.
 _SUMMARY = {
     **dict.fromkeys(("Public Member Functions", "Protected Member Functions", "Private Member Functions",
                      "Static Public Member Functions", "Static Protected Member Functions",
-                     "Static Private Member Functions", "Functions", "Friends", "Related Symbols"),
-                    "function"),
+                     "Static Private Member Functions", "Functions"), "function"),
     **dict.fromkeys(("Public Attributes", "Protected Attributes", "Private Attributes",
                      "Static Public Attributes", "Static Protected Attributes", "Static Private Attributes",
                      "Variables", "Data Fields"), "variable"),
     **dict.fromkeys(("Public Types", "Protected Types", "Private Types"), _BY_TYPE_WORD),
+    **dict.fromkeys(("Friends", "Related Symbols"), _BY_DECLARATION),
     "Typedefs": "typedef", "Enumerations": "enum", "Macros": "define",
 }
 # Documentation section (h2.groupheader after the description) -> symbol_kind of its members.
@@ -59,8 +59,8 @@ _SECTIONS = {
     **dict.fromkeys(("Member Typedef Documentation", "Typedef Documentation"), "typedef"),
     **dict.fromkeys(("Member Enumeration Documentation", "Enumeration Type Documentation"), "enum"),
     **dict.fromkeys(("Member Function Documentation", "Function Documentation",
-                     "Constructor & Destructor Documentation", "Friends And Related Symbol Documentation"),
-                    "function"),
+                     "Constructor & Destructor Documentation"), "function"),
+    "Friends And Related Symbol Documentation": _BY_DECLARATION,
     **dict.fromkeys(("Member Data Documentation", "Field Documentation", "Variable Documentation"), "variable"),
     "Macro Definition Documentation": "define",
 }
@@ -85,7 +85,7 @@ class _Member:
         self.anchor = anchor
         self.section = section  # the summary section, or the h2 of its documentation section
         self.summary = summary  # documented in its summary row only
-        self.row: Optional[Text] = None  # that row
+        self.signature: Optional[Text] = None  # its table.memname, or its summary row
         self.name: Optional[Text] = None
         self.parts: List[Tuple[Text, bool]] = []  # (region, read as one line), in page order
 
@@ -199,9 +199,11 @@ class _Page(Regions):
 
     def _member_start(self, tag, classes, closers):
         parts = self._member.parts
-        if (tag == "div" and "memtemplate" in classes) or (tag == "table" and "memname" in classes) or (
-                tag == "span" and "mlabels" in classes):
-            parts.append((self.region(closers), True))  # a template header; the signature; its labels
+        if (tag == "div" and "memtemplate" in classes) or (tag == "span" and "mlabels" in classes):
+            parts.append((self.region(closers), True))  # a template header; the signature's labels
+        elif tag == "table" and "memname" in classes:
+            self._member.signature = self.region(closers)
+            parts.append((self._member.signature, True))
         elif tag == "div" and "memdoc" in classes:
             parts.append((self.region(closers), False))
 
@@ -251,7 +253,7 @@ class _Page(Regions):
             self._fail("a summary row without a name")
             return
         member = _Member(row.anchor, row.label, summary=True)
-        member.name, member.row = row.name, row.text
+        member.name, member.signature = row.name, row.text
         member.parts = ([(template.text, True)] if template is not None else []) + [(row.text, True)]
         self.members.append(member)
         self._last = member
@@ -275,10 +277,32 @@ def _kind(title: str):
     raise _unsupported(f"page kind {kind}")
 
 
-def _member_kind(member: _Member, section: str) -> str:
+def _declared_kind(signature: str) -> Optional[str]:
+    """symbol_kind of a friend or related symbol by its declaration; None for a friend class,
+    a relation rather than a member, documented on the class's own page."""
+    words = signature.split()
+    if words[:1] == ["friend"]:
+        words = words[1:]
+    first = words[0] if words else ""
+    if first in _TYPE_WORDS:
+        return _TYPE_WORDS[first]
+    if first == "#define":
+        return "define"
+    if "(" in signature:
+        return "function"
+    if len(words) == 2 and first in ("class", "struct", "union"):
+        return None
+    return "variable"
+
+
+def _member_kind(member: _Member, section: str) -> Optional[str]:
+    """symbol_kind of a member; None for one that gets no record."""
     kind = _SUMMARY.get(section) if member.summary else _SECTIONS.get(section)
+    signature = line(member.signature)
+    if kind == _BY_DECLARATION:
+        return _declared_kind(signature)
     if kind == _BY_TYPE_WORD:
-        kind = _TYPE_WORDS.get(line(member.row).split(" ", 1)[0])
+        kind = _TYPE_WORDS.get(signature.split(" ", 1)[0])
     if kind is None:
         raise _unsupported(f"a member of unknown kind in section {section or 'without a heading'}")
     return kind
@@ -330,6 +354,8 @@ def records(html: str, generator: str) -> List[ApiRecord]:
         body = [ln for text, one_line in member.parts
                 for ln in ([line(text)] if one_line else text.final()) if ln]
         kind = _member_kind(member, cached_line(member.section))
+        if kind is None:
+            continue  # a friend class: its name stays on the container
         if symbol_kind == "file" and member.summary and name.rpartition("::")[0] in namespaces:
             continue  # a namespace member Doxygen also anchors here: documented on the namespace page
         member_symbol = name if symbol_kind == "file" else f"{symbol}::{name}"

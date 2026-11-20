@@ -158,6 +158,9 @@ public:
      */
     friend bool operator!=(const Box& a, const Box& b) { return !(a == b); }
 
+    /// A square may look inside any box.
+    friend class Square;
+
     /// The most items any box of this type holds.
     static constexpr std::size_t limit = N;
 
@@ -192,6 +195,14 @@ extern int boxes_made;
  */
 template <typename T>
 Box<T> make_box(T item);
+
+/**
+ * @brief A box of points.
+ *
+ * Points are compared by position.
+ * @relates Box
+ */
+using PointBox = Box<Point>;
 
 }  // namespace shapes
 
