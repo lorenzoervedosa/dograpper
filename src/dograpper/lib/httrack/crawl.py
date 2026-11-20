@@ -301,7 +301,7 @@ def moved_request(url: str, referer: str | None, meta: FetchMeta, target: str, *
     htscore.c:3424-3426). Both keep the moved link's metadata, with the worst Sec-Fetch-Site
     of the chain (htsfetch.c:452-465); a start URL's (`front`) "none" stays. `initiator` is
     the page whose link began the chain."""
-    same_name = url_key(url).casefold() == url_key(target).casefold()  # #159
+    same_name = url_key(url).casefold() == url_key(target).casefold()  # xroche/httrack#159
     referer = referer if no_page(target) or same_name else url
     if front or not meta.dest:
         site = "none" if front else meta.site

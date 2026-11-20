@@ -9,7 +9,6 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse, urljoin
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
-from pathlib import Path
 
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.progress import ProgressReporter
