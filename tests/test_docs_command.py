@@ -53,6 +53,17 @@ def test_option_kinds_are_rendered():
     assert "500000" in page.split('id="pack--max-words-per-chunk"')[1].split("</tr>")[0]
 
 
+def _row(page, row_id):
+    return page.split(f'id="{row_id}"')[1].split("</tr>")[0]
+
+
+def test_option_without_default_shows_none():
+    # click 8.3 reports a missing default as its UNSET sentinel, not None
+    page = _page()
+    assert "Sentinel" not in page
+    assert "<td>none</td>" in _row(page, "download--output")
+
+
 def test_page_is_self_contained():
     page = _page()
     for needle in ("<link", "<script", "<img", "@import", "url(", "src=", "<iframe"):

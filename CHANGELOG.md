@@ -525,6 +525,8 @@ stays `0.0.0.dev0`.
   summary in `--dry-run`.
 - The release install script matches the filename referenced by its `.sha256`
   companion.
+- `dograpper docs` shows `none` as the default of an option that has none,
+  instead of `Sentinel.UNSET` (click 8.3).
 
 ### Security
 

@@ -12,6 +12,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import click
 
+try:  # click >= 8.3 reports an option without a default as this sentinel; earlier versions as None
+    from click._utils import UNSET as _UNSET
+except ImportError:
+    _UNSET = None
+
 _CSS = """
 :root{--bg:#fff;--fg:#1b1f24;--muted:#59636e;--line:#d1d9e0;--accent:#0b5fd1;--code:#f3f5f7}
 @media (prefers-color-scheme:dark){:root{--bg:#14171a;--fg:#e6e9ec;--muted:#9aa4ae;--line:#2f353b;--accent:#6ea8ff;--code:#1e2328}}
@@ -41,7 +46,7 @@ def _description(cmd):
 
 def _default(opt, ctx):
     d = opt.get_default(ctx)
-    if d is None or d == ():
+    if d is None or d is _UNSET or d == ():
         return "none"
     if isinstance(d, bool):
         return "on" if d else "off"
