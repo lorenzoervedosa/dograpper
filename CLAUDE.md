@@ -133,8 +133,11 @@ status do `tail`. Rode sem pipe, ou leia `${PIPESTATUS[0]}` (bash) /
 ## Sessões paralelas (worktrees + PR por lote)
 
 Várias sessões de agente costumam rodar ao mesmo tempo neste repositório. O
-merge é sempre do mantenedor, por PR revisado; nenhuma sessão faz merge local
-nem push na `main` (o guarda `.claude/hooks/block-dangerous-git.py` bloqueia).
+merge é sempre por PR revisado, com `gh pr merge --merge` (merge commit), feito
+pelo mantenedor ou por uma sessão que ele autorizou (autorização permanente
+desde 2026-11-20), e só com o CI verde no head do PR e o nível 2 conferido em
+cada commit; nenhuma sessão faz merge local nem push na `main` (o guarda
+`.claude/hooks/block-dangerous-git.py` bloqueia).
 
 - **Isolamento:** cada sessão trabalha numa worktree própria em
   `.claude/worktrees/<nome>`, numa branch curta criada da base do lote
