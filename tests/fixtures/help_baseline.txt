@@ -16,7 +16,7 @@ Usage: dograpper [OPTIONS] COMMAND [ARGS]...
 Options:
   --version      Show the version and exit.
   -v, --verbose  Detailed (DEBUG) logging of each operation
-  -q, --quiet    Suppress output except critical errors
+  -q, --quiet    Silence summaries and info lines; errors stay on stderr
   --config PATH  JSON config file (sections `download` and `pack`)  [default:
                  .dograpper.json]
   -h, --help     Show this message and exit.

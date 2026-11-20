@@ -1360,7 +1360,7 @@ def test_download_progress_lines_are_info_so_quiet_hides_them(tmp_path):
                     patch('dograpper.commands.download.is_spa', return_value=False):
                 res = CliRunner().invoke(cli, [*flags, 'download', H + "/", '-o', str(out)])
             assert res.exit_code == 0, res.output
-            assert "Download complete:" in res.output
+            assert ("Download complete:" in res.output) is shown  # --quiet silences the summary too (#139)
             assert ("INFO: [progress] wget --mirror: 9 files · 0.0 MB · " in res.output) is shown, res.output
     finally:
         logger.setLevel(level)  # --quiet leaves ERROR, which would hide later tests' log records

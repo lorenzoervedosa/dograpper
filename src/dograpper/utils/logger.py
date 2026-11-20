@@ -20,7 +20,7 @@ def setup_logger(verbose: bool = False, quiet: bool = False) -> logging.Logger:
     if logger.hasHandlers():
         logger.handlers.clear()
         
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(sys.stderr)
     handler.setLevel(level)
     formatter = logging.Formatter('%(levelname)s: %(message)s')
     handler.setFormatter(formatter)

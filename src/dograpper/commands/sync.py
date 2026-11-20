@@ -3,6 +3,7 @@
 import click
 import logging
 
+from ..utils.output import say
 from ..lib.config_loader import is_explicit_source
 from ._httrack_profile import PROFILE_OPTIONS
 from .download import download as _download_cmd
@@ -99,7 +100,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
     ctx.ensure_object(dict)
 
     try:
-        click.echo("=== Step 1: Download ===")
+        say("=== Step 1: Download ===")
         # 'output' is always user-derived on sync (-o is required)
         ctx.obj['CLI_EXPLICIT_PARAMS'] = (
             _explicit_params(ctx, _DOWNLOAD_PASSTHROUGH) | {'output'})
@@ -114,7 +115,7 @@ def sync(ctx, url, output, depth, headless, delay, include_extensions,
             **downloader_kw,
         )
 
-        click.echo("\n=== Step 2: Pack (delta) ===")
+        say("\n=== Step 2: Pack (delta) ===")
         # 'output' comes from --chunks-dir/-o and 'delta' is sync's
         # contract: both always win over config
         ctx.obj['CLI_EXPLICIT_PARAMS'] = (

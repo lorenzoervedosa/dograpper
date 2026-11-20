@@ -327,6 +327,10 @@ stays `0.0.0.dev0`.
   resolving source URLs for `--context-header`. `pack` never writes it. ([#39])
 - `--report` is a paired flag (`--report/--no-report`) so a config file that
   enables it can still be overridden from the command line.
+- `--quiet` now silences the summaries and informational lines of `pack`,
+  `download`, `sync` and `eval` (errors stay on stderr, `pack --dry-run` keeps
+  its report; `eval -o` keeps the report), and log lines go to stderr instead
+  of stdout. ([#139])
 
 ### Removed
 
@@ -584,3 +588,4 @@ stays `0.0.0.dev0`.
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159
 [#167]: https://github.com/lorenzoervedosa/dograpper/issues/167
 [#160]: https://github.com/lorenzoervedosa/dograpper/issues/160
+[#139]: https://github.com/lorenzoervedosa/dograpper/issues/139

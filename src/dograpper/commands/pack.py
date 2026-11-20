@@ -5,6 +5,7 @@ import click
 import logging
 from datetime import datetime, timezone
 
+from ..utils.output import say
 from ..lib.config_loader import is_explicit, load_config
 from ..lib.ignore_parser import exclude_subtree, filter_files, normalize_extensions, split_by_extension
 from ..utils.challenge import find_challenge_files
@@ -79,7 +80,7 @@ def _validate_flags(ctx, fmt, for_queries_path, strategy, is_report,
         )
     if is_report and not is_score:
         is_score = True
-        click.echo("--report implies --score: enabling readiness scoring.")
+        say("--report implies --score: enabling readiness scoring.")
 
     return query_list, is_score
 
@@ -105,14 +106,14 @@ def _load_url_manifest(ctx, manifest_name, input_dir):
         if manifest_path is None:
             return None
         if os.path.dirname(manifest_path) != os.path.abspath(input_dir):
-            click.echo(f"Note: using manifest {manifest_path} from a parent of INPUT_DIR",
+            say(f"Note: using manifest {manifest_path} from a parent of INPUT_DIR",
                        err=True)
     try:
         return read_manifest(manifest_path)
     except (OSError, ValueError, TypeError, AttributeError) as e:
         if explicit:
             raise click.ClickException(f"cannot load manifest {manifest_path}: {e}")
-        click.echo(f"Note: ignoring manifest {manifest_path}: {e}", err=True)
+        say(f"Note: ignoring manifest {manifest_path}: {e}", err=True)
         return None
 
 
@@ -341,7 +342,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             all_files.append(fpath)
     all_files, own_output_files = exclude_subtree(all_files, output_dir)
     if own_output_files:
-        click.echo(f"Excluded own output directory: {own_output_files} file(s) under {output_dir}")
+        say(f"Excluded own output directory: {own_output_files} file(s) under {output_dir}")
 
     # 4. Check empty
     if not all_files:
@@ -351,7 +352,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     doc_files, skipped_types = split_by_extension(all_files, include_exts)
     if skipped_types:
         listing = ", ".join(f"{k} x{n}" for k, n in sorted(skipped_types.items()))
-        click.echo(f"Skipped non-documentation files: "
+        say(f"Skipped non-documentation files: "
                    f"{sum(skipped_types.values())} ({listing}). "
                    f"Use --include-extensions to pack other extensions.")
     filtered_paths = filter_files(doc_files, ign_file, ign_inline, input_dir)
@@ -365,7 +366,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     if challenge_paths:
         listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
                            for p in challenge_paths)
-        click.echo(f"Warning: {len(challenge_paths)} bot-challenge page(s) skipped "
+        say(f"Warning: {len(challenge_paths)} bot-challenge page(s) skipped "
                    f"(the source is missing their real content):\n{listed}", err=True)
         challenge_set = set(challenge_paths)
         filtered_paths = [p for p in filtered_paths if p not in challenge_set]
@@ -377,7 +378,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
     if error_paths:
         listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
                            for p in error_paths)
-        click.echo(f"Warning: {len(error_paths)} saved HTTP error page(s) skipped "
+        say(f"Warning: {len(error_paths)} saved HTTP error page(s) skipped "
                    f"(the source is missing their real content):\n{listed}", err=True)
         error_set = set(error_paths)
         filtered_paths = [p for p in filtered_paths if p not in error_set]
@@ -391,7 +392,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         # Listed like the challenge pages above.
         listed = "\n".join("  " + os.path.relpath(p, input_dir).replace(os.sep, '/')
                            for p in alias_paths)
-        click.echo(f"Note: {len(alias_paths)} redirect alias page(s) skipped "
+        say(f"Note: {len(alias_paths)} redirect alias page(s) skipped "
                    f"(the page they redirect to is packed):\n{listed}", err=True)
         alias_set = set(alias_paths)
         filtered_paths = [p for p in filtered_paths if p not in alias_set]
@@ -423,7 +424,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
                      f"{len(diff.removed)} removed")
 
         if not (diff.added or diff.modified or diff.removed):
-            click.echo("Delta: no files changed since last pack. Nothing to do.")
+            say("Delta: no files changed since last pack. Nothing to do.")
             return
 
     # 6c. API reference records (opt-in, ADR-0009): split the recognised pages, report the rest
@@ -433,7 +434,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
 
         api_split = split_api_pages(filtered_paths, input_dir)
         for line in format_kept_whole(api_split, bool(ctx.obj.get('VERBOSE'))):
-            click.echo(line, err=True)
+            say(line, err=True)
     # md renders HTML as Markdown (#87); every count below leaves its markup out.
     markdown = fmt == 'md'
 
@@ -527,7 +528,7 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
             filtered_paths, input_dir, query_list, no_ext,
             text_overrides=dedup_text_overrides if dedup_mode != "off" else None)
         for warning in ordering.warnings:
-            click.echo(warning, err=True)
+            say(warning, err=True)
         query_pack_result = ordering.result
         filtered_paths = ordering.paths
 
@@ -774,57 +775,57 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         avg_w = min_w = max_w_actual = 0
         
     # Formatting the summary outputs
-    click.echo("\nPack complete:")
-    click.echo(f"  Files processed: {files_processed}")
-    click.echo(f"  Files excluded:  {files_excluded}")
+    say("\nPack complete:")
+    say(f"  Files processed: {files_processed}")
+    say(f"  Files excluded:  {files_excluded}")
     if challenge_paths:
-        click.echo(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
+        say(f"  Challenge pages: {len(challenge_paths)} (skipped, counted in Files excluded)")
     if error_paths:
-        click.echo(f"  Error pages:     {len(error_paths)} (skipped, counted in Files excluded)")
+        say(f"  Error pages:     {len(error_paths)} (skipped, counted in Files excluded)")
     if alias_paths:
-        click.echo(f"  Redirect aliases: {len(alias_paths)} (skipped, counted in Files excluded)")
+        say(f"  Redirect aliases: {len(alias_paths)} (skipped, counted in Files excluded)")
     if page_layout:
-        click.echo(f"  Pages written:   {generated_chunk_count}")
-        click.echo(f"  Index:           {index_path}")
+        say(f"  Pages written:   {generated_chunk_count}")
+        say(f"  Index:           {index_path}")
     else:
-        click.echo(f"  Chunks generated: {generated_chunk_count} / {max_c} (max)")
+        say(f"  Chunks generated: {generated_chunk_count} / {max_c} (max)")
 
         if generated_chunk_count > 0:
-             click.echo(f"  Words per chunk:  ~{avg_w:,.0f} avg (min: {min_w:,}, max: {max_w_actual:,})")
+             say(f"  Words per chunk:  ~{avg_w:,.0f} avg (min: {min_w:,}, max: {max_w_actual:,})")
         else:
-             click.echo("  Words per chunk:  0")
+             say("  Words per chunk:  0")
 
-    click.echo(f"  Total words:     {total_words:,}")
+    say(f"  Total words:     {total_words:,}")
 
     if dedup_stats is not None:
-        click.echo(f"  Dedup mode:        {dedup_mode}")
-        click.echo(f"  Blocks analyzed:   {dedup_stats.total_blocks}")
-        click.echo(f"  Blocks removed:    {dedup_stats.blocks_removed} ({dedup_stats.blocks_removed_exact} exact + {dedup_stats.blocks_removed_fuzzy} fuzzy)")
-        click.echo(f"  Matches kept:      {dedup_stats.blocks_kept_same_page} same-page, "
+        say(f"  Dedup mode:        {dedup_mode}")
+        say(f"  Blocks analyzed:   {dedup_stats.total_blocks}")
+        say(f"  Blocks removed:    {dedup_stats.blocks_removed} ({dedup_stats.blocks_removed_exact} exact + {dedup_stats.blocks_removed_fuzzy} fuzzy)")
+        say(f"  Matches kept:      {dedup_stats.blocks_kept_same_page} same-page, "
                    f"{dedup_stats.blocks_kept_leading_token} leading-token, "
                    f"{dedup_stats.blocks_kept_numbers} numbers-only")
-        click.echo(f"  Pages exempted:    {dedup_stats.pages_exempt} (API reference)")
+        say(f"  Pages exempted:    {dedup_stats.pages_exempt} (API reference)")
         if total_words + dedup_stats.words_removed > 0:
             pct = dedup_stats.words_removed * 100 // (total_words + dedup_stats.words_removed)
         else:
             pct = 0
-        click.echo(f"  Words removed:     {dedup_stats.words_removed:,} (~{pct}%)")
+        say(f"  Words removed:     {dedup_stats.words_removed:,} (~{pct}%)")
 
     if query_pack_result is not None:
-        click.echo(_query_packing_summary(query_list, query_pack_result))
+        say(_query_packing_summary(query_list, query_pack_result))
 
     if api_split is not None:
         from ..utils.api_reference import format_summary
-        click.echo(f"  {format_summary(api_split)}")
+        say(f"  {format_summary(api_split)}")
 
     if is_delta and diff is not None:
-        click.echo(f"  Delta:           {len(diff.added)} added, {len(diff.modified)} modified, {len(diff.removed)} removed")
-        click.echo(f"  Delta manifest:  {os.path.join(output_dir, 'delta_manifest.json')}")
+        say(f"  Delta:           {len(diff.added)} added, {len(diff.modified)} modified, {len(diff.removed)} removed")
+        say(f"  Delta manifest:  {os.path.join(output_dir, 'delta_manifest.json')}")
 
     if guide_path is not None:
-        click.echo(f"  Import guide:    {guide_path}")
+        say(f"  Import guide:    {guide_path}")
 
-    click.echo(f"  Output:          {output_dir}/")
+    say(f"  Output:          {output_dir}/")
 
     if readiness_scores:
         readiness_path = os.path.join(output_dir, "llm-readiness.json")
@@ -832,37 +833,37 @@ def pack(ctx: click.Context, input_dir: str, output: str, max_words_per_chunk: i
         for s in readiness_scores:
             grade_counts[s.grade] += 1
         avg_score = sum(s.score for s in readiness_scores) / len(readiness_scores)
-        click.echo(f"  LLM Readiness:   {readiness_path}")
-        click.echo(f"                   {grade_counts['A']}x A, {grade_counts['B']}x B, {grade_counts['C']}x C "
+        say(f"  LLM Readiness:   {readiness_path}")
+        say(f"                   {grade_counts['A']}x A, {grade_counts['B']}x B, {grade_counts['C']}x C "
                    f"(avg: {avg_score:.2f})")
 
     if do_cross_refs:
-        click.echo(f"  Cross-refs:        {output_dir}/cross_refs.json ({cross_ref_total} links, {cross_ref_unresolved} unresolved)")
+        say(f"  Cross-refs:        {output_dir}/cross_refs.json ({cross_ref_total} links, {cross_ref_unresolved} unresolved)")
 
     if url_resolution is not None:
         from ..lib.source_urls import format_url_summary
         for line in format_url_summary(url_resolution, bool(ctx.obj.get('VERBOSE'))):
-            click.echo(f"  {line}")
+            say(f"  {line}")
 
     if token_counts:
         from ..utils.token_counter import format_token_summary
-        click.echo(format_token_summary(token_counts))
+        say(format_token_summary(token_counts))
     
     # Warnings at bottom (the page layout has no word or chunk cap)
     oversized = [] if page_layout else [c for c in chunks if c.total_words > max_w]
     if oversized:
         plural = "s" if len(oversized) > 1 else ""
-        click.echo(f"  \u26a0 {len(oversized)} chunk{plural} exceeds the word limit")
+        say(f"  \u26a0 {len(oversized)} chunk{plural} exceeds the word limit")
         
     if not page_layout and generated_chunk_count > max_c:
-        click.echo(f"  \u26a0 Chunk count exceeds max-chunks limit ({generated_chunk_count} > {max_c})")
+        say(f"  \u26a0 Chunk count exceeds max-chunks limit ({generated_chunk_count} > {max_c})")
 
     # 12. Readiness report terminal summary (after the normal pack summary)
     if report_path is not None:
         from ..utils.readiness_report import GRADE_COLORS, format_terminal_report
         for grade, text in format_terminal_report(readiness_scores, report_path):
             if grade is None:
-                click.echo(text)
+                say(text)
             else:
                 badge = click.style(f"[{grade}]", fg=GRADE_COLORS[grade], bold=True)
-                click.echo(f"  {badge} {text}")
+                say(f"  {badge} {text}")

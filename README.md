@@ -1529,6 +1529,7 @@ Prerequisite: a pack built with `--format jsonl --context-header` —
 golden Q&A generation needs the heading breadcrumbs that flag injects.
 Exits 1 if no JSONL chunks match `--prefix`, or if none of the loaded
 chunks carry a heading breadcrumb to generate a question from.
+Under `--quiet` nothing is printed on success; `-o` is how the report is kept.
 
 #### Examples
 
@@ -1661,12 +1662,12 @@ Stop the server with Ctrl+C.
 | Flag | Alias | Default | Description |
 |---|---|---|---|
 | `--verbose` | `-v` | `false` | Detailed log (DEBUG level); the `[cascade]` lines are printed without it |
-| `--quiet` | `-q` | `false` | Critical errors only |
+| `--quiet` | `-q` | `false` | Silences the summaries and informational lines of `pack`, `download`, `sync` and `eval`; errors still print on stderr, and `pack --dry-run` still prints its report |
 | `--config` | — | `.dograpper.json` | Configuration file |
 | `--version` | — | — | Print the installed version and exit |
 | `--help` | `-h` | — | Show help and exit (every subcommand takes it too) |
 
-`--verbose` and `--quiet` are mutually exclusive.
+`--verbose` and `--quiet` are mutually exclusive. Log lines go to stderr, with or without `--quiet`. Under `--quiet`, `eval` prints nothing on success: use `-o` to keep its report.
 
 ---
 
