@@ -23,9 +23,9 @@ from ..lib.manifest import Manifest
 from ..lib.playwright_crawl import run_playwright_crawl
 from ..lib.spa_detector import is_spa
 from ..utils.atomic_write import atomic_write_bytes
-from ..utils.http_headers import parse_header
 from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
+from ._profile_headers import single_user_agent, user_headers
 
 logger = logging.getLogger(__name__)
 
@@ -79,37 +79,12 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
         for param in params:
             if param.name not in from_config or values[param.name] != param.default:
                 raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack or fire-engine")
-    header_ua, headers = _user_headers(values.pop('header'), config_note('header' in from_config))
+    header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
     values['user_agent'] = single_user_agent({"--user-agent": values['user_agent'],
                                               "--header 'User-Agent: …'": header_ua})
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     policy_kw['headers'] = headers
     return policy_kw, from_config
-
-
-def _user_headers(lines, src: str):
-    """The --header lines, each checked by parse_header (the shared wire guard), as
-    (the User-Agent among them or None, the other (name, value) pairs); `src` is the
-    config_note of the lines."""
-    pairs = []
-    for position, line in enumerate(lines, 1):
-        try:
-            pairs.append(parse_header(line, position))
-        except ValueError as e:
-            raise click.UsageError(f"--header {e}{src}") from None
-    agents = [value for name, value in pairs if name.lower() == "user-agent"]
-    return (agents[-1] if agents else None,
-            tuple(pair for pair in pairs if pair[0].lower() != "user-agent"))
-
-
-def single_user_agent(sources: Dict[str, str | None]) -> str | None:
-    """The one User-Agent among `sources` (flag text -> value, or None when not given).
-    Given two ways it is a usage error (exit 2) naming the flags, never the values (#136;
-    #171 adds --browser-login as a source)."""
-    given = [flag for flag, value in sources.items() if value is not None]
-    if len(given) > 1:
-        raise click.UsageError(f"{' and '.join(given)} both set the User-Agent; give one")
-    return sources[given[0]] if given else None
 
 
 def _build_policy(delay, policy_kw, from_config):
