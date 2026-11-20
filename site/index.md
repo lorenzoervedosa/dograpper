@@ -60,16 +60,16 @@ guides/air-gapped
 :hidden:
 :maxdepth: 2
 
-commands/docs
-commands/doctor
 commands/download
+commands/pack
+commands/sync
+commands/serve
 commands/drift
 commands/eval
 commands/explain
 commands/init
-commands/pack
-commands/serve
-commands/sync
+commands/doctor
+commands/docs
 ```
 
 ```{toctree}
