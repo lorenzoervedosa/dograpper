@@ -95,3 +95,9 @@ Entry format, grouped under one heading per issue or PR:
   progress callback (`XFERINFOFUNCTION`), which curl_cffi does not expose. Fix
   when curl_cffi exposes it, or when a real crawl is slowed by servers that
   stall mid-body.**
+
+## httrack browser pass, in-memory stores (#160, #167, 2026-11-20)
+
+- **The engine's response store also keeps non-HTML bodies.** `RunResponses.keep` (`src/dograpper/lib/httrack/crawl.py`) stores every 2xx body, so images, PDFs or stylesheets of a seeded list can fill the 128 MiB cap before the pages the browser pass needs. ⏸ **accepted: the pages of a documentation site are small and a non-HTML answer is reused too (saved as fetched); fix by keeping only `text/html` when a run is seen to hit the cap, or when memory use of a real crawl matters.**
+- **The subresource cache is keyed by URL alone.** `Navigator._response`/`_route` (`src/dograpper/lib/httrack/browser.py`) ignore `Vary` and `Range`, so a GET 200 whose answer depends on a request header (or a dynamic XHR) is replayed to every later page of the run. ⏸ **accepted: the issue defines a per-run cache keyed by URL, and only GET 200 without `no-store` is kept; fix when a crawled site is seen to render differently because of a replayed answer (key by URL plus the `Vary` headers then).**
+- **The engine's responses sit in memory up to 128 MiB during the engine fetch even when no browser pass follows.** `run_profile` (`src/dograpper/commands/_httrack_profile.py`) creates the store before it knows whether the result looks client-rendered. ⏸ **accepted: the cap bounds it and it is released after the run; fix by keeping only when `is_spa` is likely, or when the peak memory of a large crawl is a problem.**
