@@ -260,9 +260,9 @@ stays `0.0.0.dev0`.
   a member with only a brief description gets its summary row and brief),
   anchored at Doxygen's member id. `symbol_kind` gains `file`, `typedef` and
   `define`; `generator` is `doxygen`. Member lists, source pages, indexes,
-  topic (group) pages and unmeasured markup keep one record. Doxygen pages,
-  like the other generators' pages, are now never deduplicated, with or
-  without `--api-records`.
+  topic (group) pages and unmeasured markup keep one record. A Doxygen page
+  the adapter splits is now never deduplicated, with or without
+  `--api-records`, like the other generators' split pages.
   ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
   [#168](https://github.com/lorenzoervedosa/dograpper/issues/168))
 - `dograpper eval` — offline validation of a packed context: deterministic
