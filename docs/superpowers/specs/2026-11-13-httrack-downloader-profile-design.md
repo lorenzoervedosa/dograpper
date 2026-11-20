@@ -648,9 +648,16 @@ README and CHANGELOG.
      non-HTML answer is saved as fetched, never opened. After an engine fetch
      the browser pass has its own report and is no front (§5.8); a shallow
      crawl explained by challenges does not trigger it (§5.4).
-   - After an engine fetch that looks client-rendered, the browser fetches
-     every page again. Decided (2026-11-19): reuse the engine's body in the
-     browser pass instead, not implemented yet, tracked in [#160](https://github.com/lorenzoervedosa/dograpper/issues/160).
+   - After an engine fetch that looks client-rendered, the browser pass reuses
+     the engine's responses (decided 2026-11-19, #160). The engine keeps each
+     2xx page response (status, headers, body, final URL) in memory in a
+     `KeptResponses` sink, up to 128 MiB in total and without eviction;
+     `Navigator.prepare()` takes the one kept for the URL it is asked for and
+     hands it to Chromium with `route.fulfill()`, sending no request. A page
+     not kept (over the cap; a 304 of an update run, which has no body this
+     run; a start URL that redirected, since a fetch re-bases the scope), and
+     any page found only by rendering, goes through the fetcher under the full
+     policy. The saved file, record and `-K0` relink are unchanged.
    - `--cache`, `--updatehack`, `--do-not-recatch` and `--changes` with
      `--headless` are a usage error (exit 2), since no page is revalidated
      there: kept (user decision, 2026-11-19).

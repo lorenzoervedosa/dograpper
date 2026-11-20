@@ -451,6 +451,23 @@ def test_httrack_spa_falls_back_to_playwright_with_the_discovered_seeds(ht):
     assert "Files downloaded: 1" in res.output  # the page the browser rendered over the shell
 
 
+def test_httrack_browser_pass_reuses_what_the_engine_received(ht):
+    out, fu, _ = ht
+    seen = []
+    fu.side_effect = lambda urls, o, *a, **k: seen.append(k["responses"]) or _res(o)
+    with patch(f"{P}.is_spa", return_value=True), \
+         patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out, ("p0.html",))) as pw:
+        assert run(out, "--downloader", "httrack").exit_code == 0
+    assert seen[0] is not None and pw.call_args.kwargs["navigator"]._reuse is seen[0]
+
+
+def test_httrack_headless_has_no_engine_responses_to_reuse(ht):
+    out, fu, _ = ht
+    with patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out)) as pw:
+        assert run(out, "--downloader", "httrack", "--headless").exit_code == 0
+    assert pw.call_args.kwargs["navigator"]._reuse is None
+
+
 @pytest.mark.parametrize("flag", ["--cache=1", "--updatehack", "--do-not-recatch", "--changes"])
 def test_httrack_update_flags_under_headless_are_usage_errors(ht, flag):
     """They steer the engine's revalidation; under --headless no page is revalidated."""

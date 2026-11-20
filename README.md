@@ -636,8 +636,11 @@ the `wget` cascade's Playwright:
 - **Each page in full.** `--headless` skips the engine's fetch, so no page is
   revalidated: `--cache`, `--updatehack`, `--do-not-recatch` and `--changes`
   with `--headless` are a usage error (exit 2). After an engine fetch that
-  looked client-rendered, the browser fetches every page again (reusing the
-  engine's copy is planned, [#160](https://github.com/lorenzoervedosa/dograpper/issues/160)); a crawl that
+  looked client-rendered, the browser pass hands Chromium the
+  response the engine received in the same run (kept in memory, up to 128 MiB in
+  total) instead of requesting the page again; a page the engine did not keep
+  (over the cap, a 304 in an update run, a start URL that redirected) or that only
+  rendering found is fetched through the profile as usual. A crawl that
   saved one page because the rest was challenged is no trigger (no browser
   run, the report lists the challenges).
 - **Report and exit.** After an engine fetch, the browser's own report follows

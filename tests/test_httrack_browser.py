@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dograpper.lib.httrack.browser import Navigator
+from dograpper.lib.httrack.crawl import KeptResponses
+from dograpper.lib.httrack.fetcher import FetchResult
 from dograpper.lib.httrack.fetcher import Fetcher
 from dograpper.lib.httrack.policy import build_policy
 from dograpper.lib.playwright_crawl import run_playwright_crawl
@@ -550,3 +552,57 @@ def test_subresource_body_unreadable_is_not_fatal_but_not_kept(server, tmp_path)
     res.body = lambda: (_ for _ in ()).throw(Exception("No resource with given identifier"))
     ctx.events["response"](res)
     assert load(ctx, page, base + "/g.js")[1]
+
+
+def reusing(base, out, kept, **kw):
+    policy = build_policy(retries=0, **kw)
+    ft = FakeTime()
+    nav = Navigator(Fetcher(policy, clock=ft.clock, sleep=ft.sleep), str(out), base + "/docs/",
+                    "html", reuse=kept)
+    ctx, page = Context(), Page()
+    nav.attach(ctx, page)
+    return nav, ctx, page
+
+
+def test_prepare_reuses_the_response_the_engine_fetched(server, tmp_path):
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/new"] = (200, HTML, b"<p>fetched anew</p>")
+    kept = KeptResponses()
+    kept.keep(base + "/docs/a", base + "/docs/a",
+              FetchResult(base + "/docs/a", status=200, headers=HTML, body=b"<p>engine</p>"))
+    nav, ctx, page = reusing(base, tmp_path, kept)
+    assert nav.prepare(base + "/docs/a") == base + "/docs/a"
+    (call,) = navigate(ctx, page, base + "/docs/a")
+    assert call[0] == "fulfill" and call[1]["body"] == b"<p>engine</p>"
+    assert "/docs/a" not in seen  # no second request
+    # a page found only by rendering goes through the fetcher, under the full policy
+    assert nav.prepare(base + "/docs/new") == base + "/docs/new"
+    assert seen == ["/robots.txt", "/docs/new"]
+
+
+def test_prepare_fetches_a_reused_start_url_that_redirected(server, tmp_path):
+    """The start URL's redirect re-bases the scope (rescope), which only a fetch does."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (301, {"location": "/docs/home"}, b"")
+    script["/docs/home"] = (200, HTML, b"<p>home</p>")
+    kept = KeptResponses()
+    kept.keep(base + "/docs/", base + "/docs/home",
+              FetchResult(base + "/docs/home", status=200, headers=HTML, body=b"<p>e</p>"))
+    nav, ctx, page = reusing(base, tmp_path, kept)
+    assert nav.prepare(base + "/docs/") == base + "/docs/home"
+    assert "/docs/" in seen
+
+
+def test_reused_page_is_saved_like_a_fetched_one(server, tmp_path):
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    kept = KeptResponses()
+    kept.keep(base + "/docs/a", base + "/docs/a",
+              FetchResult(base + "/docs/a", status=200, headers=HTML, body=b"<p>engine</p>"))
+    nav, ctx, page = reusing(base, tmp_path, kept)
+    nav.prepare(base + "/docs/a")
+    path = nav.save(base + "/docs/a", "<p>rendered</p>")
+    assert open(path).read() == "<p>rendered</p>"
+    assert nav.records[path]["status"] == 200 and nav.records[path]["redirected"] is False

@@ -13,7 +13,7 @@ import click
 from ..lib.config_loader import is_explicit
 from ..lib.httrack.browser import Navigator
 from ..lib.httrack.changes import CHANGES_FILE
-from ..lib.httrack.crawl import MAX_REDIRECTS, fetch_url_list
+from ..lib.httrack.crawl import MAX_REDIRECTS, KeptResponses, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
 from ..lib.httrack.mirror import mirror_site
@@ -148,12 +148,13 @@ _PREVIOUS_RUN_FLAGS = (("--cache", lambda p: p.cache is not None),
                        ("--changes", lambda p: p.changes))
 
 
-def _browse(fetcher, url, output, depth, include_extensions, filters, seeds):
+def _browse(fetcher, url, output, depth, include_extensions, filters, seeds, reuse=None):
     """Layer 4 under the profile: the Playwright crawl from `url`, or over the discovered
-    `seeds` alone, every navigation fetched by `fetcher` under its policy (Navigator).
+    `seeds` alone, every navigation fetched by `fetcher` under its policy (Navigator), except
+    the pages `reuse` (KeptResponses) holds from the engine's fetch of this run.
     Returns (CrawlResult, its RunReport, file -> record)."""
     nav = Navigator(fetcher, output, url, include_extensions, filters=filters,
-                    seeded=bool(seeds))
+                    seeded=bool(seeds), reuse=reuse)
     try:  # the Fetcher paces (policy.delay_ms); an update is the engine's
         res = run_playwright_crawl(url, output, depth, 0, include_extensions, None,
                                    seed_urls=seeds or None, filters=filters, navigator=nav)
@@ -199,16 +200,20 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
         raise click.ClickException(message)
 
     browse = headless
+    # a browser pass may follow the engine's fetch: it reuses what that fetch received
+    responses = KeptResponses() if not headless and fallback is None else None
     if not headless:
         if discovered:
             logger.info(f"[cascade] {name}: fetching {len(discovered)} URLs from "
                         f"{winning_layer}")
             res = fetch_url_list(discovered, output, policy, include_extensions,
-                                 fetcher=fetcher, filters=filters, previous=previous)
+                                 fetcher=fetcher, filters=filters, previous=previous,
+                                 responses=responses)
         else:
             logger.info(f"[cascade] layer-3 {name} crawl: link-graph fallback")
             res = mirror_site(url, output, policy, include_extensions, depth=depth,
-                              fetcher=fetcher, filters=filters, previous=previous)
+                              fetcher=fetcher, filters=filters, previous=previous,
+                              responses=responses)
         report, written, kept = res.report, res.files_downloaded, res.kept
         urls, records, changes = res.urls, res.records, res.changes
         unreached(report)
@@ -233,7 +238,7 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
                         + (f"{len(discovered)} URLs from {winning_layer}" if discovered
                            else "direct crawl"))
         pw, pw_report, pw_records = _browse(fetcher, url, output, depth, include_extensions,
-                                            filters, discovered)
+                                            filters, discovered, responses)
         written = sorted({*written, *pw.files_downloaded})  # rendered over the engine's copy
         kept = [f for f in kept if f not in written]
         urls, records = {**urls, **pw.urls}, {**records, **pw_records}

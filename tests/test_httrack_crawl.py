@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from dograpper.lib.httrack.crawl import fetch_url_list
+from dograpper.lib.httrack.crawl import KeptResponses, fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher
 from dograpper.lib.httrack.policy import build_policy
 from dograpper.lib.httrack.report import RunReport, format_report
@@ -854,3 +854,55 @@ def test_the_record_keeps_the_md5_of_the_payload_as_received(server, tmp_path):
     a = next(f for f in res.files_downloaded if f.endswith("a.html"))
     assert open(a, "rb").read() != body  # relinked
     assert res.records[a]["payload_md5"] == hashlib.md5(body).hexdigest()
+
+
+# -- the responses a later browser pass reuses (#160) --
+
+def run_kept(urls, out, kept, **kw):
+    policy = build_policy(**{"retries": 0, **kw})
+    ft = FakeTime()
+    return fetch_url_list(urls, str(out), policy, "html", responses=kept,
+                          fetcher=Fetcher(policy, clock=ft.clock, sleep=ft.sleep))
+
+
+def test_kept_responses_hold_the_pages_the_engine_fetched(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/a"] = (200, HTML, b"<p>a</p>")
+    script["/old"] = (301, {"location": "/b"}, b"")
+    script["/b"] = (200, HTML, b"<p>b</p>")
+    script["/gone"] = (404, HTML, b"x")
+    kept = KeptResponses()
+    run_kept([f"{base}/a", f"{base}/old", f"{base}/gone"], tmp_path, kept)
+    final, res = kept.take(f"{base}/a")
+    assert final == f"{base}/a" and res.body == b"<p>a</p>" and res.status == 200
+    final, res = kept.take(f"{base}/old")  # keyed by the URL requested, final after redirects
+    assert final == f"{base}/b" and res.body == b"<p>b</p>"
+    assert kept.take(f"{base}/gone") is None
+    assert kept.take(f"{base}/a") is None  # taken once: the memory is given back
+
+
+def test_kept_responses_stop_at_the_byte_cap(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/big"] = (200, HTML, b"x" * 20)
+    script["/s"] = (200, HTML, b"y" * 5)
+    kept = KeptResponses(limit=10)
+    run_kept([f"{base}/big", f"{base}/s"], tmp_path, kept)
+    assert kept.take(f"{base}/big") is None and kept.take(f"{base}/s") is not None
+
+
+def test_kept_responses_skip_a_page_the_update_kept(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/p"] = validated('"v"', b"<p>1</p>")
+    script["/p"] = (200, {**HTML, "etag": '"v"'}, b"<p>1</p>")
+    first = run([f"{base}/p"], tmp_path)
+    script["/p"] = validated('"v"', b"<p>1</p>")
+    kept = KeptResponses()
+    policy = build_policy(retries=0)
+    ft = FakeTime()
+    fetch_url_list([f"{base}/p"], str(tmp_path), policy, "html", responses=kept,
+                   previous=again(first, base, tmp_path),
+                   fetcher=Fetcher(policy, clock=ft.clock, sleep=ft.sleep))
+    assert kept.take(f"{base}/p") is None  # a 304: no body this run

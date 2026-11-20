@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.redact import redact_url
 
-from .crawl import (extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
+from .crawl import (KeptResponses, extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
                     stamp)
 from .fetcher import Fetcher
 from .links import url_key
@@ -46,8 +46,9 @@ def _is_page(res) -> bool:
 class Navigator:
     def __init__(self, fetcher: Fetcher, output_dir: str, start_url: str,
                  include_extensions: str, *, filters: UrlFilters | None = None,
-                 seeded: bool = False):
+                 seeded: bool = False, reuse: KeptResponses | None = None):
         self.fetcher, self.filters, self._seeded = fetcher, filters, seeded
+        self._reuse = reuse  # what the engine fetched earlier in this run (#160)
         self.report = RunReport()
         self._start, self._rule, self._front = start_url, start_rule(start_url), False
         self._lock = threading.Lock()  # fetch_page's report lock
@@ -105,8 +106,15 @@ class Navigator:
             return None
         self._prepared += 1
         self._front = url == self._start
-        outcome, final, res = fetch_page(url, self.fetcher, self.report, self._lock,
-                                         self._redirect_ok, referer=self._referers.get(url))
+        kept = self._reuse.take(url) if self._reuse is not None else None
+        if kept is not None and self._front and kept[0] != url:
+            kept = None  # a start URL's redirect re-bases the scope (_redirect_ok): fetch it
+        if kept is not None:  # fetched by the engine under the same policy: no second request
+            outcome, (final, res) = "ok", kept
+        else:
+            outcome, final, res = fetch_page(url, self.fetcher, self.report, self._lock,
+                                             self._redirect_ok,
+                                             referer=self._referers.get(url))
         if outcome != "ok":
             return None
         saved = self._local.get(url_key(final))
