@@ -33,6 +33,9 @@ struct Point {
     double x; ///< Horizontal position.
     double y; ///< Vertical position.
 
+    /// Where a point lies against a box.
+    enum { Inside, Outside };
+
     /// The distance to another point.
     double distance(const Point& other) const;
 };

@@ -100,6 +100,11 @@ Entry format:
 - **Rejected:** keeping every friend a function; a friend class as a member record with symbol_kind `class` (a member kind the brief does not list).
 - **Pending:** none.
 
+- **Decision:** an enum with no name is named `anonymous enum`, as Doxygen titles its section; its summary row names its first enumerator.
+- **Why:** the review found a brief-only anonymous enum named after its first enumerator; libstdc++ 13 has 13 such rows.
+- **Rejected:** keeping the page whole (anonymous enums are common in C headers).
+- **Pending:** none.
+
 - **Decision:** `Regions.copy_until_end()` in `_html.py` is the shared form of the "second copy of the text" that `sphinx.py` and `typedoc.py` each implement as `_tap`; the Doxygen adapter is its first user. The two existing copies stay as they are.
 - **Why:** the Doxygen adapter needed it (the name inside a summary row), which made it the third copy; the wave gave `sphinx.py` and `typedoc.py` to no lane, so this lane could not touch them.
 - **Rejected:** a third private copy in `doxygen.py`.

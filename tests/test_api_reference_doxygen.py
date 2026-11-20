@@ -35,7 +35,7 @@ def _page(name):
 def test_a_member_documented_in_the_summary_only_is_a_member_record():
     # A member with only a brief description has no detailed section: Doxygen puts its
     # anchor and its brief in the summary row, so the row is its record.
-    point, distance, x, y = split_page(_page("cpp/structshapes_1_1Point.html"))
+    point, _, distance, x, y = split_page(_page("cpp/structshapes_1_1Point.html"))
     assert (point.symbol, point.kind, point.symbol_kind, point.generator) == (
         "shapes::Point", "container", "struct", "doxygen")
     assert (point.anchor, point.container, point.breadcrumb) == ("", "", ["shapes::Point"])
@@ -44,6 +44,7 @@ def test_a_member_documented_in_the_summary_only_is_a_member_record():
         "A point on the plane.",
         "#include <shapes.hpp>",
         "A point on the plane.",  # the brief, repeated at the start of the detailed description
+        "Public Types: anonymous enum",
         "Public Member Functions: distance",
         "Public Attributes: x, y",
     ])
@@ -150,6 +151,14 @@ def test_friend_classes_are_names_and_related_symbols_keep_their_kind():
     assert (point_box.symbol, point_box.symbol_kind) == (f"{BOX}::PointBox", "typedef")
     assert point_box.text.split("\n")[:5] == [
         f"{BOX}::PointBox", CLASS_TEMPLATE, "using PointBox = Box<Point>", "related", "A box of points."]
+
+
+def test_an_anonymous_enum_is_named_as_doxygen_titles_it():
+    point, anonymous = split_page(_page("cpp/structshapes_1_1Point.html"))[:2]
+    assert (anonymous.symbol, anonymous.symbol_kind) == ("shapes::Point::anonymous enum", "enum")
+    assert anonymous.text == "\n".join([
+        "shapes::Point::anonymous enum", "enum { Inside , Outside }", "Where a point lies against a box."])
+    assert "Public Types: anonymous enum" in point.text.split("\n")
 
 
 def test_a_link_without_a_value_is_read_as_any_link():
@@ -453,7 +462,7 @@ def test_pack_writes_doxygen_records(tmp_path):
     assert (ring_push["symbol"], ring_push["container"]) == ("ring_push", "ring.h")
     assert "symbol" not in by_id["01_cpp/classshapes_1_1Box-members.html"]
     assert "c/annotated.html: Doxygen index, listing, source or topic page" in result.stderr
-    assert "API records:     11 pages split into 56 records (11 container, 45 member), 45 pages kept whole" \
+    assert "API records:     11 pages split into 57 records (11 container, 46 member), 45 pages kept whole" \
         in result.output
 
 

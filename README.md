@@ -1190,7 +1190,8 @@ dograpper serve ./pack   # search_chunks now ranks member records
     is its summary row and brief. The anchor is Doxygen's member id
     (`#a9b2c9af7709c2bb0ffabf015a63b470a`). Friend functions and related
     symbols (`\relates`) are member records under the class that documents
-    them; a friend class is only a name under `Friends`. A file page leaves out the
+    them; a friend class is only a name under `Friends`. An enum with no
+    name is `anonymous enum`, as Doxygen titles it. A file page leaves out the
     members of the namespaces it lists, which each namespace's page
     documents; the members of a namespace without a page (libstdc++'s `std`)
     are the file page's own, under their qualified names.

@@ -66,6 +66,7 @@ _SECTIONS = {
 }
 _DESCRIPTION = "Detailed Description"
 _NAMESPACES = "Namespaces"  # the summary section listing a file's documented namespaces
+_ANONYMOUS_ENUM = "anonymous enum"  # how Doxygen titles the section of an enum with no name
 
 
 class _Row:
@@ -245,6 +246,9 @@ class _Page(Regions):
         template, self._template = self._template, None
         if template is not None and row.anchor is None:
             row.anchor = template.anchor  # a member template's anchor sits in its template header row
+        if row.name is not None and _anonymous_enum(line(row.text), line(row.name)):
+            row.name = Text()
+            row.name.add(_ANONYMOUS_ENUM)  # the row names its first enumerator
         if row.name is not None:
             self.names.append((row.label, row.name))
         if row.anchor is None or row.inherited:
@@ -275,6 +279,12 @@ def _kind(title: str):
     if kind in _LISTING_PAGES:
         raise NotSplit(NOT_API)
     raise _unsupported(f"page kind {kind}")
+
+
+def _anonymous_enum(signature: str, name: str) -> bool:
+    """Whether a summary row declares an enum with no name: "enum { First, Second }"."""
+    head = signature.split("{", 1)[0]
+    return signature.startswith("enum") and "{" in signature and name not in head.split()
 
 
 def _declared_kind(signature: str) -> Optional[str]:
