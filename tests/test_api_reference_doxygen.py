@@ -139,6 +139,12 @@ def test_a_member_template_documented_in_the_summary_keeps_its_template_header()
         "Stores every item of a range, in order."])
 
 
+def test_a_link_without_a_value_is_read_as_any_link():
+    # html.parser gives a valueless attribute None, not "".
+    page = _page("cpp/structshapes_1_1Point.html").replace("<p><code>#include", "<p><a href>See also</a> <code>#include", 1)
+    assert split_page(page)[0].text.split("\n")[2] == "See also #include <shapes.hpp>"
+
+
 def test_overloads_are_one_record_each_under_their_own_anchor():
     recs = _records("cpp/classshapes_1_1Box.html")
     by_copy, by_move = recs["a9b2c9af7709c2bb0ffabf015a63b470a"], recs["ab1ff8e2bd6b1b6d72d3413e74051d165"]

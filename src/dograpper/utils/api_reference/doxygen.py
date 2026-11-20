@@ -149,6 +149,7 @@ class _Page(Regions):
             return
         if not self._in_contents:
             return
+        href = attr.get("href") or ""  # html.parser gives a valueless attribute None
         top = len(self._stack) == self._depth + 1  # a child of div.contents
         anchor = titled = None
         if top:
@@ -157,10 +158,10 @@ class _Page(Regions):
             if titled is not None and not (tag == "div" and "memitem" in classes):
                 self._fail("an h2.memtitle without its div.memitem")
         if ((tag == "span" and ("permalink" in classes or "overload" in classes))
-                or (tag == "a" and attr.get("href", "").endswith("#details"))
+                or (tag == "a" and href.endswith("#details"))
                 # "Go to the source code of this file.", a link in a p of its own: the include
                 # line's link to the same page sits one level deeper, in its code
-                or (tag == "a" and attr.get("href", "").endswith("_source.html")
+                or (tag == "a" and href.endswith("_source.html")
                     and len(self._stack) == self._depth + 2)
                 or (tag == "div" and ("dynheader" in classes or "dyncontent" in classes or "ttc" in classes))):
             self.skip(closers)  # permalink sign, "[1/2]" after an overloaded name, "More...", diagrams, code tooltips
