@@ -19,7 +19,7 @@ class DograpperOptions(SphinxDirective):
 
     def run(self):
         from dograpper.cli import cli
-        from dograpper.commands.docs import OPTION_COLUMNS, option_cells
+        from dograpper.commands.docs import OPTION_COLUMNS, command_context, option_cells
 
         # Sphinx cannot see that this page depends on the CLI source.
         for mod in list(sys.modules.values()):
@@ -27,12 +27,10 @@ class DograpperOptions(SphinxDirective):
                 self.env.note_dependency(mod.__file__)
 
         name = self.arguments[0]
-        root = click.Context(cli, info_name="dograpper")
         if name == "dograpper":
-            cmd, ctx = cli, root
+            cmd, ctx = cli, command_context(cli)
         elif name in cli.commands:
-            cmd = cli.commands[name]
-            ctx = click.Context(cmd, info_name=name, parent=root)
+            cmd, ctx = cli.commands[name], command_context(cli, name)
         else:
             raise self.error(f"dograpper-options: unknown command {name!r}")
 
