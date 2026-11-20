@@ -88,3 +88,17 @@ Entradas abaixo, uma seção `##` por termo.
 **Onde apareceu:** `site/index.md` e `myst-parser` no extra `docs` (spec `docs/superpowers/specs/2026-11-20-docs-site-design.md`, 2026-11-20).
 **Por que importa pra decisão:** permite reaproveitar o texto do README em Markdown sem reescrever em reStructuredText.
 **Nível:** 🆕 novo
+
+## client hints (`sec-ch-ua*`)
+**Em uma frase:** headers que um navegador Chromium manda dizendo a própria marca e versão (`sec-ch-ua`), se é celular (`sec-ch-ua-mobile`) e o sistema (`sec-ch-ua-platform`), repetindo em campos separados o que o User-Agent diz numa frase só.
+**Analogia:** um crachá com nome, cargo e setor ao lado do cartão de visita; quem compara os dois percebe quando não batem.
+**Onde apareceu:** `lib/fire_engine/fetcher.py` (`_CLIENT_HINTS`, `_TARGET_HEADERS`), #136 e #157, 2026-11-20.
+**Por que importa pra decisão:** com um `--user-agent` próprio, os hints do perfil diriam outro navegador; por isso o dograpper os derruba, e troca pelo `?1` o `?0` que o alvo Android do `curl_cffi` manda.
+**Nível:** 🆕 novo
+
+## upgrade h2c
+**Em uma frase:** pedido de um cliente a um servidor `http://` (sem TLS) para trocar a conversa para HTTP/2 no meio da conexão, com os headers `Upgrade: h2c` e `HTTP2-Settings`; nenhum navegador faz isso.
+**Analogia:** chegar a um balcão e pedir para seguir o atendimento num idioma que só robô fala.
+**Onde apareceu:** `lib/fire_engine/fetcher.py` (`HTTP_VERSION` = `V2TLS`), #156, 2026-11-20.
+**Por que importa pra decisão:** essas linhas denunciavam o fire-engine como não-navegador em sites só `http://`; com HTTP/2 só sobre TLS elas somem, e o HTTPS segue em HTTP/2.
+**Nível:** 🆕 novo
