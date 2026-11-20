@@ -682,3 +682,13 @@ picked option (a).
 - #160: the cap of the engine's response store is 128 MiB; it keeps every 2xx body (non-HTML too);
   a start URL that redirected is fetched again, since only a fetch re-bases the scope.
   `run_profile` (owner: `fire`) gained the sink creation and the `responses=` argument.
+
+## 2026-11-20 — `--quiet` and `pack --report` / the stub scan window (#139, #163)
+
+- **Decision:** `pack --report` under `-q` loses its terminal summary (the report
+  file is still written); it goes through `say()` like the other summaries. Only
+  `--dry-run` is kept as "output that is the purpose of a flag". The redirect-stub
+  detector reads the first 16 KiB of a file, as the error-page one does: a larger
+  page is not a stub.
+- **Why:** the Agent Brief names `--dry-run` alone; a stub is a few hundred bytes.
+- **Pending:** maintainer: keep the `--report` terminal output under `-q`?
