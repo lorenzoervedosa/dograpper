@@ -6,8 +6,7 @@ dograpper pack ./docs -o ./chunks --format jsonl --cross-refs --score
 
 ## More on RAG ingestion
 
-Add `--context-header` to the recommended pipeline so each record carries its
-heading breadcrumb:
+Add `--context-header` to the recommended pipeline:
 
 ```bash
 dograpper download <url> -o ./docs
