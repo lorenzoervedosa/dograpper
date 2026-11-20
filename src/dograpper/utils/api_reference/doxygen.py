@@ -168,7 +168,7 @@ class _Page(Regions):
         elif tag == "table" and "memberdecls" in classes:
             self.region(closers)  # summary text is dropped; rows, names and briefs are read below
             self.set_until_end("_decls", True, closers)
-            self._label = self._inherit = None
+            self._label = self._inherit = self._template = self._last = None
         elif self._decls:
             self._decls_start(tag, attr, classes, closers)
         elif top:
