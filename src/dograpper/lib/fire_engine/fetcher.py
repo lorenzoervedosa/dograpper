@@ -133,8 +133,9 @@ class CurlCffiFetcher(Fetcher):
         # each layer replaces a same-named header of the one before; the user's --header last
         pairs = merge_headers(_TARGET_HEADERS.get(self._impersonate, {}).items(),
                               [(k, v) for k, v in headers if k.lower() in _FORWARDED])
-        if self._user_agent:  # a None value makes curl_cffi drop the profile's line
+        if self._user_agent:
             pairs = merge_headers(pairs, [("User-Agent", self._user_agent),
+                                          # None: curl_cffi drops the profile's line
                                           *((hint, None) for hint in _CLIENT_HINTS)])
         req_headers = dict(merge_headers(pairs, self.policy.headers))
         proxies = ({"http": self._proxy, "https": self._proxy}

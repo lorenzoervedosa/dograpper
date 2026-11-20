@@ -62,6 +62,7 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     for param in params:
         value = merged_params[param.name]
         if param.multiple:  # --header: a CLI tuple, or a JSON list of strings
+            # Second copy of download.py's _url_filters list check; a third gets a helper.
             if not isinstance(value, (list, tuple)) or not all(isinstance(v, str) for v in value):
                 raise click.UsageError(f"{_flag(param.name)}{FROM_CONFIG} must be a "
                                        "list of 'Name: value' strings")
