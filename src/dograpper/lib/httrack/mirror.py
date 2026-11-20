@@ -25,7 +25,7 @@ from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .changes import Changes
-from .crawl import (MAX_REDIRECTS, HttrackResult, Previous, extension_set, fetch_page,
+from .crawl import (MAX_REDIRECTS, HttrackResult, RunResponses, Previous, extension_set, fetch_page,
                     moved_request, previous_files, record_of, relink, reserve_names, save_file,
                     sends, stamp, uncached)
 from .fetcher import Fetcher, same_host
@@ -131,7 +131,8 @@ def skipped_by_extension(url: str, exts: set) -> bool:
 def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extensions: str, *,
                 depth: int = 0, fetcher: Fetcher | None = None,
                 filters: UrlFilters | None = None,
-                previous: Manifest | None = None) -> HttrackResult:
+                previous: Manifest | None = None,
+                responses: RunResponses | None = None) -> HttrackResult:
     """Crawl from `url` into `output_dir`; `depth` caps link hops (0: unlimited) and
     policy.max_links the URLs queued (the report then says partial). The result maps each
     written file to the URL requested for it (preferring one that needed no redirect, then
@@ -194,7 +195,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
         return fetch_page(entry.url, fetcher, report, lock, None,
                           kind="linked" if entry.referer else "navigate",
                           referer=entry.referer, meta=entry.meta, prev=entry.prev,
-                          tried=changes and changes.tried)
+                          tried=changes and changes.tried, responses=responses)
 
     def handle(entry: _Entry, outcome: str, final: str, res) -> None:
         safe, via = redact_url(entry.url), redact_url(entry.referer) if entry.referer else None

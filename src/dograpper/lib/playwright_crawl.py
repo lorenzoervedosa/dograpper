@@ -9,7 +9,6 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse, urljoin
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
-from pathlib import Path
 
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.progress import ProgressReporter
@@ -112,7 +111,15 @@ def run_playwright_crawl(
                     to_visit.append((absolute_link, current_depth + 1))
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        try:
+            browser = p.chromium.launch(headless=True)
+        except Exception as e:
+            first = (str(e).splitlines() or [type(e).__name__])[0]
+            if "Executable doesn't exist" in first:
+                raise RuntimeError(
+                    "Chromium is not installed for Playwright. "
+                    "Run: dograpper doctor --install") from None
+            raise RuntimeError(first) from None
         context = browser.new_context(**(navigator.context_options() if navigator else {}))
         page = context.new_page()
         if navigator is not None:
@@ -215,9 +222,19 @@ def run_playwright_crawl(
 
                 if content is not None:
                     # Extract links
+                    # a[href] plus the target of a meta refresh in the rendered DOM, which
+                    # catches a refresh that fires after the render wait
                     links = page.evaluate('''() => {
-                        return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
+                        const hrefs = Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
+                        for (const m of document.querySelectorAll('meta[http-equiv]')) {
+                            if (m.httpEquiv.toLowerCase() !== 'refresh') continue;
+                            const t = /url\\s*=\\s*['"]?([^'";]+)/i.exec(m.content);
+                            if (t) hrefs.push(new URL(t[1].trim(), document.baseURI).href);
+                        }
+                        return hrefs;
                     }''')
+                    if navigator is not None:  # navigations the page started itself, aborted
+                        links = links + navigator.initiated()
                     follow(links, target, current_depth)
 
             except Exception as e:

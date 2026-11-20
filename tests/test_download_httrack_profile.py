@@ -6,7 +6,8 @@ No test here touches the network: ``Fetcher`` is replaced by FakeFetcher.
 import json
 import logging
 import os
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -409,6 +410,19 @@ def test_httrack_cache_0_lists_no_unreached_file(crawl):
     assert "Not reached" not in res.output
 
 
+def test_httrack_headless_without_chromium_is_a_one_line_error(ht, monkeypatch):
+    out, _, _ = ht
+    api = MagicMock()
+    api.sync_playwright.return_value.__enter__.return_value.chromium.launch.side_effect = \
+        Exception("BrowserType.launch: Executable doesn't exist at /x/chrome\n+----+")
+    monkeypatch.setitem(sys.modules, "playwright", MagicMock())
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", api)
+    res = run(out, "--downloader", "httrack", "--headless")
+    assert res.exit_code == 1
+    assert "dograpper doctor --install" in res.output
+    assert "Traceback" not in res.output and "+----+" not in res.output
+
+
 def test_httrack_headless_runs_playwright_under_the_policy(ht):
     """As the wget cascade's --headless: layers 1+2 (under the profile), then the browser."""
     out, fu, _ = ht
@@ -435,6 +449,23 @@ def test_httrack_spa_falls_back_to_playwright_with_the_discovered_seeds(ht):
     assert pw.call_args.kwargs["navigator"].report is not engine[0].report
     assert res.output.index("Responses:") < res.output.index("Playwright pass:")
     assert "Files downloaded: 1" in res.output  # the page the browser rendered over the shell
+
+
+def test_httrack_browser_pass_reuses_what_the_engine_received(ht):
+    out, fu, _ = ht
+    seen = []
+    fu.side_effect = lambda urls, o, *a, **k: seen.append(k["responses"]) or _res(o)
+    with patch(f"{P}.is_spa", return_value=True), \
+         patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out, ("p0.html",))) as pw:
+        assert run(out, "--downloader", "httrack").exit_code == 0
+    assert seen[0] is not None and pw.call_args.kwargs["navigator"]._reuse is seen[0]
+
+
+def test_httrack_headless_has_no_engine_responses_to_reuse(ht):
+    out, fu, _ = ht
+    with patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out)) as pw:
+        assert run(out, "--downloader", "httrack", "--headless").exit_code == 0
+    assert pw.call_args.kwargs["navigator"]._reuse is None
 
 
 @pytest.mark.parametrize("flag", ["--cache=1", "--updatehack", "--do-not-recatch", "--changes"])

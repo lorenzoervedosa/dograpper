@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dograpper.lib.httrack.browser import Navigator
+from dograpper.lib.httrack.crawl import RunResponses
+from dograpper.lib.httrack.fetcher import FetchResult
 from dograpper.lib.httrack.fetcher import Fetcher
 from dograpper.lib.httrack.policy import build_policy
 from dograpper.lib.playwright_crawl import run_playwright_crawl
@@ -40,8 +42,8 @@ class Frame:
 
 
 class Request:
-    def __init__(self, url, frame, nav=True):
-        self.url, self.frame, self._nav = url, frame, nav
+    def __init__(self, url, frame, nav=True, method="GET"):
+        self.url, self.frame, self._nav, self.method = url, frame, nav, method
 
     def is_navigation_request(self):
         return self._nav
@@ -62,8 +64,28 @@ class Route:
 
 
 class Context:
+    def __init__(self):
+        self.events = {}
+
     def route(self, pattern, handler):
         self.pattern, self.handler = pattern, handler
+
+    def on(self, event, handler):
+        self.events[event] = handler
+
+
+class Response:
+    """What the context's response event hands over; body() works only while `open`."""
+    def __init__(self, request, status=200, headers=None, body=b"x"):
+        self.request, self.status, self.headers = request, status, headers or {}
+        self._body = body
+
+    @property
+    def url(self):
+        return self.request.url
+
+    def body(self):
+        return self._body
 
 
 class Page:
@@ -163,9 +185,25 @@ def test_route_scope_of_requests_that_are_no_crawl_navigation(server, tmp_path):
         ("abort", "blockedbyclient")]
     # the crawled page still gets its armed answer
     assert navigate(ctx, page, base + "/docs/")[0][0] == "fulfill"
-    # and a navigation the page starts itself (meta refresh, script) is not followed
+    # and a navigation the page starts itself (meta refresh, script) is aborted, not opened
     assert navigate(ctx, page, base + "/docs/next") == [("abort", "blockedbyclient")]
     assert seen == ["/robots.txt", "/docs/"]
+
+
+def test_page_started_navigation_is_captured_for_that_page_only(server, tmp_path):
+    base, script, _ = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"<p>page</p>")
+    nav, ctx, page = navigator(base, tmp_path)
+    nav.prepare(base + "/docs/")
+    navigate(ctx, page, base + "/docs/")
+    navigate(ctx, page, base + "/docs/next")
+    navigate(ctx, page, base + "/docs/frame", frame=Frame())  # an iframe is no capture
+    assert nav.initiated() == [base + "/docs/next"]
+    assert nav.initiated() == []  # taken once
+    navigate(ctx, page, base + "/docs/stale")
+    nav.prepare(base + "/docs/")  # the next page starts clean
+    assert nav.initiated() == []
 
 
 def test_rendered_pages_are_named_recorded_and_relinked_like_the_engine(server, tmp_path):
@@ -368,3 +406,204 @@ def test_raw_file_gets_its_last_modified_time_too(server, tmp_path):
     path = nav.save(base + "/docs/n.txt", "<pre>n</pre>")
     nav.finish()
     assert os.path.getmtime(path) == calendar.timegm((2026, 11, 18, 10, 0, 0))
+
+
+def _starts_navigation(ctx, page, base, target):
+    """A page whose render starts a navigation to `target` (a script or a meta refresh)."""
+    def goto(u, **_):
+        if u == base + "/docs/":
+            handler = ctx.route.call_args.args[1]
+            for url in (u, target):
+                handler(Route(Request(url, page.main_frame)))
+    page.goto.side_effect = goto
+
+
+def test_crawl_queues_the_navigation_a_page_started_as_its_link(server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    referers = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"shell")
+    script["/docs/next"] = lambda h: referers.append(h.get("Referer")) or (200, HTML, b"n")
+    _starts_navigation(ctx, page, base, base + "/docs/next")
+    nav, res = crawl_with(base, tmp_path)
+    assert seen == ["/robots.txt", "/docs/", "/docs/next"]  # fetched by the profile, later
+    assert referers == [base + "/docs/"]
+    assert len(res.files_downloaded) == 2
+
+
+def test_crawl_never_requests_a_started_navigation_out_of_scope_or_filtered(
+        server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"shell")
+    for target in ("http://other.invalid/x", base + "/docs/no-1", base + "/blog/x"):
+        _starts_navigation(ctx, page, base, target)
+        crawl_with(base, tmp_path, filters=UrlFilters(["-*/no-*"]))
+    assert seen.count("/docs/") == 3 and not [u for u in seen if u not in ("/robots.txt", "/docs/")]
+
+
+def _chain(ctx, page, base, nexts):
+    """Each page the browser opens starts a navigation to nexts[its URL]."""
+    def goto(u, **_):
+        if u.startswith("http"):
+            handler = ctx.route.call_args.args[1]
+            handler(Route(Request(u, page.main_frame)))
+            if u in nexts:
+                handler(Route(Request(nexts[u], page.main_frame)))
+    page.goto.side_effect = goto
+
+
+def test_crawl_started_navigation_holds_depth(server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    for p in ("/docs/", "/docs/a", "/docs/b"):
+        script[p] = (200, HTML, b"shell")
+    _chain(ctx, page, base, {base + "/docs/": base + "/docs/a", base + "/docs/a": base + "/docs/b"})
+    crawl_with(base, tmp_path, depth=1)
+    assert seen == ["/robots.txt", "/docs/", "/docs/a"]  # /docs/b is a hop too far
+
+
+def test_crawl_started_navigation_of_a_seeded_run_opens_no_start_url(server, tmp_path, browser):
+    base, script, seen = server
+    _, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    for p in ("/docs/a", "/docs/b"):
+        script[p] = (200, HTML, b"shell")
+    _chain(ctx, page, base, {base + "/docs/a": base + "/docs/b"})
+    crawl_with(base, tmp_path, seed_urls=[base + "/docs/a"])
+    assert seen == ["/robots.txt", "/docs/a", "/docs/b"]  # never the start URL /docs/
+
+
+def load(ctx, page, url, *, method="GET", status=200, headers=None, body=b"js"):
+    """A subresource the browser loads: route it, and when the route lets it through, the
+    server answers and the response event fires. Returns (route calls, went to the server)."""
+    req = Request(url, page.main_frame, nav=False, method=method)
+    route = Route(req)
+    ctx.handler(route)
+    went = route.calls == [("continue",)]
+    if went:
+        ctx.events["response"](Response(req, status, headers, body))
+    return route.calls, went
+
+
+def test_subresource_is_requested_once_per_run(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    js, css = base + "/app.js", base + "/site.css"
+    assert load(ctx, page, js, body=b"code") == ([("continue",)], True)
+    assert load(ctx, page, css, headers={"content-type": "text/css"}, body=b"a{}") == (
+        [("continue",)], True)
+    (call,), went = load(ctx, page, js)  # the second page's request: answered from memory
+    assert not went and call[0] == "fulfill"
+    assert call[1]["status"] == 200 and call[1]["body"] == b"code"
+    (call,), went = load(ctx, page, css)
+    assert not went and call[1]["headers"] == {"content-type": "text/css"}
+
+
+def test_subresource_cache_replays_decoded_without_stale_length(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    url = base + "/a.js"
+    load(ctx, page, url, headers={"content-encoding": "gzip", "content-length": "3",
+                                  "set-cookie": "a=1", "content-type": "text/javascript"},
+         body=b"decoded")
+    (call,), _ = load(ctx, page, url)
+    assert call[1]["headers"] == {"content-type": "text/javascript"}
+
+
+@pytest.mark.parametrize("kw", [
+    {"headers": {"cache-control": "private, No-Store"}},
+    {"status": 404}, {"status": 304}, {"method": "POST"}])
+def test_subresource_is_not_kept_unless_get_200_without_no_store(server, tmp_path, kw):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    url = base + "/x.js"
+    assert load(ctx, page, url, **kw)[1]
+    assert load(ctx, page, url, **kw)[1]  # the second request still goes to the server
+
+
+def test_a_navigation_response_is_never_kept(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    req = Request(base + "/docs/x", page.main_frame, nav=True)
+    ctx.events["response"](Response(req))
+    assert load(ctx, page, base + "/docs/x")[1]
+
+
+def test_subresource_cache_is_bounded_in_bytes_without_eviction(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    nav._cache_limit = 10
+    a, b, c = (base + p for p in ("/a.js", "/b.js", "/c.js"))
+    load(ctx, page, a, body=b"123456")
+    load(ctx, page, b, body=b"123456")  # would pass 10 bytes: passes through unkept
+    load(ctx, page, c, body=b"1234")  # still fits
+    assert not load(ctx, page, a)[1] and not load(ctx, page, c)[1]
+    assert load(ctx, page, b)[1]
+
+
+def test_subresource_body_unreadable_is_not_fatal_but_not_kept(server, tmp_path):
+    base, _, _ = server
+    nav, ctx, page = navigator(base, tmp_path)
+    req = Request(base + "/g.js", page.main_frame, nav=False)
+    res = Response(req)
+    res.body = lambda: (_ for _ in ()).throw(Exception("No resource with given identifier"))
+    ctx.events["response"](res)
+    assert load(ctx, page, base + "/g.js")[1]
+
+
+def reusing(base, out, kept, **kw):
+    policy = build_policy(retries=0, **kw)
+    ft = FakeTime()
+    nav = Navigator(Fetcher(policy, clock=ft.clock, sleep=ft.sleep), str(out), base + "/docs/",
+                    "html", reuse=kept)
+    ctx, page = Context(), Page()
+    nav.attach(ctx, page)
+    return nav, ctx, page
+
+
+def test_prepare_reuses_the_response_the_engine_fetched(server, tmp_path):
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/new"] = (200, HTML, b"<p>fetched anew</p>")
+    kept = RunResponses()
+    kept.keep(base + "/docs/a", base + "/docs/a",
+              FetchResult(base + "/docs/a", status=200, headers=HTML, body=b"<p>engine</p>"))
+    nav, ctx, page = reusing(base, tmp_path, kept)
+    assert nav.prepare(base + "/docs/a") == base + "/docs/a"
+    (call,) = navigate(ctx, page, base + "/docs/a")
+    assert call[0] == "fulfill" and call[1]["body"] == b"<p>engine</p>"
+    assert "/docs/a" not in seen  # no second request
+    # a page found only by rendering goes through the fetcher, under the full policy
+    assert nav.prepare(base + "/docs/new") == base + "/docs/new"
+    assert seen == ["/robots.txt", "/docs/new"]
+
+
+def test_prepare_fetches_a_reused_start_url_that_redirected(server, tmp_path):
+    """The start URL's redirect re-bases the scope (rescope), which only a fetch does."""
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (301, {"location": "/docs/home"}, b"")
+    script["/docs/home"] = (200, HTML, b"<p>home</p>")
+    kept = RunResponses()
+    kept.keep(base + "/docs/", base + "/docs/home",
+              FetchResult(base + "/docs/home", status=200, headers=HTML, body=b"<p>e</p>"))
+    nav, ctx, page = reusing(base, tmp_path, kept)
+    assert nav.prepare(base + "/docs/") == base + "/docs/home"
+    assert "/docs/" in seen
+
+
+def test_reused_page_is_saved_like_a_fetched_one(server, tmp_path):
+    base, script, seen = server
+    script["/robots.txt"] = (404, {}, b"")
+    kept = RunResponses()
+    kept.keep(base + "/docs/a", base + "/docs/a",
+              FetchResult(base + "/docs/a", status=200, headers=HTML, body=b"<p>engine</p>"))
+    nav, ctx, page = reusing(base, tmp_path, kept)
+    nav.prepare(base + "/docs/a")
+    path = nav.save(base + "/docs/a", "<p>rendered</p>")
+    assert open(path).read() == "<p>rendered</p>"
+    assert nav.records[path]["status"] == 200 and nav.records[path]["redirected"] is False

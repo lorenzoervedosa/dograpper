@@ -271,6 +271,9 @@ stays `0.0.0.dev0`.
 
 ### Changed
 
+- `download --downloader httrack` over a result that looks client-rendered (and `sync`) no longer requests each page a second time for the browser pass: the pages the engine already fetched in the run (up to 128 MiB in memory) are handed to the browser. ([#160])
+- `download --downloader httrack --headless` requests a script or stylesheet that several pages share once per run, instead of once per page (a per-run in-memory cache of at most 64 MiB; nothing is written to disk). ([#167])
+- `download --downloader httrack --headless` follows a navigation a page starts itself (meta refresh, `location =`) as a link of that page, within scope, `--filter`, `--depth` and `--max-links`, instead of dropping it. ([#159])
 - `pack --token-encoding` with an unknown name is a usage error (exit 2) before anything is packed, from the command line and from the `token-encoding` config key; before, it packed, warned once per chunk and exited 0 without the token lines. ([#144])
 - `pack --dedup-threshold` outside 0 to 10, or not an integer in the config, is a usage error (exit 2), from the command line and from the `dedup-threshold` config key; before, any integer was accepted. ([#142])
 - `pack` now packs documentation formats only by default (`.html`, `.htm`,
@@ -333,6 +336,7 @@ stays `0.0.0.dev0`.
 
 ### Fixed
 
+- `download --headless` (also with `--downloader httrack`, and `sync`) without an installed Chromium prints one line naming `dograpper doctor --install` and exits 1, instead of a Playwright traceback; any other browser launch failure prints Playwright's first line. ([#166])
 - `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
 - `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
 - `drift -o` and `eval -o` on a path that cannot be written print one error line
@@ -576,3 +580,7 @@ stays `0.0.0.dev0`.
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
+[#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
+[#159]: https://github.com/lorenzoervedosa/dograpper/issues/159
+[#167]: https://github.com/lorenzoervedosa/dograpper/issues/167
+[#160]: https://github.com/lorenzoervedosa/dograpper/issues/160

@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.redact import redact_url
 
-from .crawl import (extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
+from .crawl import (RunResponses, extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
                     stamp)
 from .fetcher import Fetcher
 from .links import url_key
@@ -32,6 +32,13 @@ logger = logging.getLogger(__name__)
 # The Fetcher hands the body over decoded; fulfill() sets its own length.
 _DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding",
                       "connection", "keep-alive"})
+# a replayed subresource sets no cookie again: the first answer already did
+_NOT_REPLAYED = _DROPPED | {"set-cookie"}
+
+
+# Subresources the browser fetched, kept in memory for the run (spec 5.2): bounded in total
+# bytes, no eviction. 64 MiB holds the shared scripts and styles of a documentation site.
+SUBRESOURCE_CACHE_BYTES = 64 * 1024 * 1024
 
 
 def _is_page(res) -> bool:
@@ -41,8 +48,9 @@ def _is_page(res) -> bool:
 class Navigator:
     def __init__(self, fetcher: Fetcher, output_dir: str, start_url: str,
                  include_extensions: str, *, filters: UrlFilters | None = None,
-                 seeded: bool = False):
+                 seeded: bool = False, reuse: RunResponses | None = None):
         self.fetcher, self.filters, self._seeded = fetcher, filters, seeded
+        self._reuse = reuse  # what the engine fetched earlier in this run (#160)
         self.report = RunReport()
         self._start, self._rule, self._front = start_url, start_rule(start_url), False
         self._lock = threading.Lock()  # fetch_page's report lock
@@ -51,6 +59,10 @@ class Navigator:
         self._last = None   # (final URL, FetchResult) of the last prepare()
         self._prepared = 0  # URLs prepare() fetched: policy.max_links caps them
         self._frame = None
+        # subresource URL -> its answer; a second byte-capped store, see crawl.RunResponses
+        self._cache: dict[str, tuple[int, dict, bytes]] = {}
+        self._cache_bytes, self._cache_limit = 0, SUBRESOURCE_CACHE_BYTES
+        self._started: list[str] = []  # navigations the current page started itself
         self._files: dict[str, str] = {}  # saved file -> URL it came from
         self._pages: dict[str, str] = {}  # the HTML pages among them, for relink
         self._local: dict[str, str] = {}  # url_key -> saved file
@@ -66,6 +78,7 @@ class Navigator:
         """Route every request of `context`; `page` is the one the crawl saves."""
         self._frame = page.main_frame
         context.route("**/*", self._route)
+        context.on("response", self._response)
 
     def follows(self, url: str, page: str) -> bool:
         """Whether the crawl follows `url`, a link of `page`, as mirror_site queues one: in
@@ -90,13 +103,21 @@ class Navigator:
         (fetch_page); return the URL the browser is to open, its answer armed for that
         navigation, or None when the policy refused it (the report says why)."""
         self._armed = None  # never a stale answer for whatever the browser opens next
+        self._started = []  # a capture belongs to the page that produced it
         if self._prepared >= self.fetcher.policy.max_links:
             self.report.partial = True
             return None
         self._prepared += 1
         self._front = url == self._start
-        outcome, final, res = fetch_page(url, self.fetcher, self.report, self._lock,
-                                         self._redirect_ok, referer=self._referers.get(url))
+        reused = self._reuse.take(url) if self._reuse is not None else None
+        if reused is not None and self._front and reused[0] != url:
+            reused = None  # a start URL's redirect re-bases the scope (_redirect_ok): fetch it
+        if reused is not None:  # fetched by the engine under the same policy: no second request
+            outcome, (final, res) = "ok", reused
+        else:
+            outcome, final, res = fetch_page(url, self.fetcher, self.report, self._lock,
+                                             self._redirect_ok,
+                                             referer=self._referers.get(url))
         if outcome != "ok":
             return None
         saved = self._local.get(url_key(final))
@@ -104,6 +125,12 @@ class Navigator:
             self._local[url_key(url)] = saved
         self._armed, self._last = res, (final, res)
         return final
+
+    def initiated(self) -> list[str]:
+        """The main-frame navigations the page just crawled started itself (aborted, never
+        opened), once: the crawl queues them as links of that page."""
+        started, self._started = self._started, []
+        return started
 
     @property
     def renders(self) -> bool:
@@ -145,20 +172,45 @@ class Navigator:
                extended_parsing=policy.extended_parsing)
         stamp(self._files, self.records, self.report)
 
+    def _response(self, response) -> None:
+        """Keep what the server answered a subresource (GET, 200, no `no-store`), read here
+        because the body is gone once the page closes, until the byte bound is reached."""
+        req = response.request
+        if (self._cache_bytes >= self._cache_limit or req.is_navigation_request() or req.method != "GET" or response.status != 200
+                or req.url in self._cache or "no-store" in
+                (response.headers.get("cache-control") or "").lower()):
+            return
+        try:
+            body = response.body()
+        except Exception as e:  # a cache miss only: the page rendered with this response
+            logger.debug("browser: %s not kept: %s", redact_url(req.url), e)
+            return
+        if self._cache_bytes + len(body) > self._cache_limit:
+            return
+        self._cache_bytes += len(body)
+        self._cache[req.url] = (response.status, response.headers, body)
+
     def _route(self, route) -> None:
         req = route.request
         if urlsplit(req.url).path.startswith("/cdn-cgi/"):  # never requested (spec 5.4)
             route.abort("blockedbyclient")
             return
         if not req.is_navigation_request():  # a subresource: the browser's own request
-            route.continue_()
+            cached = self._cache.get(req.url) if req.method == "GET" else None
+            if cached is None:
+                route.continue_()
+            else:  # asked before in this run: answered from memory, nothing sent
+                status, headers, body = cached
+                route.fulfill(status=status, body=body, headers={
+                    k: v for k, v in headers.items() if k not in _NOT_REPLAYED})
             return
         if req.frame is not self._frame:  # an iframe or a popup: never part of the saved page
             route.abort("blockedbyclient")
             return
         res, self._armed = self._armed, None
-        if res is None:  # one the page started itself (meta refresh, script): not followed
-            logger.debug("browser: navigation to %s not followed", redact_url(req.url))
+        if res is None:  # one the page started itself (meta refresh, script): a link instead
+            logger.debug("browser: navigation to %s queued as a link", redact_url(req.url))
+            self._started.append(req.url)
             route.abort("blockedbyclient")
             return
         route.fulfill(status=res.status, body=res.body,

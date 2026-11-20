@@ -190,11 +190,18 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     forbids legitimate assets.
   - What bounds the load: the navigations, paced by the `Fetcher` one page at
     a time, and Chromium's own per-host connection limit.
-  - The HTTP cache does **not** soften it: Playwright turns Chromium's cache
-    off while routing is on, and the profile routes every request (measured
-    with Playwright 1.58: a `max-age=3600` script was fetched once per page,
-    against once per run without routing). Each page fetches its
-    subresources again.
+  - Chromium's HTTP cache does not soften it: Playwright turns it off while
+    routing is on, and the profile routes every request (measured with
+    Playwright 1.58: a `max-age=3600` script was fetched once per page,
+    against once per run without routing). The profile keeps its own
+    per-run cache instead: the first request for a subresource URL is
+    Chromium's own and its body is read from the context's response event
+    (inside the callback, while the page is open); later requests for it in
+    the same run are answered with `route.fulfill()` from memory. Only GET
+    answers with status 200 and no `Cache-Control: no-store` are kept, up to
+    64 MiB in total (past it responses pass through unkept, no eviction);
+    nothing goes to disk or to the manifest, and `max-age` is not honored.
+    `route.fetch()` is not used: its TLS is the Playwright driver's.
 - **Group selection:** a `dograpper` UA token (case-insensitive prefix) beats
   `*`, and consecutive `User-agent:` lines form one group.
 - **Matching:** longest pattern wins and Allow wins ties.
@@ -575,9 +582,6 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- The Playwright pass (§7, PR 4) does not follow a navigation a page starts
-  itself (meta refresh, `location =`), where §5.5 counts meta refresh as a
-  link. Decided: queue it as a link. Tracked in [#159](https://github.com/lorenzoervedosa/dograpper/issues/159).
 
 ## 6. Code layout (proposal; the plan may refine)
 
@@ -636,16 +640,24 @@ README and CHANGELOG.
      Playwright 1.58's Chromium), which would leave the policy.
    - Subresources are Chromium's own requests: the §5.2 **deviation** (user
      decision, 2026-11-19); `/cdn-cgi/` is aborted for every request.
-   - Not followed: iframes, popups and navigations a page starts itself (meta
-     refresh, `location =`). Decided (2026-11-19): queue them as links, not
-     implemented yet, tracked in [#159](https://github.com/lorenzoervedosa/dograpper/issues/159) (Known gaps). A seeded run opens its seeds alone; followed links carry their
+   - Not followed: iframes and popups. A navigation a page starts itself (meta
+     refresh, `location =`) is aborted and queued as a link of that page
+     (decided 2026-11-19; the route handler captures it, and the rendered DOM's
+     meta refresh is read too, for one that fires after the render wait). A seeded run opens its seeds alone; followed links carry their
      page as `Referer` and pass mirror's scope and extension pre-filter; a
      non-HTML answer is saved as fetched, never opened. After an engine fetch
      the browser pass has its own report and is no front (§5.8); a shallow
      crawl explained by challenges does not trigger it (§5.4).
-   - After an engine fetch that looks client-rendered, the browser fetches
-     every page again. Decided (2026-11-19): reuse the engine's body in the
-     browser pass instead, not implemented yet, tracked in [#160](https://github.com/lorenzoervedosa/dograpper/issues/160).
+   - After an engine fetch that looks client-rendered, the browser pass reuses
+     the engine's responses (decided 2026-11-19, #160). The engine keeps each
+     2xx page response (status, headers, body, final URL) in memory in a
+     `RunResponses` sink, up to 128 MiB in total and without eviction;
+     `Navigator.prepare()` takes the one kept for the URL it is asked for and
+     hands it to Chromium with `route.fulfill()`, sending no request. A page
+     not kept (over the cap; a 304 of an update run, which has no body this
+     run; a start URL that redirected, since a fetch re-bases the scope), and
+     any page found only by rendering, goes through the fetcher under the full
+     policy. The saved file, record and `-K0` relink are unchanged.
    - `--cache`, `--updatehack`, `--do-not-recatch` and `--changes` with
      `--headless` are a usage error (exit 2), since no page is revalidated
      there: kept (user decision, 2026-11-19).
