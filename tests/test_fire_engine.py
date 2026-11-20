@@ -8,6 +8,7 @@ No test touches the network.
 import base64
 import gzip
 import json
+import logging
 import sys
 import time
 from http.server import BaseHTTPRequestHandler
@@ -412,31 +413,66 @@ def test_real_download_mirrors_the_site(server, tmp_path):
     assert sorted(e["url"] for e in files.values()) == [f"{base}/docs/", f"{base}/docs/a.html"]
 
 
-def test_real_explicit_user_agent_replaces_the_impersonated_one(server):
-    # Maintainer decision: an explicit --user-agent is sent (#136 aligns it with Firecrawl).
-    base, script, _ = server
-    log = []
-    script["/p"] = recorded(log, (200, {"Content-Type": "text/html"}, b"<html>hi</html>"))
-
-    res = real_fetcher(user_agent="MyDocsBot/1.0").get(base + "/p", kind="navigate")
-
-    assert res.status == 200
-    assert log[0]["User-Agent"] == "MyDocsBot/1.0"
+FIREFOX_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+CLIENT_HINTS = ("sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform")
 
 
-def test_real_download_sends_the_user_agent_given_on_the_command_line(server, tmp_path):
+def test_real_explicit_user_agent_takes_the_profile_slot_without_the_client_hints(raw_server):
+    """#136 option B (research probes B, E and J): the UA given replaces the profile's in
+    its slot and the order holds; the profile's sec-ch-ua* describe its own UA, so they go."""
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(user_agent="Custom-UA/1.0").get(base + "/p", kind="navigate")
+
+    lines = wire_lines(heads[0])
+    assert "User-Agent: Custom-UA/1.0" in lines
+    assert [line.split(":", 1)[0].lower() for line in lines] == [
+        "upgrade-insecure-requests", "user-agent", "accept", "sec-fetch-site",
+        "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "accept-encoding",
+        "accept-language", "cache-control", "host"]
+
+
+def test_real_firefox_user_agent_sits_in_the_profile_slot_without_the_client_hints(raw_server):
+    """A UA naming Firefox also makes curl_cffi add Firefox's `priority` line (ADR-0011
+    residue), so only the slot and the missing hints are this test's."""
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(user_agent=FIREFOX_UA).get(base + "/p", kind="navigate")
+
+    lines = wire_lines(heads[0])
+    assert lines[:2] == ["upgrade-insecure-requests: 1", f"User-Agent: {FIREFOX_UA}"]
+    assert not [line for line in lines if line.lower().startswith("sec-ch-ua")]
+
+
+def test_real_android_hint_goes_with_an_explicit_user_agent(raw_server):
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(impersonate="chrome_android", user_agent=FIREFOX_UA).get(
+        base + "/p", kind="navigate")
+
+    assert not [line for line in wire_lines(heads[0]) if line.lower().startswith("sec-ch-ua")]
+
+
+def test_real_download_sends_the_user_agent_given_on_the_command_line(server, tmp_path, caplog):
+    """Every request of the run, robots.txt included, carries the UA and no client hint;
+    the warning that the TLS fingerprint stays the profile's comes once."""
     pytest.importorskip("curl_cffi")
     base, script, _ = server
     _docs_site(script)
     log = []
-    script["/docs/a.html"] = recorded(log, script["/docs/a.html"])
+    for path in ("/robots.txt", "/docs/", "/docs/a.html"):
+        script[path] = recorded(log, script[path])
 
-    result = CliRunner().invoke(
-        cli, ["download", f"{base}/docs/", "-o", str(tmp_path / "m"), "--downloader",
-              "fire-engine", "--user-agent", "MyDocsBot/1.0", *FAST])
+    with caplog.at_level(logging.WARNING):
+        result = CliRunner().invoke(
+            cli, ["download", f"{base}/docs/", "-o", str(tmp_path / "m"), "--downloader",
+                  "fire-engine", "--user-agent", FIREFOX_UA, *FAST])
 
     assert result.exit_code == 0, result.output
-    assert [h["User-Agent"] for h in log] == ["MyDocsBot/1.0"]
+    assert [h["User-Agent"] for h in log] == [FIREFOX_UA] * 3
+    assert not [n for h in log for n in CLIENT_HINTS if n in h]
+    warned = [r.getMessage() for r in caplog.records if "TLS fingerprint" in r.getMessage()]
+    assert len(warned) == 1 and "chrome" in warned[0]
 
 
 def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp_path):

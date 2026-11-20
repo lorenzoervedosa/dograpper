@@ -4,11 +4,15 @@ The cascade is ``_httrack_profile.run_profile``, shared with the httrack profile
 module only differs in the ``CurlCffiFetcher`` transport, the messages and the
 headless rule.
 """
+import logging
+
 import click
 
 from ..lib.fire_engine.fetcher import CurlCffiFetcher, CurlCffiMissing
 from ..lib.manifest import Manifest
 from ._httrack_profile import run_profile
+
+logger = logging.getLogger(__name__)
 
 _SPA_MSG = ("fire-engine: the content looks client-rendered (SPA); it runs no "
             "JavaScript. Use --downloader wget --headless.")
@@ -35,6 +39,10 @@ def run_fire_engine(url, output, depth, delay, include_extensions, headless, ver
         raise click.ClickException(
             "fire-engine: --headless is not supported (it runs its own "
             "browser-fingerprint transport). Omit --headless.")
+    if policy_kw.get('user_agent'):  # once per run: the handshake still names the profile
+        logger.warning("fire-engine: the User-Agent you gave replaces the %s profile's and "
+                       "drops its sec-ch-ua client hints; the TLS fingerprint stays %s's.",
+                       impersonate, impersonate)
     try:  # curl_cffi is imported by the first GET: robots.txt, or discovery under --no-robots
         return run_profile(
             "fire-engine",

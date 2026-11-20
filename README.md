@@ -691,9 +691,13 @@ On the wire, the browser profile sends its own identity headers
 client hints) in its own order; of the `httrack` header set only the
 request-specific ones are sent: `Referer` and, on an update, `If-None-Match` /
 `If-Modified-Since`. A `--user-agent` you give (on the command line or in
-config) replaces the profile's `User-Agent`; the rest of the identity stays the
-profile's. How this should match Firecrawl exactly is open in
-[#136](https://github.com/lorenzoervedosa/dograpper/issues/136).
+config) replaces the profile's `User-Agent` in the profile's own slot, as
+Firecrawl's `headers` option lets a custom User-Agent through. Since the
+profile's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` client hints
+describe its own User-Agent, they are dropped, and the run warns once that the
+TLS fingerprint still says the `--impersonate` profile: a WAF that compares the
+handshake with the User-Agent can still tell them apart. Without
+`--user-agent`, the identity is the profile's, coherent end to end.
 
 #### Incremental
 

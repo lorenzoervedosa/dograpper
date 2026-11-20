@@ -340,6 +340,11 @@ stays `0.0.0.dev0`.
   words, such as rustdoc's re-export pages): one stderr warning per page, a
   `Redirect stubs: N` summary line, counted in `Files excluded`, in both layouts
   and under `--dry-run`; an input of stubs only fails. ([#163])
+- `download --downloader fire-engine --user-agent X` now also drops the
+  profile's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` client
+  hints, which describe the profile's own User-Agent, and warns once per run
+  that the TLS fingerprint stays the `--impersonate` profile's; the User-Agent
+  keeps the profile's slot. ([#136], [ADR-0011](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0011-fire-engine-downloader.md))
 
 ### Removed
 
@@ -600,6 +605,7 @@ stays `0.0.0.dev0`.
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
 [#156]: https://github.com/lorenzoervedosa/dograpper/issues/156
 [#157]: https://github.com/lorenzoervedosa/dograpper/issues/157
+[#136]: https://github.com/lorenzoervedosa/dograpper/issues/136
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159

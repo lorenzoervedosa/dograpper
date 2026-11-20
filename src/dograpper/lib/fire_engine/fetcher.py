@@ -32,6 +32,9 @@ _FORWARDED = frozenset({"referer", "if-none-match", "if-modified-since"})
 _TARGET_HEADERS = {target: {"sec-ch-ua-mobile": "?1"}
                    for target in ("chrome_android", "chrome131_android")}
 
+# The profile's client hints, which describe its own User-Agent: an explicit one drops them (#136)
+_CLIENT_HINTS = ("sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform")
+
 _WRITE_ABORT = 0xFFFFFFFF  # libcurl's CURL_WRITEFUNC_ERROR: the writer stops the transfer
 
 _MISSING = (
@@ -130,6 +133,7 @@ class CurlCffiFetcher(Fetcher):
         req_headers.update((k, v) for k, v in headers if k.lower() in _FORWARDED)
         if self._user_agent:
             req_headers["User-Agent"] = self._user_agent
+            req_headers.update(dict.fromkeys(_CLIENT_HINTS))  # None: curl_cffi drops the line
         proxies = ({"http": self._proxy, "https": self._proxy}
                    if self._proxy else None)
         session = self._session()  # outside the try: a missing curl_cffi is no transport error

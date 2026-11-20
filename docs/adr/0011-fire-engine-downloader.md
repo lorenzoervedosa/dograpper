@@ -88,9 +88,8 @@ e cada fatia é um PR próprio, começando pelo caso observado:
   Chrome é exatamente a incoerência que um WAF detecta. Consequência
   aceita: os `Sec-Fetch-*` são os fixos do perfil (navegação), não os do link
   (`FetchMeta`). Um `--user-agent` dado pelo usuário substitui o
-  `User-Agent` do perfil (decisão do mantenedor, 2026-11-18, provisória: o
-  comportamento exato do Firecrawl está em pesquisa no #136); sem ele, vale o
-  do perfil.
+  `User-Agent` do perfil; sem ele, vale o do perfil. A regra provisória de
+  2026-11-18 foi substituída pela opção B do #136 (seção "Identidade no fio").
 - **Corpo limitado no lado do curl.** A decodificação do curl fica desligada
   (`HTTP_CONTENT_DECODING` 0): o writer do curl (`content_callback`) recebe o
   corpo como veio do fio, aborta a transferência além de `MAX_BODY_BYTES` e
@@ -138,6 +137,21 @@ Evidência: `docs/discovery/firecrawl-header-behavior.md`.
   especificação de Client Hints manda um navegador móvel fazer, no lugar que o
   alvo dá ao header. Decisão do mantenedor (2026-11-20), sem captura de um
   Chrome Android real; o defeito vai ao `curl_cffi` pelo mantenedor.
+- **User-Agent livre (#136, opção B, decisão do mantenedor de 2026-11-19).**
+  Como o `headers` do Firecrawl, um `--user-agent` explícito é enviado: ele
+  substitui o User-Agent do perfil no lugar que o perfil dá a ele, e os
+  `sec-ch-ua`, `sec-ch-ua-mobile` e `sec-ch-ua-platform` do perfil caem, porque
+  descrevem o User-Agent do perfil e seriam falsos para qualquer outro. A
+  execução avisa uma vez que o fingerprint TLS continua o do perfil. Os engines
+  abertos do Firecrawl não realinham nada além do User-Agent; derrubar os
+  hints é escolha do dograpper, não paridade. Resíduo aceito:
+  - o handshake TLS e as configurações HTTP/2 continuam os do perfil;
+  - a ordem e os demais headers só de Chrome (`Sec-Fetch-*`, `Accept`,
+    `Accept-Language`, `cache-control`, `upgrade-insecure-requests`) ficam os
+    do perfil;
+  - com um User-Agent que nomeia o Firefox, o próprio `curl_cffi` acrescenta a
+    linha `priority: u=0, i` do Firefox (medido no 0.17.0), o que o dograpper
+    não controla.
 
 ## Estado da decisão (2026-11-18)
 

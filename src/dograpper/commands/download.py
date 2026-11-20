@@ -299,7 +299,7 @@ def _run_download_cascade(
 @click.option('--impersonate', type=str, default='chrome', show_default=True,
               help="[fire-engine] curl_cffi browser profile to impersonate (e.g. chrome124)")
 @click.option('--user-agent', type=str, default=None,
-              help="[httrack, fire-engine] User-Agent header. Default: the dograpper identifier under httrack; the impersonated browser profile's own User-Agent under fire-engine. A value given here replaces it.")
+              help="[httrack, fire-engine] User-Agent header. Default: the dograpper identifier under httrack; the impersonated browser profile's own User-Agent under fire-engine. A value given here replaces it; under fire-engine it also drops the profile's sec-ch-ua client hints.")
 @click.option('--no-robots', is_flag=True, default=False,
               help="[httrack, fire-engine] Ignore robots.txt")
 @click.option('--connections', type=click.IntRange(min=1), default=4, show_default=True,
