@@ -56,6 +56,13 @@ Entry format:
 - **Why:** the Agent Brief names `--dry-run` alone; a stub is a few hundred bytes.
 - **Maintainer (2026-11-20):** keep it; recorded on #139.
 
+## 2026-11-20 — `--user-agent` gets the `--header` value check (#136)
+
+- **Decision:** a `--user-agent` value, from the command line or `.dograpper.json`, goes through the same CR/LF/NUL check as a `--header` line (`check_value()` in `utils/http_headers.py`): exit 2, naming the flag and never quoting the value. CHANGELOG lists it under Security.
+- **Why:** the Agent Brief names the check for `--header` only, but both routes put the same header on the wire, and under fire-engine a line break in `--user-agent` put a header line of its own on the wire (found and measured by the branch's spec review). Guarding one route of two leaves the guard open.
+- **Rejected:** checking `--header` only (the brief's letter); stripping the characters (a silent change of what the user asked for).
+- **Pending:** none.
+
 ## 2026-11-20 — `--header` edge rules the Agent Brief left open (#136)
 
 - **Decision:** three readings, all toward failing loud or keeping the user's word:

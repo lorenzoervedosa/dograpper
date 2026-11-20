@@ -15,6 +15,12 @@ Entry format, grouped under one heading per issue or PR:
   <why now is not the time>; <what would trigger the fix>.**
 ```
 
+## fire-engine headers and `--header` (#136, #156, #157, 2026-11-20)
+
+- **`tests/test_httrack_mirror.py` keeps its own `_Silent` http.server outside the `http_server` mold of `tests/conftest.py`, and never shuts it down.** `tests/test_httrack_mirror.py` (`_Silent`, started next to the `server` fixture). ⏸ **accepted: the file belongs to another lane in this wave; fix on the next change to that test's servers, by starting `_Silent` through `http_server`.**
+- **`config_note()` and `FROM_CONFIG` live in `commands/_httrack_profile.py`, though `commands/download.py` imports them for `--filter`, which is not a profile flag.** Their natural home is `lib/config_loader.py`, next to `is_explicit()`. ⏸ **accepted: `lib/config_loader.py` was outside the fire lane's zone; move them on the next change to `lib/config_loader.py`.**
+- **An empty User-Agent (`--user-agent ''` or `--header 'User-Agent:'`) falls back silently to the profile's.** Under httrack that is the dograpper default UA; under fire-engine, the impersonated one with its client hints and no warning (`policy.user_agent or DEFAULT_USER_AGENT`, `if self._user_agent:` in `lib/fire_engine/fetcher.py`). HTTrack `-F ""` and `curl -H 'User-Agent:'` send no User-Agent at all. The `--user-agent ''` case predates #136. ⏸ **accepted: the brief makes the header form follow `--user-agent` exactly, and whether an empty one means "send none" or exit 2 is the maintainer's call; fix when it is decided.**
+
 ## Docs site, stage 1 (#176 and this PR, 2026-11-20)
 
 - **The sync page lost the grouped rows' "see Downloader profiles" pointer and the per-flag "(passed to download/pack)" notes.** `site/commands/sync.md` has the generated table instead of the README rows. ⏸ **accepted: the generated table keeps the profile tags and the `--downloader` detail links the section; fix at the cutover tightening.**
