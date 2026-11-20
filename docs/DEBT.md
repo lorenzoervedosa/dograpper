@@ -39,6 +39,11 @@ Entry format, grouped under one heading per issue or PR:
   without failing the test, or a switch to CommonMark-correct backtick-run
   matching.**
 
+## Doxygen API records (#168, 2026-11-20)
+
+- **The pack helpers of the API-reference tests are copied in four files.** `_cwd`, `_pack`, `_corpus` and `_jsonl` in `tests/test_api_reference_doxygen.py` repeat those of `tests/test_api_reference.py`, `tests/test_api_reference_rustdoc.py` and `tests/test_api_reference_typedoc.py`; the Doxygen copy points at the first. ⏸ **accepted: the other three files belonged to other lanes of the wave; fix in one test refactor that moves them to a shared module, or when a fifth adapter would copy them again.**
+- **`sphinx.py` and `typedoc.py` still carry their own copy of the text tap (`_tap`).** `Regions.copy_until_end()` in `utils/api_reference/_html.py` is the shared form, used by `doxygen.py` only. ⏸ **accepted: both files were outside the lane's zone; fix in a refactor that moves both to `copy_until_end()`, before any new adapter needs the tap.**
+
 ## rustdoc API records (#75, 2026-11-19)
 
 - **A trait implementation member with its own doc comment is dropped.**

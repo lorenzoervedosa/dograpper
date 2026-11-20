@@ -425,6 +425,8 @@ def test_names_repeated_on_every_member_are_bounded():
     assert_linear(long_name, run, 2000)
 
 
+# _pack, _corpus and _jsonl repeat the helpers of tests/test_api_reference.py (the first copy) and
+# of the rustdoc and TypeDoc tests; extracting them is in docs/DEBT.md.
 def _pack(src, out, *flags):
     return CliRunner().invoke(cli, ["pack", str(src), "-o", str(out), "--format", "jsonl", *flags],
                               catch_exceptions=False)
@@ -441,7 +443,7 @@ def _jsonl(out):
     for name in sorted(os.listdir(out)):
         if name.endswith(".jsonl"):
             with open(out / name, encoding="utf-8") as f:
-                by_id.update((r["id"], r) for r in map(json.loads, f) if r)
+                by_id.update((r["id"], r) for r in (json.loads(ln) for ln in f if ln.strip()))
     return by_id
 
 
