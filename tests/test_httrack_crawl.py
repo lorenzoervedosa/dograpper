@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from dograpper.lib.httrack.crawl import KeptResponses, fetch_url_list
+from dograpper.lib.httrack.crawl import RunResponses, fetch_url_list
 from dograpper.lib.httrack.fetcher import Fetcher
 from dograpper.lib.httrack.policy import build_policy
 from dograpper.lib.httrack.report import RunReport, format_report
@@ -872,7 +872,7 @@ def test_kept_responses_hold_the_pages_the_engine_fetched(server, tmp_path):
     script["/old"] = (301, {"location": "/b"}, b"")
     script["/b"] = (200, HTML, b"<p>b</p>")
     script["/gone"] = (404, HTML, b"x")
-    kept = KeptResponses()
+    kept = RunResponses()
     run_kept([f"{base}/a", f"{base}/old", f"{base}/gone"], tmp_path, kept)
     final, res = kept.take(f"{base}/a")
     assert final == f"{base}/a" and res.body == b"<p>a</p>" and res.status == 200
@@ -887,7 +887,7 @@ def test_kept_responses_stop_at_the_byte_cap(server, tmp_path):
     script["/robots.txt"] = (404, {}, b"")
     script["/big"] = (200, HTML, b"x" * 20)
     script["/s"] = (200, HTML, b"y" * 5)
-    kept = KeptResponses(limit=10)
+    kept = RunResponses(limit=10)
     run_kept([f"{base}/big", f"{base}/s"], tmp_path, kept)
     assert kept.take(f"{base}/big") is None and kept.take(f"{base}/s") is not None
 
@@ -899,7 +899,7 @@ def test_kept_responses_skip_a_page_the_update_kept(server, tmp_path):
     script["/p"] = (200, {**HTML, "etag": '"v"'}, b"<p>1</p>")
     first = run([f"{base}/p"], tmp_path)
     script["/p"] = validated('"v"', b"<p>1</p>")
-    kept = KeptResponses()
+    kept = RunResponses()
     policy = build_policy(retries=0)
     ft = FakeTime()
     fetch_url_list([f"{base}/p"], str(tmp_path), policy, "html", responses=kept,

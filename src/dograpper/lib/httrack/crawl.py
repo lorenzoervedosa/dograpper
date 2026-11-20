@@ -44,18 +44,19 @@ class HttrackResult:
     changes: tuple[str, str] | None = None  # --changes: (hts-changes.json, summary line)
 
 
-# What a run keeps in memory for a browser pass that may follow it (KeptResponses): the
+# What a run keeps in memory for a browser pass that may follow it (RunResponses): the
 # pages of a documentation site are small, the cap only bounds a hostile one.
-KEPT_RESPONSES_BYTES = 128 * 1024 * 1024
+RUN_RESPONSES_BYTES = 128 * 1024 * 1024
 
 
-class KeptResponses:
+class RunResponses:
     """The 2xx page responses of an engine run, in memory and up to `limit` bytes in total,
     so a browser pass over the same run hands them to the browser instead of requesting each
-    page again (#160). A response past the cap is not kept, with no eviction; a page an
-    update kept from the previous mirror (304) has no body this run, so is never here."""
+    page again (#160). A response past the cap is not stored, with no eviction (as
+    browser.Navigator's subresource cache: a third such store would call for one shared
+    class); a page an update left as it was (304) has no body this run, so is never here."""
 
-    def __init__(self, limit: int = KEPT_RESPONSES_BYTES):
+    def __init__(self, limit: int = RUN_RESPONSES_BYTES):
         self._limit, self._bytes, self._lock = limit, 0, threading.Lock()
         self._by_url: dict[str, tuple[str, FetchResult]] = {}
 
@@ -347,7 +348,7 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                referer: str | None = None, meta: FetchMeta = NAVIGATION,
                prev: Previous | None = None, names: NameRegistry | None = None,
                tried: Callable[[str], None] | None = None,
-               responses: KeptResponses | None = None
+               responses: RunResponses | None = None
                ) -> tuple[str, str, FetchResult | None]:
     """GET `url` for every fetch path: /cdn-cgi/ is never requested, robots.txt is checked
     before each hop, and a redirect is followed (at most MAX_REDIRECTS) only when
@@ -367,7 +368,7 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
     (prev.erased) ("kept", URL, result) with result.error NOT_RECAUGHT; a 200 that -%s
     (policy.updatehack) takes at its headers is ("kept", URL, result) with
     result.stopped. `tried(url)` is told of each hop requested past robots.txt; `responses`
-    keeps each "ok" response (KeptResponses)."""
+    keeps each "ok" response (RunResponses)."""
     start = url
     via, hops = (redact_url(referer) if referer else None), 0
     while True:
@@ -489,13 +490,13 @@ def fetch_url_list(urls: list[str], output_dir: str, policy: HttrackPolicy,
                    include_extensions: str, *, fetcher: Fetcher | None = None,
                    filters: UrlFilters | None = None,
                    previous: Manifest | None = None,
-                   responses: KeptResponses | None = None) -> HttrackResult:
+                   responses: RunResponses | None = None) -> HttrackResult:
     """Fetch `urls` (already scoped and filtered); a redirect target goes through the
     same-host check and `filters` (refusals land in `filters.excluded`) before its GET.
     The links of the saved HTML pages are then rewritten (relink), as wget -i
     --convert-links does. With the `previous` run's manifest, its files are revalidated
     (fetch_page) and a kept one is left byte-identical, relink included. `responses` collects
-    the responses fetched, for a browser pass to reuse (KeptResponses)."""
+    the responses fetched, for a browser pass to reuse (RunResponses)."""
     fetcher = fetcher or Fetcher(policy)
     names = NameRegistry(output_dir)
     prev = previous_files(previous, names, output_dir, policy.cache, policy.do_not_recatch)

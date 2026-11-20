@@ -729,12 +729,12 @@ def test_do_not_recatch_in_the_crawl(server, tmp_path):
 
 
 def test_mirror_keeps_the_pages_it_fetched_for_a_browser_pass(server, tmp_path):
-    from dograpper.lib.httrack.crawl import KeptResponses
+    from dograpper.lib.httrack.crawl import RunResponses
     base, script, _ = server
     script["/robots.txt"] = (404, {}, b"")
     script["/docs/"] = (200, {"content-type": "text/html"}, b'<a href="/docs/a">a</a>')
     script["/docs/a"] = (200, {"content-type": "text/html"}, b"<p>a</p>")
-    kept = KeptResponses()
+    kept = RunResponses()
     mirror_site(f"{base}/docs/", str(tmp_path), build_policy(retries=0), "html", responses=kept)
     assert kept.take(f"{base}/docs/a")[1].body == b"<p>a</p>"
     assert kept.take(f"{base}/docs/") is not None

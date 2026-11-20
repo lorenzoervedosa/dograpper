@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.redact import redact_url
 
-from .crawl import (KeptResponses, extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
+from .crawl import (RunResponses, extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
                     stamp)
 from .fetcher import Fetcher
 from .links import url_key
@@ -46,7 +46,7 @@ def _is_page(res) -> bool:
 class Navigator:
     def __init__(self, fetcher: Fetcher, output_dir: str, start_url: str,
                  include_extensions: str, *, filters: UrlFilters | None = None,
-                 seeded: bool = False, reuse: KeptResponses | None = None):
+                 seeded: bool = False, reuse: RunResponses | None = None):
         self.fetcher, self.filters, self._seeded = fetcher, filters, seeded
         self._reuse = reuse  # what the engine fetched earlier in this run (#160)
         self.report = RunReport()
@@ -57,7 +57,8 @@ class Navigator:
         self._last = None   # (final URL, FetchResult) of the last prepare()
         self._prepared = 0  # URLs prepare() fetched: policy.max_links caps them
         self._frame = None
-        self._cache: dict[str, tuple[int, dict, bytes]] = {}  # subresource URL -> its answer
+        # subresource URL -> its answer; a second byte-capped store, see crawl.RunResponses
+        self._cache: dict[str, tuple[int, dict, bytes]] = {}
         self._cache_bytes, self._cache_limit = 0, SUBRESOURCE_CACHE_BYTES
         self._started: list[str] = []  # navigations the current page started itself
         self._files: dict[str, str] = {}  # saved file -> URL it came from
@@ -106,11 +107,11 @@ class Navigator:
             return None
         self._prepared += 1
         self._front = url == self._start
-        kept = self._reuse.take(url) if self._reuse is not None else None
-        if kept is not None and self._front and kept[0] != url:
-            kept = None  # a start URL's redirect re-bases the scope (_redirect_ok): fetch it
-        if kept is not None:  # fetched by the engine under the same policy: no second request
-            outcome, (final, res) = "ok", kept
+        reused = self._reuse.take(url) if self._reuse is not None else None
+        if reused is not None and self._front and reused[0] != url:
+            reused = None  # a start URL's redirect re-bases the scope (_redirect_ok): fetch it
+        if reused is not None:  # fetched by the engine under the same policy: no second request
+            outcome, (final, res) = "ok", reused
         else:
             outcome, final, res = fetch_page(url, self.fetcher, self.report, self._lock,
                                              self._redirect_ok,
@@ -193,11 +194,11 @@ class Navigator:
             route.abort("blockedbyclient")
             return
         if not req.is_navigation_request():  # a subresource: the browser's own request
-            kept = self._cache.get(req.url) if req.method == "GET" else None
-            if kept is None:
+            cached = self._cache.get(req.url) if req.method == "GET" else None
+            if cached is None:
                 route.continue_()
             else:  # asked before in this run: answered from memory, nothing sent
-                status, headers, body = kept
+                status, headers, body = cached
                 route.fulfill(status=status, body=body, headers={
                     k: v for k, v in headers.items() if k not in _DROPPED})
             return

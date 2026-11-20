@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dograpper.lib.httrack.browser import Navigator
-from dograpper.lib.httrack.crawl import KeptResponses
+from dograpper.lib.httrack.crawl import RunResponses
 from dograpper.lib.httrack.fetcher import FetchResult
 from dograpper.lib.httrack.fetcher import Fetcher
 from dograpper.lib.httrack.policy import build_policy
@@ -568,7 +568,7 @@ def test_prepare_reuses_the_response_the_engine_fetched(server, tmp_path):
     base, script, seen = server
     script["/robots.txt"] = (404, {}, b"")
     script["/docs/new"] = (200, HTML, b"<p>fetched anew</p>")
-    kept = KeptResponses()
+    kept = RunResponses()
     kept.keep(base + "/docs/a", base + "/docs/a",
               FetchResult(base + "/docs/a", status=200, headers=HTML, body=b"<p>engine</p>"))
     nav, ctx, page = reusing(base, tmp_path, kept)
@@ -587,7 +587,7 @@ def test_prepare_fetches_a_reused_start_url_that_redirected(server, tmp_path):
     script["/robots.txt"] = (404, {}, b"")
     script["/docs/"] = (301, {"location": "/docs/home"}, b"")
     script["/docs/home"] = (200, HTML, b"<p>home</p>")
-    kept = KeptResponses()
+    kept = RunResponses()
     kept.keep(base + "/docs/", base + "/docs/home",
               FetchResult(base + "/docs/home", status=200, headers=HTML, body=b"<p>e</p>"))
     nav, ctx, page = reusing(base, tmp_path, kept)
@@ -598,7 +598,7 @@ def test_prepare_fetches_a_reused_start_url_that_redirected(server, tmp_path):
 def test_reused_page_is_saved_like_a_fetched_one(server, tmp_path):
     base, script, seen = server
     script["/robots.txt"] = (404, {}, b"")
-    kept = KeptResponses()
+    kept = RunResponses()
     kept.keep(base + "/docs/a", base + "/docs/a",
               FetchResult(base + "/docs/a", status=200, headers=HTML, body=b"<p>engine</p>"))
     nav, ctx, page = reusing(base, tmp_path, kept)

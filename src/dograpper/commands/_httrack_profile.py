@@ -13,7 +13,7 @@ import click
 from ..lib.config_loader import is_explicit
 from ..lib.httrack.browser import Navigator
 from ..lib.httrack.changes import CHANGES_FILE
-from ..lib.httrack.crawl import MAX_REDIRECTS, KeptResponses, fetch_url_list
+from ..lib.httrack.crawl import MAX_REDIRECTS, RunResponses, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
 from ..lib.httrack.mirror import mirror_site
@@ -151,7 +151,7 @@ _PREVIOUS_RUN_FLAGS = (("--cache", lambda p: p.cache is not None),
 def _browse(fetcher, url, output, depth, include_extensions, filters, seeds, reuse=None):
     """Layer 4 under the profile: the Playwright crawl from `url`, or over the discovered
     `seeds` alone, every navigation fetched by `fetcher` under its policy (Navigator), except
-    the pages `reuse` (KeptResponses) holds from the engine's fetch of this run.
+    the pages `reuse` (RunResponses) holds from the engine's fetch of this run.
     Returns (CrawlResult, its RunReport, file -> record)."""
     nav = Navigator(fetcher, output, url, include_extensions, filters=filters,
                     seeded=bool(seeds), reuse=reuse)
@@ -201,7 +201,7 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
 
     browse = headless
     # a browser pass may follow the engine's fetch: it reuses what that fetch received
-    responses = KeptResponses() if not headless and fallback is None else None
+    responses = RunResponses() if not headless and fallback is None else None
     if not headless:
         if discovered:
             logger.info(f"[cascade] {name}: fetching {len(discovered)} URLs from "

@@ -25,7 +25,7 @@ from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.redact import redact_url
 
 from .changes import Changes
-from .crawl import (MAX_REDIRECTS, HttrackResult, KeptResponses, Previous, extension_set, fetch_page,
+from .crawl import (MAX_REDIRECTS, HttrackResult, RunResponses, Previous, extension_set, fetch_page,
                     moved_request, previous_files, record_of, relink, reserve_names, save_file,
                     sends, stamp, uncached)
 from .fetcher import Fetcher, same_host
@@ -132,7 +132,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                 depth: int = 0, fetcher: Fetcher | None = None,
                 filters: UrlFilters | None = None,
                 previous: Manifest | None = None,
-                responses: KeptResponses | None = None) -> HttrackResult:
+                responses: RunResponses | None = None) -> HttrackResult:
     """Crawl from `url` into `output_dir`; `depth` caps link hops (0: unlimited) and
     policy.max_links the URLs queued (the report then says partial). The result maps each
     written file to the URL requested for it (preferring one that needed no redirect, then

@@ -651,7 +651,7 @@ README and CHANGELOG.
    - After an engine fetch that looks client-rendered, the browser pass reuses
      the engine's responses (decided 2026-11-19, #160). The engine keeps each
      2xx page response (status, headers, body, final URL) in memory in a
-     `KeptResponses` sink, up to 128 MiB in total and without eviction;
+     `RunResponses` sink, up to 128 MiB in total and without eviction;
      `Navigator.prepare()` takes the one kept for the URL it is asked for and
      hands it to Chromium with `route.fulfill()`, sending no request. A page
      not kept (over the cap; a 304 of an update run, which has no body this
