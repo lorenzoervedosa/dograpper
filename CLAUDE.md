@@ -100,8 +100,8 @@ arquitetural. A numeração é estável (outros arquivos citam "contrato N").
    Pinado por: `.claude/hooks/guard-temporario.sh` (PreToolUse; bloqueia escrita e edição, não leitura) · Teste: nenhum.
 9. **Mudança observável pelo usuário exige entrada no `CHANGELOG.md`**, em `## [Unreleased]`, no mesmo PR. Observável = superfície do CLI (comando, flag, output, exit code), arquivos escritos ou seu formato, comportamento da Action, ou requisito de instalação. `refactor`/`test`/`chore`/`ci`/`build`/`docs` não geram entrada — se gerariam, o commit foi tipado errado. A regra completa está no cabeçalho do `CHANGELOG.md`; `tests/test_changelog.py` guarda a parte mecânica.
    Testes: `tests/test_changelog.py` (estrutura) · lembrete: `.claude/hooks/commit-doc-check.sh` em `feat`/`fix` sem `CHANGELOG.md`.
-10. **Release**: renomear `## [Unreleased]` para `## [X.Y.Z] - AAAA-MM-DD`, abrir uma `## [Unreleased]` vazia e bumpar `version` no `pyproject.toml` no mesmo commit. `dograpper --version` lê o metadata do pacote instalado — tag sem bump publica binário que se identifica errado.
-    Teste: `test_newest_release_matches_the_packaged_version` (`tests/test_changelog.py`).
+10. **Release** (versão por data: `YYYY.M`, ex. `2027.3`; outro release no mesmo mês, `2027.3.1`; mês sem zero à esquerda, que o empacotamento Python normaliza): renomear `## [Unreleased]` para `## [YYYY.M] - AAAA-MM-DD`, abrir uma `## [Unreleased]` vazia e pôr o mesmo `YYYY.M` em `version` no `pyproject.toml` no mesmo commit; a tag é `vYYYY.M`. `dograpper --version` lê o metadata do pacote instalado — tag sem bump publica binário que se identifica errado. Até o primeiro release, `version` é `0.0.0.dev0` e o CHANGELOG só tem `## [Unreleased]`.
+    Testes: `test_newest_release_matches_the_packaged_version` e `test_release_headings_use_the_dated_version_of_their_month` (`tests/test_changelog.py`).
 
 ## Gates (dois níveis)
 

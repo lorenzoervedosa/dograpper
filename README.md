@@ -61,35 +61,9 @@ dograpper pack ./flask-docs -o ./chunks --delta
 
 ## Install
 
-### Release binary
-
-> Release binaries are Linux x86_64 only.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
-dograpper doctor --install             # fetches wget + chromium
-dograpper doctor --check-system-libs   # diagnoses missing system libs
-dograpper --help
-```
-
-`install.sh` failures exit with a dedicated code — see
-[Exit codes](#exit-codes).
-
-#### Proxy / MITM
-
-```bash
-HTTPS_PROXY=http://proxy:3128 curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
-CURL_CA_BUNDLE=/path/to/cacert.pem curl -fsSL https://raw.githubusercontent.com/lorenzoervedosa/dograpper/main/scripts/install.sh | sh
-```
-
-#### Storage layout
-
-| Path | Contents |
-|------|---------|
-| `~/.dograpper/bin/` | static wget |
-| `~/.dograpper/playwright-browsers/` | chromium |
-
-Override the default root: `DOGRAPPER_HOME=/custom/path dograpper doctor --install`
+> No release is published yet: dograpper is in development, so install it from
+> source. `scripts/install.sh` and its exit codes apply once a release binary
+> exists.
 
 ### From source
 
@@ -136,6 +110,18 @@ On Ubuntu 22.04 / Debian 12 and older the package is called `libasound2`
 (without the `t64` suffix). `doctor --check-system-libs` reads
 `/etc/os-release` and prints the name of your release; on a derivative it
 cannot classify, it prints `libasound2` and a note about the `t64` name.
+
+#### Storage layout
+
+`dograpper doctor --install` fetches a static wget and chromium (chromium needs
+the `headless` extra); dograpper uses them before the ones on `PATH`.
+
+| Path | Contents |
+|------|---------|
+| `~/.dograpper/bin/` | static wget |
+| `~/.dograpper/playwright-browsers/` | chromium |
+
+Override the default root: `DOGRAPPER_HOME=/custom/path dograpper doctor --install`
 
 ---
 
@@ -1761,7 +1747,7 @@ jobs:
 
       - name: Refresh context and report drift
         id: freshness
-        uses: lorenzoervedosa/dograpper@v0.4.0 # pin a release tag (or a commit SHA), not a branch
+        uses: lorenzoervedosa/dograpper@<commit-sha> # pin a commit SHA (no release tag exists yet), not a branch
         with:
           url: https://docs.example.com
           input-dir: ./docs
