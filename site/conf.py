@@ -1,3 +1,5 @@
+import sys
+
 import click
 from docutils import nodes
 from sphinx.util.docutils import SphinxDirective
@@ -18,6 +20,11 @@ class DograpperOptions(SphinxDirective):
     def run(self):
         from dograpper.cli import cli
         from dograpper.commands.docs import OPTION_COLUMNS, option_cells
+
+        # Sphinx cannot see that this page depends on the CLI source.
+        for mod in list(sys.modules.values()):
+            if getattr(mod, "__name__", "").startswith("dograpper") and getattr(mod, "__file__", None):
+                self.env.note_dependency(mod.__file__)
 
         name = self.arguments[0]
         root = click.Context(cli, info_name="dograpper")
