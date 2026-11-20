@@ -28,7 +28,7 @@ src/dograpper/commands/
 | Arquivo | Quando ler |
 |---|---|
 | `tests/test_download_cascade.py` | Antes de alterar a orquestração de `commands/download.py` ou o threshold `MIN_URLS_TO_CONSIDER_DISCOVERED` |
-| `tests/test_download_httrack_profile.py` | Antes de alterar `commands/_httrack_profile.py` ou o despacho `--downloader` de `commands/download.py` (flags `[httrack]`, mensagens fail-loud, injeção do `Fetcher` na descoberta) |
+| `tests/test_download_httrack_profile.py` | Antes de alterar `commands/_httrack_profile.py`, `commands/_profile_headers.py` (`--header`, `--user-agent`) ou o despacho `--downloader` de `commands/download.py` (flags `[httrack]`, mensagens fail-loud, injeção do `Fetcher` na descoberta) |
 | `tests/test_init_wizard.py` | Antes de alterar `commands/init.py` ou os presets `TARGETS` |
 | `tests/test_delta_artifacts.py` | Antes de alterar o portão de `--delta` em `commands/pack.py` ou `PACK_STATE_FILENAME` (semântica fixada na ADR-0008) |
 | `tests/test_eval_command.py` | Antes de alterar `commands/eval.py` |

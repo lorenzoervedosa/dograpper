@@ -166,7 +166,7 @@ Evidência: `docs/discovery/firecrawl-header-behavior.md`.
   volta mesmo com `--user-agent`. A grafia do nome é a do usuário, visível só
   em HTTP/1.1 (follow-up 10 da pesquisa). `--header 'User-Agent: X'` é o
   `--user-agent X`; os dois juntos são exit 2, regra que vale para toda fonte
-  de User-Agent (`single_user_agent()` em `commands/_httrack_profile.py`). A
+  de User-Agent (`single_user_agent()` em `commands/_profile_headers.py`). A
   validação, guarda de entrada não confiável no fio, mora num lugar só
   (`utils/http_headers.py`).
 - **robots.txt casa com o token fixo `dograpper` (#136, decisão do mantenedor
