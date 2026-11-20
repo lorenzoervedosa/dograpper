@@ -22,6 +22,13 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-20 — Docs site content copied
+
+- **Decision:** supersedes "Docs site pages copied from the README". The README sections copied into `site/` have two copy points. `site/index.md` and `site/commands/pack.md` were copied at commit `97e4ccf` (README blob `16043b5`); every other page (the other commands, `reference/`, `install.md`, `quickstart.md`, `guides/`, `troubleshooting.md`) at commit `3799eda` (README blob `4eba1a4`). At cutover, `git diff 97e4ccf HEAD -- README.md` (the oldest point) lists what to carry over. Each guide also holds an English `## More on ...` section written from the matching Portuguese note in `docs/workflows/`; `docs/workflows/` is untouched, and its JSONL example, the only flag-bearing content, was checked against `schema-v1.md` and `--help`. The cutover diff from `97e4ccf` also re-lists the install and action hunks already copied at `3799eda`, and that is harmless.
+- **Why:** the README stays untouched until the site replaces it, so the copies drift unless every copy point is recorded.
+- **Rejected:** generating pages from the README at build time; translating what the README already says.
+- **Pending:** none.
+
 ## 2026-11-20 — Docs site pages copied from the README
 
 - **Decision:** each `site/commands/*.md` page is a verbatim copy of its README section (heading levels shifted, option tables replaced by the generated table, relative `docs/` links turned into GitHub URLs). The `pack` page was copied from `README.md` blob `16043b558b70fcbd396fb62ec60d1ceb122cd73a` at commit `97e4ccf`. At cutover, `git diff 97e4ccf HEAD -- README.md` lists what changed in the README since and has to be carried over to the pages.

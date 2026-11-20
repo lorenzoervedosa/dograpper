@@ -31,7 +31,7 @@ tests/
 ├── test_delta_manifest.py  # Delta: diff_manifests e o contrato do delta_manifest.json; URL gravada pelo build_manifest (a buscada, sem credenciais, None com query fora da allowlist, nunca a de outro arquivo), records do build_manifest, manifest antigo legível, falha de escrita do manifest e do pack_state
 ├── test_dep_resolver.py    # Resolução de wget/chromium via DOGRAPPER_HOME (fallback para PATH, reload de módulo)
 ├── test_docs_command.py    # docs: âncoras por comando/opção, tipos de opção, página autocontida, escape HTML, bind/porta/--no-browser
-├── test_docs_site.py       # Drift guard of site/: command page ↔ click command, {dograpper-options} directive per page naming that command, ### --flag headings are options of their command, every --flag on the site exists (FOREIGN_FLAGS allowlist)
+├── test_docs_site.py       # Drift guard of site/: command page ↔ click command, {dograpper-options} directive per page naming that command, ### --flag headings are options of their command, every --flag on the site and in schema-v1.md exists (FOREIGN_FLAGS allowlist), included docs have no relative links, no page links README.md
 ├── test_doctor.py          # Doctor: detecção, --install (download verificado, lock, idempotência), --check-system-libs
 ├── test_download.py        # wget mock, SPA detector, manifest roundtrip e merge, UA/headers, run_wget_urls, bounded hydration; log do wget → URL por arquivo, resumo de falhas, --filter no wget, linhas de progresso, resolução do caminho do --manifest
 ├── test_download_cascade.py # Cascade 4-layer: layer-1/2/3/4 wins, below-threshold fall-through, headless, post-wget-i SPA, observability, --filter em cada camada (inclusive wget real), URLs do manifest por camada

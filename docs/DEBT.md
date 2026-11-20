@@ -15,6 +15,24 @@ Entry format, grouped under one heading per issue or PR:
   <why now is not the time>; <what would trigger the fix>.**
 ```
 
+## Docs site, stage 1 (#176 and this PR, 2026-11-20)
+
+- **The sync page lost the grouped rows' "see Downloader profiles" pointer and the per-flag "(passed to download/pack)" notes.** `site/commands/sync.md` has the generated table instead of the README rows. ⏸ **accepted: the generated table keeps the profile tags and the `--downloader` detail links the section; fix at the cutover tightening.**
+- **Positional arguments (`CHUNKS_DIR`, `URL`, ...) have no table row.** The `dograpper-options` directive (`site/conf.py`) lists `click.Option` only. ⏸ **accepted: the usage lines and prose cover them; fix at the cutover, or when a reader misses an argument description.**
+- **No CI job builds the site.** A break in the directive or an include shows only on a local `-W` build. ⏸ **accepted: the spec defers CI to the cutover; fix at the cutover, or on the first broken local build.**
+- **The generated tables show `Sentinel.UNSET` as Default for options without one, and `--help` without `-h`.** Both come from `option_cells` in `src/dograpper/commands/docs.py`, which shares `dograpper docs` behaviour under click 8.3. ⏸ **accepted: this is a pre-existing `dograpper docs` bug for a separate `fix(docs)` PR; fix in that PR.**
+- **The guide sections "More on ..." partly restate the README text above them.** `site/guides/notebooklm.md` and `site/guides/incremental.md`. ⏸ **accepted: tightening the prose is stage 2; fix at the cutover.**
+- **The relative-link check in `tests/test_docs_site.py` can hide a link after a stray backtick.**
+  `_relative_links` strips code spans with `` `[^`]*` ``, which pairs across lines
+  and ignores CommonMark backtick runs. `CHANGELOG.md` has an odd number of
+  backticks (1119), so from the stray one onward the pairing shifts, and a
+  relative link placed after it could be stripped instead of checked.
+  Nothing is hidden today: `CHANGELOG.md` and `docs/schema-v1.md` have no
+  relative links. ⏸ **accepted: the local `-W` build still fails on such a
+  link (`myst.xref_missing`); trigger: a relative link reaching the local build
+  without failing the test, or a switch to CommonMark-correct backtick-run
+  matching.**
+
 ## rustdoc API records (#75, 2026-11-19)
 
 - **A trait implementation member with its own doc comment is dropped.**

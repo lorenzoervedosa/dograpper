@@ -190,7 +190,7 @@ page metadata `version` and `version_status`, written after `url`, and
 sub-chunks) are omitted when not available (they never appear as `null`). A
 `>` in a value is written as `\u003e`, so a value holding `-->` cannot close
 the comment. Full spec:
-[docs/schema-v1.md](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/schema-v1.md).
+[docs/schema-v1.md](../reference/schema-v1.md).
 
 In the page layout (`--layout page`) each page file gets exactly one header,
 at line 1, with the page `title` as its first field (the same title as in
@@ -266,7 +266,7 @@ Schema (required fields in **bold**, optional in italics):
 
 Field names diverge from the header format for word count, breadcrumb and
 readiness — see the full field-by-field spec, including the JSONL/header
-mapping table, in [docs/schema-v1.md](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/schema-v1.md).
+mapping table, in [docs/schema-v1.md](../reference/schema-v1.md).
 
 ## API reference records (`--api-records`)
 
@@ -362,7 +362,7 @@ dograpper serve ./pack   # search_chunks now ranks member records
 - Usage error (exit 2) with `--format md` or `txt`, with `--bundle notebooklm`
   and with `--layout page`.
 
-Field list: [docs/schema-v1.md](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/schema-v1.md#api-records---api-records).
+Field list: [docs/schema-v1.md](../reference/schema-v1.md#api-records---api-records).
 
 ## LLM Readiness Score (`--score`)
 
