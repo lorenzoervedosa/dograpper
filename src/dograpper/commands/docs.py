@@ -54,19 +54,26 @@ def _type(opt):
     return opt.type.name
 
 
-def _option_row(cmd_name, opt, ctx):
-    long = next((o for o in opt.opts if o.startswith("--")), opt.opts[0]).lstrip("-")
+OPTION_COLUMNS = ("Option", "Type", "Values", "Default", "Flags", "Help")
+
+
+def option_cells(opt: click.Option, ctx: click.Context) -> tuple[str, str, str, str, str, str]:
+    """The six cells of an option row, in OPTION_COLUMNS order (shared with the docs site)."""
     signature = opt.get_help_record(ctx)[0]
     values = ", ".join(opt.type.choices) if isinstance(opt.type, click.Choice) else ""
     marks = [m for m, on in (("required", opt.required), ("repeatable", opt.multiple)) if on]
-    cells = (signature, _type(opt), values, _default(opt, ctx), ", ".join(marks), opt.help or "")
-    tds = "".join(f"<td>{_e(c)}</td>" for c in cells)
+    return (signature, _type(opt), values, _default(opt, ctx), ", ".join(marks), opt.help or "")
+
+
+def _option_row(cmd_name, opt, ctx):
+    long = next((o for o in opt.opts if o.startswith("--")), opt.opts[0]).lstrip("-")
+    tds = "".join(f"<td>{_e(c)}</td>" for c in option_cells(opt, ctx))
     return f'<tr id="{_e(cmd_name)}--{_e(long)}">{tds}</tr>'
 
 
 def _options_table(cmd_name, params, ctx):
     rows = "\n".join(_option_row(cmd_name, p, ctx) for p in params if isinstance(p, click.Option))
-    head = "".join(f"<th>{h}</th>" for h in ("Option", "Type", "Values", "Default", "Flags", "Help"))
+    head = "".join(f"<th>{h}</th>" for h in OPTION_COLUMNS)
     return f"<table><thead><tr>{head}</tr></thead><tbody>\n{rows}\n</tbody></table>"
 
 
