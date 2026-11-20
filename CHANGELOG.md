@@ -4,7 +4,9 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Entries start at `0.4.0`. For anything earlier, read `git log`.
+Nothing has been released yet, so every entry sits under `## [Unreleased]`.
+Entries start after the withdrawn v0.3.3 release (commit `71870e0`,
+2026-04-21); for anything earlier, read `git log`.
 
 ## How to update this file
 
@@ -244,6 +246,25 @@ and fixes alone are a PATCH bump.
   unmeasured markup (such as `Methods from Deref`) keep one record.
   ([ADR-0009](docs/adr/0009-api-reference-symbol-records.md),
   [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
+- `dograpper eval` — offline validation of a packed context: deterministic
+  golden Q&A generated from heading breadcrumbs, BM25 retrieval, and
+  hit-rate@k / MRR reported per readiness grade. No network calls.
+- `dograpper explain` — read-only preview of exactly what the LLM receives per
+  chunk (v1 headers, cross-references, grade). Writes nothing.
+- `dograpper serve` — local MCP server over the packed JSONL, speaking
+  newline-delimited JSON-RPC 2.0 on stdio: search, get, cross-refs, readiness.
+- `dograpper init` — onboarding wizard that generates a `.dograpper.json` tuned
+  per target (`notebooklm`, `rag`, `claude-project`). `--target` with `--yes`
+  for scripted use.
+- `dograpper drift` — diff between two `llm-readiness.json` snapshots, rendered
+  as markdown or text, with `--fail-on-drift` for CI.
+- Composite GitHub Action for context freshness: re-packs, computes the drift
+  and posts a single upserted report comment on the pull request.
+- `pack --for-queries` — reorders source files by BM25 affinity to a list of
+  expected queries so content answering the same question is co-located.
+  Requires `--strategy size`.
+- `pack --report` — writes `readiness-report.html` with per-page before/after
+  extraction data and the cause of each score penalty. Implies `--score`.
 
 ### Changed
 
@@ -289,6 +310,17 @@ and fixes alone are a PATCH bump.
   or a list as one block, never removes a link definition and compares links
   by target. `txt` and `jsonl` output is unchanged. ([#87],
   [#115](https://github.com/lorenzoervedosa/dograpper/issues/115))
+- `pack --delta` is now a change gate: the corpus state recorded by the last
+  pack decides *whether* the run happens, not *which* files it packs. Nothing
+  changed, nothing is written; anything changed, the pack runs in full. Partial
+  runs used to renumber chunks from `01` and overwrite the artifacts of the
+  files they did not touch. ([#39], [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md))
+- `pack --delta` records `pack_state.json` in the output directory and diffs
+  against it on the next run, so delta now works in pack-only flows. ([#39])
+- `pack --manifest` no longer drives the delta comparison; its remaining role is
+  resolving source URLs for `--context-header`. `pack` never writes it. ([#39])
+- `--report` is a paired flag (`--report/--no-report`) so a config file that
+  enables it can still be overridden from the command line.
 
 ### Removed
 
@@ -469,59 +501,6 @@ and fixes alone are a PATCH bump.
 - `pack --layout page --format txt` writes `<pre>` code without its fence
   lines, as txt chunks do, and leaves them out of the page's `INDEX.md` and
   header word counts. ([#86])
-
-### Security
-
-- URLs that `download` logs during llms.txt and sitemap discovery drop
-  credentials and escape control characters, so a hostile sitemap or
-  robots.txt cannot inject terminal escape sequences.
-- `download` never writes a credential from a URL's query into the manifest,
-  and so into a pack: a URL is recorded only when every query parameter is a
-  navigation name (`title`, `oldid`, `page`, `lang`, `q`, ... see README),
-  otherwise `"url": null`. Logs and failure reports show the value of
-  credential-like parameters (`token`, `secret`, `key`, `sig`, `jwt`,
-  `X-Amz-*`, ...) as `REDACTED`. ([#94])
-
-## [0.4.0] - 2026-08-15
-
-### Added
-
-- `dograpper eval` — offline validation of a packed context: deterministic
-  golden Q&A generated from heading breadcrumbs, BM25 retrieval, and
-  hit-rate@k / MRR reported per readiness grade. No network calls.
-- `dograpper explain` — read-only preview of exactly what the LLM receives per
-  chunk (v1 headers, cross-references, grade). Writes nothing.
-- `dograpper serve` — local MCP server over the packed JSONL, speaking
-  newline-delimited JSON-RPC 2.0 on stdio: search, get, cross-refs, readiness.
-- `dograpper init` — onboarding wizard that generates a `.dograpper.json` tuned
-  per target (`notebooklm`, `rag`, `claude-project`). `--target` with `--yes`
-  for scripted use.
-- `dograpper drift` — diff between two `llm-readiness.json` snapshots, rendered
-  as markdown or text, with `--fail-on-drift` for CI.
-- Composite GitHub Action for context freshness: re-packs, computes the drift
-  and posts a single upserted report comment on the pull request.
-- `pack --for-queries` — reorders source files by BM25 affinity to a list of
-  expected queries so content answering the same question is co-located.
-  Requires `--strategy size`.
-- `pack --report` — writes `readiness-report.html` with per-page before/after
-  extraction data and the cause of each score penalty. Implies `--score`.
-
-### Changed
-
-- `pack --delta` is now a change gate: the corpus state recorded by the last
-  pack decides *whether* the run happens, not *which* files it packs. Nothing
-  changed, nothing is written; anything changed, the pack runs in full. Partial
-  runs used to renumber chunks from `01` and overwrite the artifacts of the
-  files they did not touch. ([#39], [ADR-0008](docs/adr/0008-delta-as-a-change-gate.md))
-- `pack --delta` records `pack_state.json` in the output directory and diffs
-  against it on the next run, so delta now works in pack-only flows. ([#39])
-- `pack --manifest` no longer drives the delta comparison; its remaining role is
-  resolving source URLs for `--context-header`. `pack` never writes it. ([#39])
-- `--report` is a paired flag (`--report/--no-report`) so a config file that
-  enables it can still be overridden from the command line.
-
-### Fixed
-
 - The content extractor no longer discards the rest of a page after a
   blacklisted element whose end tag never arrives — a void element such as
   `<img class="copy-button">`, or stray markup inside a code sample. Extraction
@@ -543,6 +522,18 @@ and fixes alone are a PATCH bump.
   summary in `--dry-run`.
 - The release install script matches the filename referenced by its `.sha256`
   companion.
+
+### Security
+
+- URLs that `download` logs during llms.txt and sitemap discovery drop
+  credentials and escape control characters, so a hostile sitemap or
+  robots.txt cannot inject terminal escape sequences.
+- `download` never writes a credential from a URL's query into the manifest,
+  and so into a pack: a URL is recorded only when every query parameter is a
+  navigation name (`title`, `oldid`, `page`, `lang`, `q`, ... see README),
+  otherwise `"url": null`. Logs and failure reports show the value of
+  credential-like parameters (`token`, `secret`, `key`, `sig`, `jwt`,
+  `X-Amz-*`, ...) as `REDACTED`. ([#94])
 
 [#1]: https://github.com/lorenzoervedosa/dograpper/issues/1
 [#2]: https://github.com/lorenzoervedosa/dograpper/issues/2

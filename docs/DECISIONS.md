@@ -22,6 +22,24 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-20 — Withdraw the published releases (#151)
+
+- **Decision:** dograpper is treated as unreleased. The GitHub releases v0.4.0
+  (deleted 2026-11-19) and v0.3.3 are gone, with the tags v0.3.0 to v0.4.0;
+  every tagged commit is still on `main` and the tags were lightweight, so only
+  the version markers and the v0.3.3 binary went away. The `[0.4.0]` CHANGELOG
+  section is folded into `[Unreleased]`, each subsection appended after the
+  unreleased entries of its type, and `pyproject.toml` says `0.0.0.dev0`.
+  `v0.0.0-tooling` stays: `doctor --install` downloads busybox-wget from it.
+- **Why:** the maintainer considers the project still in development, and the
+  release binaries lagged far behind `main`.
+- **Rejected:** keeping `version = "0.4.0"`, since `--version`, the httrack
+  default User-Agent and the MCP `serverInfo` would name a release that no
+  longer exists. A CHANGELOG entry for the version change: the changelog
+  describes changes between releases and there is none, so the commit is a
+  `chore`.
+- **Pending:** none.
+
 ## 2026-11-19 — TypeDoc adapter: tests, corpus and version gate (#75)
 
 - **Decision:** the TypeDoc tests live in their own file,

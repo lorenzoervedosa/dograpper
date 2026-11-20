@@ -2,9 +2,10 @@
 
 Enforces the mechanical half of the rules the file documents: the shape of its
 headings, their order, and the invariant that bites hardest — the newest
-released version must match ``pyproject.toml``, because ``dograpper --version``
-reads the installed package metadata and a tag without the bump would ship a
-binary that misreports itself.
+released version must match ``pyproject.toml`` (a ``.devN`` version while
+nothing is released), because ``dograpper --version`` reads the installed
+package metadata and a tag without the bump would ship a binary that
+misreports itself.
 """
 
 import re
@@ -46,8 +47,9 @@ def test_unreleased_section_exists_and_comes_first():
 
 
 def test_released_versions_are_well_formed_and_descending():
+    # No release yet is a valid state (docs/DECISIONS.md, 2026-11-20); the
+    # packaged-version test below pins what it requires.
     releases = _RELEASE_RE.findall(_text())
-    assert releases, "CHANGELOG.md lists no released version"
 
     def _key(version):
         return tuple(int(part) for part in version.split("."))
@@ -59,8 +61,16 @@ def test_released_versions_are_well_formed_and_descending():
 
 
 def test_newest_release_matches_the_packaged_version():
-    """A tag without the pyproject bump ships a binary that misreports itself."""
+    """A tag without the pyproject bump ships a binary that misreports itself.
+
+    With nothing released, the package must not claim a release version either.
+    """
     releases = _RELEASE_RE.findall(_text())
+    if not releases:
+        assert re.search(r"\.dev\d+$", _project_version()), (
+            f"CHANGELOG.md lists no release but pyproject.toml says "
+            f"{_project_version()}; an unreleased package is a .devN version")
+        return
     newest = releases[0][0]
     assert newest == _project_version(), (
         f"CHANGELOG.md newest release is {newest} but pyproject.toml says "
