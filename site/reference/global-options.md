@@ -9,22 +9,10 @@
 
 ## Options in detail
 
-### `--version`
-
-Print the installed version and exit
-
 ### `--verbose`
 
-Detailed log (DEBUG level); the `[cascade]` lines are printed without it. Alias `-v`
-
-### `--quiet`
-
-Critical errors only. Alias `-q`
-
-### `--config`
-
-Configuration file. Default `.dograpper.json`
+Detailed log (DEBUG level); the `[cascade]` lines are printed without it
 
 ### `--help`
 
-Show help and exit (every subcommand takes it too). Alias `-h`
+Show help and exit (every subcommand takes it too)
