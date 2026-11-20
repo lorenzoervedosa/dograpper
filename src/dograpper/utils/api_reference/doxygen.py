@@ -38,8 +38,11 @@ _PAGES = {
 }
 _LISTING_PAGES = ("Directory",)
 _REFERENCE = " Reference"
-# Summary section -> symbol_kind of a member documented in its row; _TYPE: by the row's first word.
-_TYPE = "type"
+# How a section's members get their symbol_kind: _BY_TYPE_WORD, a type's declaration starts with
+# typedef, using or enum.
+_BY_TYPE_WORD = "by type word"
+_TYPE_WORDS = {"typedef": "typedef", "using": "typedef", "enum": "enum"}
+# Summary section -> symbol_kind of a member documented in its row.
 _SUMMARY = {
     **dict.fromkeys(("Public Member Functions", "Protected Member Functions", "Private Member Functions",
                      "Static Public Member Functions", "Static Protected Member Functions",
@@ -48,10 +51,9 @@ _SUMMARY = {
     **dict.fromkeys(("Public Attributes", "Protected Attributes", "Private Attributes",
                      "Static Public Attributes", "Static Protected Attributes", "Static Private Attributes",
                      "Variables", "Data Fields"), "variable"),
-    **dict.fromkeys(("Public Types", "Protected Types", "Private Types"), _TYPE),
+    **dict.fromkeys(("Public Types", "Protected Types", "Private Types"), _BY_TYPE_WORD),
     "Typedefs": "typedef", "Enumerations": "enum", "Macros": "define",
 }
-_TYPES = {"typedef": "typedef", "using": "typedef", "enum": "enum"}
 # Documentation section (h2.groupheader after the description) -> symbol_kind of its members.
 _SECTIONS = {
     **dict.fromkeys(("Member Typedef Documentation", "Typedef Documentation"), "typedef"),
@@ -115,6 +117,9 @@ class _Page(Regions):
         self._template: Optional[_Row] = None  # template header row waiting for its member's row
         self._last: Optional[_Member] = None   # summary member whose brief may follow
 
+    def _fail(self, problem: str) -> None:
+        self.problem = self.problem or problem  # the first one is reported
+
     def handle_starttag(self, tag, attrs):
         if tag == "hr" and self._in_contents and len(self._stack) == self._depth and not self._footer:
             self._footer = True  # "The documentation for this class was generated from ...": dropped
@@ -150,7 +155,7 @@ class _Page(Regions):
             anchor, self._anchor = self._anchor, None
             titled, self._titled = self._titled, None
             if titled is not None and not (tag == "div" and "memitem" in classes):
-                self.problem = self.problem or "an h2.memtitle without its div.memitem"
+                self._fail("an h2.memtitle without its div.memitem")
         if ((tag == "span" and ("permalink" in classes or "overload" in classes))
                 or (tag == "a" and attr.get("href", "").endswith("#details"))
                 # "Go to the source code of this file.", a link in a p of its own: the include
@@ -178,7 +183,7 @@ class _Page(Regions):
             self.sections.append(self._section)
         elif tag == "h2" and "memtitle" in classes:
             if anchor is None:
-                self.problem = self.problem or "an h2.memtitle without an anchor"
+                self._fail("an h2.memtitle without an anchor")
                 return
             member = _Member(anchor, self._section, summary=False)
             member.name = self.region(closers)
@@ -186,7 +191,7 @@ class _Page(Regions):
             self._titled = member
         elif tag == "div" and "memitem" in classes:
             if titled is None:
-                self.problem = self.problem or "a div.memitem without an h2.memtitle"
+                self._fail("a div.memitem without an h2.memtitle")
                 return
             self.region(closers)  # the space between its parts
             self.set_until_end("_member", titled, closers)
@@ -201,20 +206,20 @@ class _Page(Regions):
 
     def _decls_start(self, tag, attr, classes, closers):
         row = self._row
-        kind = classes[0] if classes else ""
+        row_class = classes[0] if classes else ""  # "memitem:<anchor>", "memdesc:<anchor>"
         if tag == "h2" and "groupheader" in classes:
             self._label = self.region(closers)
             self._inherit = None
         elif tag == "tr" and "inherit_header" in classes:
             self._inherit = self.region(closers)
-        elif tag == "tr" and kind.startswith("memitem:"):
+        elif tag == "tr" and row_class.startswith("memitem:"):
             inherited = "inherit" in classes
             row = _Row(self._inherit if inherited else self._label, inherited)
             row.text = self.region(closers)
             self.set_until_end("_row", row, closers)
             closers.append(lambda: self._end_row(row))
-        elif tag == "tr" and kind.startswith("memdesc:"):
-            if self._last is not None and kind[len("memdesc:"):] == self._last.anchor:
+        elif tag == "tr" and row_class.startswith("memdesc:"):
+            if self._last is not None and row_class[len("memdesc:"):] == self._last.anchor:
                 self._last.parts.append((self.region(closers), False))
             self._last = None
         elif row is None:
@@ -242,7 +247,7 @@ class _Page(Regions):
         if row.anchor is None or row.inherited:
             return
         if row.name is None:
-            self.problem = self.problem or "a summary row without a name"
+            self._fail("a summary row without a name")
             return
         member = _Member(row.anchor, row.label, summary=True)
         member.name, member.row = row.name, row.text
@@ -271,8 +276,8 @@ def _kind(title: str):
 
 def _member_kind(member: _Member, section: str) -> str:
     kind = _SUMMARY.get(section) if member.summary else _SECTIONS.get(section)
-    if kind == _TYPE:
-        kind = _TYPES.get(line(member.row).split(" ", 1)[0])
+    if kind == _BY_TYPE_WORD:
+        kind = _TYPE_WORDS.get(line(member.row).split(" ", 1)[0])
     if kind is None:
         raise _unsupported(f"a member of unknown kind in section {section or 'without a heading'}")
     return kind
@@ -303,7 +308,7 @@ def records(html: str, generator: str) -> List[ApiRecord]:
 
     lines: Dict[int, str] = {}  # id(Text) -> its line: a section heading is read once, not once per member
 
-    def once(text: Optional[Text]) -> str:
+    def cached_line(text: Optional[Text]) -> str:
         if text is None:
             return ""
         if id(text) not in lines:
@@ -311,7 +316,7 @@ def records(html: str, generator: str) -> List[ApiRecord]:
         return lines[id(text)]
 
     # Namespaces a file page lists have pages of their own, which document their members.
-    namespaces = {line(name) for label, name in page.names if once(label) == _NAMESPACES}
+    namespaces = {line(name) for label, name in page.names if cached_line(label) == _NAMESPACES}
     anchors = set()
     members: List[ApiRecord] = []
     for member in page.members:
@@ -321,8 +326,9 @@ def records(html: str, generator: str) -> List[ApiRecord]:
             name = name[:-2]  # "put()" names a function; "operator()()" keeps its own
         if not name:
             raise _unsupported("a member without a name")
-        body = [ln for text, one in member.parts for ln in ([line(text)] if one else text.final()) if ln]
-        kind = _member_kind(member, once(member.section))
+        body = [ln for text, one_line in member.parts
+                for ln in ([line(text)] if one_line else text.final()) if ln]
+        kind = _member_kind(member, cached_line(member.section))
         if symbol_kind == "file" and member.summary and name.rpartition("::")[0] in namespaces:
             continue  # a namespace member Doxygen also anchors here: documented on the namespace page
         member_symbol = name if symbol_kind == "file" else f"{symbol}::{name}"
@@ -334,7 +340,7 @@ def records(html: str, generator: str) -> List[ApiRecord]:
 
     if symbol_kind == "file" and not members:
         raise NotSplit("Doxygen file page that documents no member")
-    names = declared((once(label), line(name)) for label, name in page.names)
+    names = declared((cached_line(label), line(name)) for label, name in page.names)
     labels = [line(page.labels)] if page.labels is not None else []
     container = ApiRecord(text="\n".join([f"{symbol} ({symbol_kind})"] + labels + page.contents.final() + names),
                           symbol=symbol, kind="container", symbol_kind=symbol_kind, breadcrumb=[symbol],
