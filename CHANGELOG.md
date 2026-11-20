@@ -274,6 +274,12 @@ stays `0.0.0.dev0`.
 - `download --downloader httrack` over a result that looks client-rendered (and `sync`) no longer requests each page a second time for the browser pass: the pages the engine already fetched in the run (up to 128 MiB in memory) are handed to the browser. ([#160])
 - `download --downloader httrack --headless` requests a script or stylesheet that several pages share once per run, instead of once per page (a per-run in-memory cache of at most 64 MiB; nothing is written to disk). ([#167])
 - `download --downloader httrack --headless` follows a navigation a page starts itself (meta refresh, `location =`) as a link of that page, within scope, `--filter`, `--depth` and `--max-links`, instead of dropping it. ([#159])
+- `pack --api-records` also splits pages from the measured rustdoc nightly
+  `1.102.0-nightly (6905905bb 2026-11-19)`, and drops its notable-trait mark
+  from signatures; any other rustdoc version still keeps one record per page.
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
+  [#162](https://github.com/lorenzoervedosa/dograpper/issues/162))
+
 - `pack --token-encoding` with an unknown name is a usage error (exit 2) before anything is packed, from the command line and from the `token-encoding` config key; before, it packed, warned once per chunk and exited 0 without the token lines. ([#144])
 - `pack --dedup-threshold` outside 0 to 10, or not an integer in the config, is a usage error (exit 2), from the command line and from the `dedup-threshold` config key; before, any integer was accepted. ([#142])
 - `pack` now packs documentation formats only by default (`.html`, `.htm`,

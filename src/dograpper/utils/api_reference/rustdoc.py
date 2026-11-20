@@ -22,7 +22,8 @@ from . import ApiRecord, NotSplit, check_anchor, check_symbol, declared
 from ._html import Regions, Text, line
 
 GENERATOR = "rustdoc"
-MEASURED_VERSION = "1.96."
+# Accepted data-rustdoc-version prefixes: the stable 1.96 line and the one measured nightly build.
+MEASURED_VERSIONS = ("1.96.", "1.102.0-nightly (6905905bb ")
 # In <meta name="rustdoc-vars">, next to the generator meta; bounded, so linear.
 _VERSION = re.compile(r'\bdata-rustdoc-version="([^"]{0,100})"')
 
@@ -105,8 +106,8 @@ class _Page(Regions):
         if tag == "h2" and "section-header" in classes:
             self._section_start(attr.get("id") or "", closers)
         elif (self._section == _DROPPED
-              or (tag == "a" and ("src" in classes or "anchor" in classes or "doc-anchor" in classes
-                                  or "tooltip" in classes))
+              or (tag == "a" and ("src" in classes or "anchor" in classes or "doc-anchor" in classes))
+              or (tag in ("a", "span") and "tooltip" in classes)  # notable-trait mark: <a> in 1.96, <span> in the nightly
               or tag == "button" or (tag == "span" and "emoji" in classes)
               or (tag == "summary" and "hideme" in classes)
               or (tag == "details" and "non-exhaustive" in classes)):
@@ -169,9 +170,9 @@ def records(html: str) -> List[ApiRecord]:
     """The page's container record first, then one member record per member in page order;
     a function, constant, static or macro page is one member record."""
     version = _VERSION.search(html, 0, SCAN_CHARS)
-    if not version or not version.group(1).startswith(MEASURED_VERSION):
+    if not version or not version.group(1).startswith(MEASURED_VERSIONS):
         raise _unsupported(f"version {version.group(1) if version else 'missing'} "
-                           f"(measured: {MEASURED_VERSION}x)")
+                           f"(measured: {', '.join(MEASURED_VERSIONS)})")
     page = _Page()
     page.feed(html)
     page.close()
