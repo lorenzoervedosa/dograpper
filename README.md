@@ -661,7 +661,7 @@ request. All `[httrack, fire-engine]` flags above apply, plus:
 | Flag | Default | Meaning |
 |---|---|---|
 | `--proxy` | — | One proxy URL for every request (`http://user:pass@host:port`); its credentials go to curl apart from the URL, so no error or report line shows them |
-| `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`) |
+| `--impersonate` | `chrome` | `curl_cffi` browser profile (e.g. `chrome124`). Under `chrome_android` (`chrome131_android`), dograpper sends `sec-ch-ua-mobile: ?1` in the profile's own slot: that `curl_cffi` target sends `?0` beside its Android User-Agent, and per Client Hints a mobile browser sends `?1` |
 
 Needs the `fire-engine` extra: `uv sync --extra fire-engine` (or `pip install
 'dograpper[fire-engine]'`), which installs `curl_cffi` plus the `br` / `zstd`

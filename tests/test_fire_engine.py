@@ -360,6 +360,31 @@ def test_real_https_still_offers_http2(raw_server):
     assert b"\x02h2\x08http/1.1" in heads[0]
 
 
+@pytest.mark.parametrize("target", ["chrome_android", "chrome131_android"])
+def test_real_android_target_sends_the_mobile_client_hint_in_its_slot(raw_server, target):
+    """#157: curl_cffi's chrome131_android sends sec-ch-ua-mobile: ?0 beside an Android UA;
+    a mobile UA sends ?1 (Client Hints). The value changes, the target's order does not."""
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher(impersonate=target).get(base + "/p", kind="navigate")
+
+    lines = wire_lines(heads[0])
+    assert "sec-ch-ua-mobile: ?1" in lines
+    assert [line.split(":", 1)[0] for line in lines] == [
+        "Host", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+        "Upgrade-Insecure-Requests", "User-Agent", "Accept", "Sec-Fetch-Site",
+        "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest", "Accept-Encoding",
+        "Accept-Language"]
+
+
+def test_real_desktop_target_keeps_its_desktop_client_hint(raw_server):
+    base, heads = raw_server(OK_REPLY)
+
+    real_fetcher().get(base + "/p", kind="navigate")
+
+    assert "sec-ch-ua-mobile: ?0" in wire_lines(heads[0])
+
+
 FAST = ["--disable-security-limits", "--max-conn-rate", "1000"]  # local server: no pacing wait
 
 

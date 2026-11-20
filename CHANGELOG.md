@@ -548,6 +548,9 @@ stays `0.0.0.dev0`.
 - `download --downloader fire-engine` no longer offers an h2c upgrade on plain
   `http://` URLs (`Upgrade: h2c`, `HTTP2-Settings`, `Connection: Upgrade, …`),
   which no browser sends; HTTPS still offers HTTP/2. ([#156])
+- `download --downloader fire-engine --impersonate chrome_android` sends
+  `sec-ch-ua-mobile: ?1` instead of the `?0` that `curl_cffi`'s target puts
+  beside its Android User-Agent; the header keeps its position. ([#157])
 
 ### Security
 
@@ -596,6 +599,7 @@ stays `0.0.0.dev0`.
 [#132]: https://github.com/lorenzoervedosa/dograpper/issues/132
 [#154]: https://github.com/lorenzoervedosa/dograpper/issues/154
 [#156]: https://github.com/lorenzoervedosa/dograpper/issues/156
+[#157]: https://github.com/lorenzoervedosa/dograpper/issues/157
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159

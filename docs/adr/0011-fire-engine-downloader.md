@@ -130,6 +130,14 @@ Evidência: `docs/discovery/firecrawl-header-behavior.md`.
   Mudar isso abandonaria a ordem de headers do perfil (decisão do mantenedor,
   2026-11-20). Em HTTP/2 o host vai no pseudo-header `:authority`, na ordem
   do perfil.
+- **Valores por alvo (#157).** Uma tabela pequena de valores de header por
+  alvo do `curl_cffi` (`_TARGET_HEADERS`) vale antes de qualquer outro header,
+  então o `--header` do usuário ainda vence. Hoje ela só corrige o
+  `chrome131_android` (alias `chrome_android`), que manda `sec-ch-ua-mobile:
+  ?0` ao lado de um User-Agent Android: o dograpper manda `?1`, como a
+  especificação de Client Hints manda um navegador móvel fazer, no lugar que o
+  alvo dá ao header. Decisão do mantenedor (2026-11-20), sem captura de um
+  Chrome Android real; o defeito vai ao `curl_cffi` pelo mantenedor.
 
 ## Estado da decisão (2026-11-18)
 

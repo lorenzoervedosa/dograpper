@@ -25,6 +25,13 @@ from ..httrack.fetcher import MAX_BODY_BYTES, Fetcher, wire_host
 # except a User-Agent the user gave, which replaces the profile's (#136 aligns it with Firecrawl).
 _FORWARDED = frozenset({"referer", "if-none-match", "if-modified-since"})
 
+# Per-target header values, set before any other header so a user's still wins (#157).
+# curl_cffi 0.17's chrome131_android (the chrome_android alias) sends sec-ch-ua-mobile: ?0
+# beside an Android UA; a mobile UA sends ?1 (Client Hints). A same-named header takes the
+# target's slot, so the order stays the target's.
+_TARGET_HEADERS = {target: {"sec-ch-ua-mobile": "?1"}
+                   for target in ("chrome_android", "chrome131_android")}
+
 _WRITE_ABORT = 0xFFFFFFFF  # libcurl's CURL_WRITEFUNC_ERROR: the writer stops the transfer
 
 _MISSING = (
@@ -119,7 +126,8 @@ class CurlCffiFetcher(Fetcher):
         # wire, so curl targets exactly what the scope/robots checks validated.
         netloc = wire_host(parts)  # the port included; ValueError on a host the checks reject
         url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
-        req_headers = {k: v for k, v in headers if k.lower() in _FORWARDED}
+        req_headers = dict(_TARGET_HEADERS.get(self._impersonate, {}))
+        req_headers.update((k, v) for k, v in headers if k.lower() in _FORWARDED)
         if self._user_agent:
             req_headers["User-Agent"] = self._user_agent
         proxies = ({"http": self._proxy, "https": self._proxy}
