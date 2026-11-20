@@ -78,7 +78,7 @@ Entry format:
 - **Decision:** a member Doxygen documents only by its brief description, which has no documentation section, gets a member record made of its summary row and brief (its anchor sits in that row, or in the row of its template header). Summary rows that link to a section are dropped as the ADR-0009 summary tables are.
 - **Why:** the brief says the summary rows repeat the members "without their documentation", which holds only for members with a section. On libstdc++ 13 a third of the anchored members (1,143 of 1,741 on the first run) have no section; dropping their rows would drop the members.
 - **Rejected:** keeping those members as names on the container only (a declared member with no record, unlike every other adapter).
-- **Pending:** maintainer: confirm at PR review, since it departs from the brief's description of the summary rows.
+- **Maintainer (2026-11-20):** accepted; recorded on #168.
 
 - **Decision:** the qualified name is the page title's, Doxygen's spacing included (`std::vector< _Tp, _Alloc >`, `shapes::Box< T, N >::put`); a member of a file page is named alone (`ring_push`) with the file as `container`.
 - **Why:** the title is the only place that names the symbol, and it keeps a specialization (`std::vector< bool, _Alloc >`) apart from its primary template; Doxygen's own signatures use the same form.
