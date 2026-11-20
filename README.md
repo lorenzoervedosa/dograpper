@@ -993,9 +993,9 @@ used as the first-seen copy that removes blocks elsewhere, so a signature
 that several types declare, such as an override, stays on every page
 ([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). The summary
 reports `Pages exempted: N (API reference)`, and `--dry-run` reports
-`Dedup pages exempted: N (API reference)`. API reference pages from a
-generator without an adapter (TypeDoc, rustdoc) are still
-deduplicated: run without `--dedup` on those corpora.
+`Dedup pages exempted: N (API reference)`. A page that no adapter splits
+(another generator version, unmeasured markup, a listing or index page) is
+deduplicated like any other page.
 
 #### Context header (`--context-header`)
 
