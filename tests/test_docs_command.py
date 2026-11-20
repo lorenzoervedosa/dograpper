@@ -64,6 +64,13 @@ def test_option_without_default_shows_none():
     assert "<td>none</td>" in _row(page, "download--output")
 
 
+def test_help_row_lists_the_short_alias():
+    # the root group's context_settings make the CLI accept -h everywhere
+    page = _page()
+    for row_id in ("global--help", "pack--help"):
+        assert "-h, --help" in _row(page, row_id), row_id
+
+
 def test_page_is_self_contained():
     page = _page()
     for needle in ("<link", "<script", "<img", "@import", "url(", "src=", "<iframe"):

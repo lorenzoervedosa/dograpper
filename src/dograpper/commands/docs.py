@@ -91,8 +91,17 @@ def _arguments(params):
     return f"<h3>Arguments</h3><ul>{''.join(items)}</ul>" if items else ""
 
 
-def _section(name, cmd, parent_ctx):
-    ctx = click.Context(cmd, info_name=name, parent=parent_ctx)
+def command_context(group: click.Group, name: str | None = None) -> click.Context:
+    """Context of `group`, or of its subcommand `name`, with the context_settings click applies
+    (the root's `-h` alias included); shared with the docs site."""
+    root = click.Context(group, info_name=group.name or "dograpper", **group.context_settings)
+    if name is None:
+        return root
+    cmd = group.commands[name]
+    return click.Context(cmd, info_name=name, parent=root, **cmd.context_settings)
+
+
+def _section(name, cmd, ctx):
     params = cmd.get_params(ctx)
     usage = f"{ctx.command_path} {' '.join(cmd.collect_usage_pieces(ctx))}"
     return (
@@ -105,7 +114,7 @@ def _section(name, cmd, parent_ctx):
 
 def build_page(cli_group: click.Group) -> str:
     """Return the whole reference page for `cli_group`; pure, no I/O."""
-    root = click.Context(cli_group, info_name=cli_group.name or "dograpper")
+    root = command_context(cli_group)
     commands = sorted(cli_group.commands.items())
     nav = '<a href="#global">Global options</a>' + "".join(
         f'<a href="#{_e(n)}">{_e(n)}</a>' for n, _ in commands)
@@ -114,7 +123,7 @@ def build_page(cli_group: click.Group) -> str:
         f"<pre>{_e(_description(cli_group))}</pre>"
         f"{_options_table('global', cli_group.get_params(root), root)}</section>"
     )
-    body = glob + "".join(_section(n, c, root) for n, c in commands)
+    body = glob + "".join(_section(n, c, command_context(cli_group, n)) for n, c in commands)
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'

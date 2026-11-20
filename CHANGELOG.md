@@ -527,6 +527,7 @@ stays `0.0.0.dev0`.
   companion.
 - `dograpper docs` shows `none` as the default of an option that has none,
   instead of `Sentinel.UNSET` (click 8.3).
+- `dograpper docs` lists `-h` next to `--help`, as every command accepts both.
 
 ### Security
 
