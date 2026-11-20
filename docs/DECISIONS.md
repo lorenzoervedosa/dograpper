@@ -22,6 +22,13 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-20 — Docs site pages copied from the README
+
+- **Decision:** each `site/commands/*.md` page is a verbatim copy of its README section (heading levels shifted, option tables replaced by the generated table, relative `docs/` links turned into GitHub URLs). The `pack` page was copied from `README.md` blob `16043b558b70fcbd396fb62ec60d1ceb122cd73a` at commit `24b75f492674caf1830f7591d071744278b5dd38`. At cutover, `git diff 24b75f492674caf1830f7591d071744278b5dd38..HEAD -- README.md` lists what changed in the README since and has to be carried over to the pages.
+- **Why:** the README stays untouched until the site replaces it, so the copies drift unless the copy point is recorded.
+- **Rejected:** generating pages from the README at build time; re-reading the whole README at cutover.
+- **Pending:** none.
+
 ## 2026-11-20 — Docs site renders options with its own directive, not sphinx-click
 
 - **Decision:** `site/conf.py` registers a `dograpper-options` directive (argument: a command name, or `dograpper` for the root group) that builds a docutils table from the click tree with `option_cells` / `OPTION_COLUMNS` of `commands/docs.py`; `sphinx-click` is dropped from the `docs` extra.

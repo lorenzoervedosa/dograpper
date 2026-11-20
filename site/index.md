@@ -51,6 +51,8 @@ URL → Mirror → Extract → Dedup → Score → Chunk → Export (MD/JSONL)
 :caption: Commands
 :hidden:
 :maxdepth: 2
+
+commands/pack
 ```
 
 ```{toctree}
