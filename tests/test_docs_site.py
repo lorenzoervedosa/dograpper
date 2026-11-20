@@ -113,3 +113,7 @@ def test_every_flag_on_the_site_exists():
         for flag in _flags_in(_read(p)) - known
     )
     assert not unknown, f"flags on the site that the CLI does not have: {unknown}"
+
+
+def test_every_command_has_a_page():
+    assert set(cli.commands) == set(_command_pages())
