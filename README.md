@@ -552,7 +552,10 @@ command line, or set away from its default in `.dograpper.json`). Their
 **Request headers (`--header`, HTTrack `-%X`).** `--header 'Name: value'`,
 repeatable, or a `"header"` list in `.dograpper.json` (a list given on the
 command line replaces the config one), adds a header to every request,
-robots.txt included. A header named like one the profile sends (compared
+robots.txt included. Every request means every one in the crawl's scope,
+including a same-host `http://` page reached from an `https://` start URL, as
+HTTrack `-%X`, `curl -H` and `wget --header` do: a credential given with
+`--header` crosses the network in clear text there. A header named like one the profile sends (compared
 without case) takes that header's place in the order, with your value and your
 spelling of the name, which shows on HTTP/1.1 only (HTTP/2 lowercases every
 name); any other header is added after the profile's. `--header 'User-Agent:

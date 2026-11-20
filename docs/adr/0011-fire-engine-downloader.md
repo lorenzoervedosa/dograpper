@@ -154,7 +154,11 @@ Evidência: `docs/discovery/firecrawl-header-behavior.md`.
     não controla.
 - **`--header` repetível (#136, decisão do mantenedor de 2026-11-19).** O
   equivalente ao mapa `headers` do Firecrawl e ao `-%X` do HTTrack, nos dois
-  perfis. Ao curl vão, nesta ordem de precedência, os valores por alvo, os
+  perfis. As linhas vão em todo pedido do escopo, inclusive um `http://` do
+  mesmo host alcançado a partir de um start `https://`, como no `-%X` do
+  HTTrack, no `curl -H` e no `wget --header` (decisão do mantenedor,
+  2026-11-20); uma credencial dada por `--header` cruza a rede em texto claro
+  nesse pedido, e o README diz isso junto do `--header`. Ao curl vão, nesta ordem de precedência, os valores por alvo, os
   headers do pedido (`Referer`, validadores), o User-Agent explícito com os
   hints derrubados e por último as linhas `--header`: cada camada toma o
   lugar do header de mesmo nome da anterior, e o `curl_cffi` põe um header de
