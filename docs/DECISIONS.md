@@ -36,6 +36,38 @@ Entry format:
 - **Rejected:** `{eval-rst}` plus sphinx-click event hooks; editing the `--prefix` help text.
 - **Pending:** none.
 
+## 2026-11-20 — Dated versions for the first release
+
+- **Decision:** releases are versioned by date: `YYYY.M` for the release month
+  (`2027.3`), `YYYY.M.N` for a further release in the same month, tagged
+  `vYYYY.M`. Contract 10, the CHANGELOG header, `tests/test_changelog.py`
+  (heading format and the version matching its date's month) and the release
+  workflow's tag filter (`v*.*`, since `v2027.3` has a single dot) follow.
+- **Why:** the maintainer chose month/year versions (2026-11-20). The month has
+  no leading zero because Python packaging normalizes `2027.03` to `2027.3`, so
+  `--version` would disagree with a `v2027.03` tag.
+- **Rejected:** `YYYY.MM` with a leading zero, for the mismatch above. The
+  old pre-1.0 semantic versioning rule.
+- **Pending:** none.
+
+## 2026-11-20 — Withdraw the published releases (#151)
+
+- **Decision:** dograpper is treated as unreleased. The GitHub releases v0.4.0
+  (deleted 2026-11-19) and v0.3.3 are gone, with the tags v0.3.0 to v0.4.0;
+  every tagged commit is still on `main` and the tags were lightweight, so only
+  the version markers and the v0.3.3 binary went away. The `[0.4.0]` CHANGELOG
+  section is folded into `[Unreleased]`, each subsection appended after the
+  unreleased entries of its type, and `pyproject.toml` says `0.0.0.dev0`.
+  `v0.0.0-tooling` stays: `doctor --install` downloads busybox-wget from it.
+- **Why:** the maintainer considers the project still in development, and the
+  release binaries lagged far behind `main`.
+- **Rejected:** keeping `version = "0.4.0"`, since `--version`, the httrack
+  default User-Agent and the MCP `serverInfo` would name a release that no
+  longer exists. A CHANGELOG entry for the version change: the changelog
+  describes changes between releases and there is none, so the commit is a
+  `chore`.
+- **Pending:** none.
+
 ## 2026-11-19 — TypeDoc adapter: tests, corpus and version gate (#75)
 
 - **Decision:** the TypeDoc tests live in their own file,

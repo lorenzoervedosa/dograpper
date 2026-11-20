@@ -2,13 +2,16 @@
 
 Enforces the mechanical half of the rules the file documents: the shape of its
 headings, their order, and the invariant that bites hardest — the newest
-released version must match ``pyproject.toml``, because ``dograpper --version``
-reads the installed package metadata and a tag without the bump would ship a
-binary that misreports itself.
+released version must match ``pyproject.toml`` (a ``.devN`` version while
+nothing is released), because ``dograpper --version`` reads the installed
+package metadata and a tag without the bump would ship a binary that
+misreports itself.
 """
 
 import re
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
@@ -19,7 +22,8 @@ ALLOWED_SECTIONS = {
 }
 
 _UNRELEASED_RE = re.compile(r"^## \[Unreleased\]\s*$", re.MULTILINE)
-_RELEASE_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})\s*$",
+# Dated versions: YYYY.M or YYYY.M.N, month without a leading zero.
+_RELEASE_RE = re.compile(r"^## \[(\d{4}\.[1-9]\d?(?:\.\d+)?)\] - (\d{4}-\d{2}-\d{2})\s*$",
                          re.MULTILINE)
 _VERSION_HEADING_RE = re.compile(r"^## \[.*$", re.MULTILINE)
 _SECTION_RE = re.compile(r"^### (.+?)\s*$", re.MULTILINE)
@@ -46,8 +50,9 @@ def test_unreleased_section_exists_and_comes_first():
 
 
 def test_released_versions_are_well_formed_and_descending():
+    # No release yet is a valid state (docs/DECISIONS.md, 2026-11-20); the
+    # packaged-version test below pins what it requires.
     releases = _RELEASE_RE.findall(_text())
-    assert releases, "CHANGELOG.md lists no released version"
 
     def _key(version):
         return tuple(int(part) for part in version.split("."))
@@ -58,9 +63,51 @@ def test_released_versions_are_well_formed_and_descending():
     assert len(set(versions)) == len(versions), "a version is listed twice"
 
 
+def _release_heading_problems(text):
+    """Release headings that break the dated-version rule, one message each."""
+    problems = []
+    for heading in _VERSION_HEADING_RE.findall(text):
+        if _UNRELEASED_RE.match(heading):
+            continue
+        match = _RELEASE_RE.match(heading)
+        if not match:
+            problems.append(f"{heading!r} is not '## [YYYY.M] - YYYY-MM-DD'")
+            continue
+        version, date = match.groups()
+        year, month = date.split("-")[:2]
+        if version.split(".")[:2] != [year, str(int(month))]:
+            problems.append(f"{heading!r}: the version is not YYYY.M of its date")
+    return problems
+
+
+def test_release_headings_use_the_dated_version_of_their_month():
+    problems = _release_heading_problems(_text())
+    assert not problems, problems
+
+
+@pytest.mark.parametrize("heading, ok", [
+    ("## [2027.3] - 2027-03-14", True),
+    ("## [2027.3.1] - 2027-03-28", True),
+    ("## [2027.12] - 2027-12-01", True),
+    ("## [2027.03] - 2027-03-14", False),  # leading zero, normalized away
+    ("## [2027.4] - 2027-03-14", False),   # version month differs from the date
+    ("## [0.4.0] - 2026-08-15", False),    # semantic version
+])
+def test_release_heading_rule(heading, ok):
+    assert (not _release_heading_problems(heading + "\n")) is ok
+
+
 def test_newest_release_matches_the_packaged_version():
-    """A tag without the pyproject bump ships a binary that misreports itself."""
+    """A tag without the pyproject bump ships a binary that misreports itself.
+
+    With nothing released, the package must not claim a release version either.
+    """
     releases = _RELEASE_RE.findall(_text())
+    if not releases:
+        assert re.search(r"\.dev\d+$", _project_version()), (
+            f"CHANGELOG.md lists no release but pyproject.toml says "
+            f"{_project_version()}; an unreleased package is a .devN version")
+        return
     newest = releases[0][0]
     assert newest == _project_version(), (
         f"CHANGELOG.md newest release is {newest} but pyproject.toml says "
