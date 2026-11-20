@@ -89,6 +89,7 @@ The member-record p99 bound in the acceptance bar is now set per generator:
 | Sphinx autodoc | ≤ 300 words |
 | rustdoc | ≤ 300 words |
 | TypeDoc | ≤ 250 words |
+| Doxygen | ≤ 550 words |
 
 Every other criterion still applies to every generator:
 
@@ -202,3 +203,52 @@ measured on 0.28.20, and 0.28.0 was checked on the fixture. Pages from 0.25 to
 breadcrumb at the project and mark no current page in it. The "Defined in"
 source locations, which TypeDoc writes by default, are dropped from the records,
 like Sphinx's `[source]` links.
+
+## Amendment (2026-11-20): Doxygen
+
+The Doxygen adapter ([#168](https://github.com/lorenzoervedosa/dograpper/issues/168),
+phase 5 of [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
+reads Doxygen 1.9.8 pages of C and C++ only. A page whose generator meta
+names another version keeps one record. Three points of the decision read
+differently for Doxygen:
+
+- **Summary tables.** A member Doxygen documents by a brief description
+  only has no documentation section: its anchor and its brief sit in its
+  summary row. That row is its member record. The rows of the members that
+  have a section repeat them, and are dropped as decision 4 drops summary
+  tables; their names stay on the container record by section, inherited
+  ones by base (`... inherited from std::_Vector_base< _Tp, _Alloc >: ...`).
+- **File pages.** A file page that documents members is a container record.
+  Its member records are named as the page writes them (`ring_push`, or
+  `std::operator==` for a namespace that has no page), with the file as
+  their container. It does not repeat the members of the namespaces it lists,
+  which their namespace's page documents; a file page that documents no
+  member keeps one record.
+- **Shared anchors.** Doxygen 1.9.8 gives two overloads that differ only in
+  their template constraints the same anchor. Such a page keeps one record,
+  as decision 5 needs one id per record.
+
+The member record p99 bound for Doxygen is 550 words (table above), set by
+the maintainer on 2026-11-20 above the 300 asked for in #168, after the
+measurement. The evidence comes from the acceptance run
+([the Doxygen acceptance doc](../discovery/doxygen-api-records-acceptance.md))
+on two corpora generated locally, ICU 74.2 (C, 1,034 member records) and
+libstdc++ 13 (templated C++, 2,252 member records):
+
+- Member p99 was 506 words on ICU, 138 on libstdc++ and 305 on both
+  together; the largest member had 2,359 words (the `UProperty` enum, one
+  documented enumerator per value). ICU's long records are its own API
+  documentation: functions that describe every parameter, error code and
+  callback (`ucnv_convertEx`, 739 words), and enums. Without the enums the
+  ICU p99 is still 358, so a lower bound would mean cutting documentation.
+- 21 of 24 lookups hit the declaring member or its container record in the
+  top 5. One miss is a large record: `ucnv_open` (325 words) ranks below
+  its shorter siblings `ucnv_open*`. `UErrorCode` (1,587 words) still ranks
+  3rd.
+- 1,063 of 1,063 template headers were kept verbatim, both headers of a
+  member template of a class template included. The largest container had
+  925 words; both packs were faster than without `--api-records` (3.6 s vs
+  5.2 s, 7.8 s vs 9.7 s).
+
+Topic (group) pages, related pages and the other Doxygen languages keep one
+record: their markup was not measured.

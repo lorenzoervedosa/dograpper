@@ -249,6 +249,22 @@ stays `0.0.0.dev0`.
   unmeasured markup (such as `Methods from Deref`) keep one record.
   ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
   [#75](https://github.com/lorenzoervedosa/dograpper/issues/75))
+- `pack --api-records` also splits Doxygen pages of C and C++ (Doxygen 1.9.8,
+  `<meta name="generator" content="Doxygen 1.9.8"/>`; a page from another
+  Doxygen version keeps one record). A class, struct, union or namespace
+  page, or a file page that documents members, becomes a container record
+  (name and kind, description, template parameters, member names by summary
+  section, inherited members by base) plus one member record per member the
+  page documents (`std::vector< _Tp, _Alloc >::push_back`, `ring_push`: its
+  template headers, signature, labels such as `virtual`, and documentation;
+  a member with only a brief description gets its summary row and brief),
+  anchored at Doxygen's member id. `symbol_kind` gains `file`, `typedef` and
+  `define`; `generator` is `doxygen`. Member lists, source pages, indexes,
+  topic (group) pages and unmeasured markup keep one record. Doxygen pages,
+  like the other generators' pages, are now never deduplicated, with or
+  without `--api-records`.
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
+  [#168](https://github.com/lorenzoervedosa/dograpper/issues/168))
 - `dograpper eval` — offline validation of a packed context: deterministic
   golden Q&A generated from heading breadcrumbs, BM25 retrieval, and
   hit-rate@k / MRR reported per readiness grade. No network calls.

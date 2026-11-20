@@ -73,6 +73,33 @@ Entry format:
 - **Rejected:** last line wins (silent); sending both lines as `curl -H` does (a second User-Agent confuses servers); a command-line `--header 'User-Agent'` beating a config `user-agent` (contract 6 stretched across two options); dropping user-given hints too.
 - **Pending:** none; the maintainer can reverse any of the three in review.
 
+## 2026-11-20 — Doxygen adapter: what a member record is (#168)
+
+- **Decision:** a member Doxygen documents only by its brief description, which has no documentation section, gets a member record made of its summary row and brief (its anchor sits in that row, or in the row of its template header). Summary rows that link to a section are dropped as the ADR-0009 summary tables are.
+- **Why:** the brief says the summary rows repeat the members "without their documentation", which holds only for members with a section. On libstdc++ 13 a third of the anchored members (1,143 of 1,741 on the first run) have no section; dropping their rows would drop the members.
+- **Rejected:** keeping those members as names on the container only (a declared member with no record, unlike every other adapter).
+- **Pending:** none.
+
+- **Decision:** the qualified name is the page title's, Doxygen's spacing included (`std::vector< _Tp, _Alloc >`, `shapes::Box< T, N >::put`); a member of a file page is named alone (`ring_push`) with the file as `container`.
+- **Why:** the title is the only place that names the symbol, and it keeps a specialization (`std::vector< bool, _Alloc >`) apart from its primary template; Doxygen's own signatures use the same form.
+- **Rejected:** the `nav-path` breadcrumb (no template arguments, so a specialization and its template share a name); `ring.h::ring_push` (not a C name).
+- **Pending:** none.
+
+- **Decision:** a file page skips the brief-only members of the namespaces its "Namespaces" table lists, and keeps the others under their qualified name. A file page with no member record keeps one record.
+- **Why:** Doxygen anchors such a member on both the file and the namespace page; the table lists only namespaces with a page. libstdc++'s `std` is undocumented and has no page, so its members exist only on the file pages. The brief makes a file page a container only when it documents members.
+- **Rejected:** skipping every qualified member of a file page (lost libstdc++'s free operators and `swap` overloads on the first run).
+- **Pending:** none.
+
+- **Decision:** topic (group) pages, related pages and the main page keep one record, under the same reason as the listing pages ("Doxygen index, listing, source or topic page"). A page with two members under one anchor keeps one record.
+- **Why:** the brief lists class, struct, union, namespace and file pages; a group page's title names no kind, so it cannot be told from a text page. Doxygen 1.9.8 gives overloads that differ only in template constraints one id (`std::optional`, `std::pair`), and two records must not share one.
+- **Rejected:** splitting group pages without a measured rule for their kind; merging the records of a shared anchor.
+- **Pending:** none.
+
+- **Decision:** `Regions.copy_until_end()` in `_html.py` is the shared form of the "second copy of the text" that `sphinx.py` and `typedoc.py` each implement as `_tap`; the Doxygen adapter is its first user. The two existing copies stay as they are.
+- **Why:** the Doxygen adapter needed it (the name inside a summary row), which made it the third copy; the wave gave `sphinx.py` and `typedoc.py` to no lane, so this lane could not touch them.
+- **Rejected:** a third private copy in `doxygen.py`.
+- **Pending:** maintainer: move `sphinx.py` and `typedoc.py` to `copy_until_end()` in a follow-up refactor.
+
 ## 2026-11-20 — Docs site content copied
 
 - **Decision:** supersedes "Docs site pages copied from the README". The README sections copied into `site/` have two copy points. `site/index.md` and `site/commands/pack.md` were copied at commit `97e4ccf` (README blob `16043b5`); every other page (the other commands, `reference/`, `install.md`, `quickstart.md`, `guides/`, `troubleshooting.md`) at commit `3799eda` (README blob `4eba1a4`). At cutover, `git diff 97e4ccf HEAD -- README.md` (the oldest point) lists what to carry over. Each guide also holds an English `## More on ...` section written from the matching Portuguese note in `docs/workflows/`; `docs/workflows/` is untouched, and its JSONL example, the only flag-bearing content, was checked against `schema-v1.md` and `--help`. The cutover diff from `97e4ccf` also re-lists the install and action hunks already copied at `3799eda`, and that is harmless.

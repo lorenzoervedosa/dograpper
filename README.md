@@ -836,7 +836,7 @@ dograpper pack <input_directory> -o <output_directory> [options]
 | `--score` | — | `false` | Computes LLM Readiness Score and writes `llm-readiness.json` |
 | `--for-queries` | — | *(none)* | Queries file for query-oriented packing (requires `--strategy size`) |
 | `--report` / `--no-report` | — | `--no-report` | Writes `readiness-report.html` with per-page extraction diff (implies `--score`) |
-| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc, rustdoc, TypeDoc) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
+| `--api-records` | — | `false` | Splits API reference pages (Javadoc, Sphinx autodoc, rustdoc, TypeDoc, Doxygen) into container records and one record per member; needs `--format jsonl` (see [API reference records](#api-reference-records---api-records)) |
 
 #### Pack internal pipeline
 
@@ -994,7 +994,7 @@ that several types declare, such as an override, stays on every page
 ([#68](https://github.com/lorenzoervedosa/dograpper/issues/68)). The summary
 reports `Pages exempted: N (API reference)`, and `--dry-run` reports
 `Dedup pages exempted: N (API reference)`. API reference pages from a
-generator without an adapter (TypeDoc, rustdoc, Doxygen) are still
+generator without an adapter (TypeDoc, rustdoc) are still
 deduplicated: run without `--dedup` on those corpora.
 
 #### Context header (`--context-header`)
@@ -1172,6 +1172,31 @@ dograpper serve ./pack   # search_chunks now ranks member records
   the breadcrumb starts at the symbol, as in a single-entry-point project).
   The readme, the hierarchy page, the project index and pages from TypeDoc
   0.25-0.27 (their breadcrumb marks no current page) keep one record.
+- **Doxygen**: Doxygen 1.9.8 pages of C and C++
+  (`<meta name="generator" content="Doxygen 1.9.8"/>`; the kind and name come
+  from the page title, `std::vector< _Tp, _Alloc > Class Template Reference`).
+  - A class, struct, union or namespace page, or a file page that documents
+    members, is a container record: the description, the template
+    parameters, the member names by summary section
+    (`Public Member Functions: ...`) and the inherited members by base
+    (`... inherited from std::_Vector_base< _Tp, _Alloc >: ...`). The
+    inheritance diagrams and the "generated from" footer are dropped.
+  - Each member the page documents gets a member record
+    (`std::vector< _Tp, _Alloc >::push_back`; on a file page the name as the
+    page writes it, `ring_push`): its template headers, every one for a member template of
+    a class template, the signature, labels such as `virtual` or `inline`,
+    and the documentation (parameters, returns, notes, examples). A member
+    with only a brief description has no section on the page, so its record
+    is its summary row and brief. The anchor is Doxygen's member id
+    (`#a9b2c9af7709c2bb0ffabf015a63b470a`). A file page leaves out the
+    members of the namespaces it lists, which each namespace's page
+    documents; the members of a namespace without a page (libstdc++'s `std`)
+    are the file page's own, under their qualified names.
+  - Member lists (`*-members.html`), source pages, the class, file and
+    symbol indexes, topic (group) pages, related pages, pages from another
+    Doxygen version and unmeasured markup keep one record, as does a page
+    where two members share one anchor (Doxygen 1.9.8 gives overloads that
+    differ only in their template constraints the same id).
 - **Container record** (`id` `NN_path` for the page's main container,
   `NN_path#anchor` for a Sphinx class or exception): qualified name and kind,
   inheritance, implemented interfaces and known subclasses, signature,
@@ -1181,7 +1206,8 @@ dograpper serve ./pack   # search_chunks now ranks member records
   function, constant, static or macro page and a TypeDoc function, variable
   or type alias page): the qualified name
   (`zombie.characters.IsoGameCharacter#getInventory()`,
-  `packaging.version.parse`, `itertools::Itertools::interleave`), the full
+  `packaging.version.parse`, `itertools::Itertools::interleave`,
+  `std::vector< _Tp, _Alloc >::push_back`), the full
   signature with its type parameters, the doc comment and the notes
   (Overrides, Specified by, Parameters, Returns, Throws). `url` ends with the member's anchor; `breadcrumb` is
   `[container, member]`.
