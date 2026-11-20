@@ -44,7 +44,7 @@ Fora de `src/` e `tests/`:
 
 ```
 action.yml                  # Composite GitHub Action: download + full pack --score → drift → comentário de PR (nunca pack --delta; ver ADR-0007)
-site/  # Sphinx docs site (stage 1): local build only; README.md remains the source of truth, and pages are copies to be reconciled at cutover (spec docs/superpowers/specs/2026-11-20-docs-site-design.md). A behaviour change updates the README as before; the site only when tests/test_docs_site.py fails.
+site/  # Sphinx docs site (stage 1): local build only; README.md remains the source of truth, and pages are copies to be reconciled at cutover (spec docs/superpowers/specs/2026-11-20-docs-site-design.md). A behaviour change updates the README as before; the site only when tests/test_docs_site.py fails. CHANGELOG.md and docs/schema-v1.md are included on the site, so their links to repo files must be absolute GitHub URLs, and tests/test_docs_site.py checks this.
 ```
 
 ## Como rodar localmente
