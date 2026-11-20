@@ -79,7 +79,7 @@ Entradas abaixo, uma seção `##` por termo.
 **Em uma frase:** gerador de sites de documentação que lê arquivos de texto e produz um site HTML navegável, com índice, busca e links verificados.
 **Analogia:** uma gráfica que recebe os manuscritos e devolve o livro paginado, com sumário e remissões conferidas.
 **Onde apareceu:** `site/conf.py` (spec `docs/superpowers/specs/2026-11-20-docs-site-design.md`, 2026-11-20).
-**Por que importa pra decisão:** é Python e entra como extra `docs` no `uv`, sem Node.js; a extensão `sphinx-click` gera a referência dos comandos a partir do próprio CLI.
+**Por que importa pra decisão:** é Python e entra como extra `docs` no `uv`, sem Node.js; uma diretiva própria em `site/conf.py` gera a tabela de opções de cada comando a partir do próprio CLI.
 **Nível:** 🆕 novo
 
 ## MyST

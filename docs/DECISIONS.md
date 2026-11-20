@@ -22,6 +22,13 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-20 — Docs site renders options with its own directive, not sphinx-click
+
+- **Decision:** `site/conf.py` registers a `dograpper-options` directive (argument: a command name, or `dograpper` for the root group) that builds a docutils table from the click tree with `option_cells` / `OPTION_COLUMNS` of `commands/docs.py`; `sphinx-click` is dropped from the `docs` extra.
+- **Why:** sphinx-click 6.2.0 has no `:hide-header:`; under MyST its rST renders as literal text; the `{eval-rst}` fallback fails `-W` (a Duplicate ID with the page H1, and `docs_chunk_` parsed as an rST reference) and duplicates the title and docstring. The maintainer's model also asked for a table generated from click, and this one matches `dograpper docs`.
+- **Rejected:** `{eval-rst}` plus sphinx-click event hooks; editing the `--prefix` help text.
+- **Pending:** none.
+
 ## 2026-11-19 — TypeDoc adapter: tests, corpus and version gate (#75)
 
 - **Decision:** the TypeDoc tests live in their own file,

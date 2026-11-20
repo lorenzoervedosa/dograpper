@@ -2,11 +2,10 @@
 
 Parses the Markdown (never builds it, so Sphinx and the ``docs`` extra are not
 needed) and checks it against the click tree: every command page names a real
-command and renders it, every ``### --flag`` detail heading is an option of
-that command, and every ``--flag`` mentioned anywhere on the site exists.
+command and renders it with the ``dograpper-options`` directive, every
+``### --flag`` detail heading is an option of that command, and every ``--flag`` mentioned anywhere on the site exists.
 """
 
-import importlib
 import re
 from pathlib import Path
 
@@ -31,9 +30,7 @@ FOREIGN_FLAGS = frozenset({
 
 _FLAG_RE = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 _HEADING_RE = re.compile(r"^### `?(--[a-z][a-z0-9-]*)", re.MULTILINE)
-_DIRECTIVE_RE = re.compile(
-    r"^(?:```\{click\}|\.\. click::)\s+([\w.]+):(\w+)\s*$", re.MULTILINE)
-_PROG_RE = re.compile(r"^:prog:\s*(.+?)\s*$", re.MULTILINE)
+_DIRECTIVE_RE = re.compile(r"^```\{dograpper-options\}\s+(\S+)\s*$", re.MULTILINE)
 
 
 def _flags_in(text: str) -> set[str]:
@@ -87,13 +84,12 @@ def test_every_command_page_names_a_command():
 
 def test_every_command_page_renders_its_own_command():
     for stem, path in _command_pages().items():
-        text = _read(path)
-        directives = _DIRECTIVE_RE.findall(text)
-        assert len(directives) == 1, f"{path}: expected exactly one click directive"
-        module, attr = directives[0]
-        assert getattr(importlib.import_module(module), attr) is cli.commands[stem], path
-        prog = _PROG_RE.search(text)
-        assert prog and prog.group(1) == f"dograpper {stem}", f"{path}: bad :prog:"
+        directives = _DIRECTIVE_RE.findall(_read(path))
+        assert len(directives) == 1, f"{path}: expected exactly one dograpper-options directive"
+        assert directives[0] == stem, f"{path}: directive renders {directives[0]!r}, not {stem!r}"
+    global_page = SITE / "reference" / "global-options.md"
+    if global_page.exists():
+        assert _DIRECTIVE_RE.findall(_read(global_page)) == ["dograpper"], global_page
 
 
 def test_detail_headings_are_options_of_their_command():

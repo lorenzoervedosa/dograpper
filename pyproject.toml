@@ -22,7 +22,7 @@ fire-engine = ["curl_cffi>=0.7", "brotli>=1.2", "zstandard>=0.22"]  # curl hands
 dev = [
     "pytest>=7.0",
 ]
-docs = ["sphinx>=8.1", "myst-parser>=4.0", "furo>=2025.12", "sphinx-click>=6.2"]
+docs = ["sphinx>=8.1", "myst-parser>=4.0", "furo>=2025.12"]
 
 [project.scripts]
 dograpper = "dograpper.cli:main"
