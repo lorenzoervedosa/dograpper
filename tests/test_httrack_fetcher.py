@@ -697,6 +697,7 @@ def test_stop_drops_the_connection_before_the_body(server):
 
 
 def _wire_names(head: bytes) -> list[str]:
+    # Second copy of test_fire_engine.py's wire_names (raw_server heads); a third goes to conftest.
     return [line.split(":", 1)[0] for line in head.decode("latin-1").split("\r\n")[1:-2]]
 
 

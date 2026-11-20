@@ -339,6 +339,11 @@ def wire_lines(head: bytes) -> list[str]:
     return head.decode("latin-1").split("\r\n")[1:-2]
 
 
+def wire_names(head: bytes) -> list[str]:
+    """The header names of a raw request head, in wire order and case."""
+    return [line.split(":", 1)[0] for line in wire_lines(head)]
+
+
 def test_real_plain_http_request_offers_no_h2c_upgrade(raw_server):
     """#156: no browser asks a cleartext server for an h2c upgrade."""
     base, heads = raw_server(OK_REPLY)
@@ -369,9 +374,8 @@ def test_real_android_target_sends_the_mobile_client_hint_in_its_slot(raw_server
 
     real_fetcher(impersonate=target).get(base + "/p", kind="navigate")
 
-    lines = wire_lines(heads[0])
-    assert "sec-ch-ua-mobile: ?1" in lines
-    assert [line.split(":", 1)[0] for line in lines] == [
+    assert "sec-ch-ua-mobile: ?1" in wire_lines(heads[0])
+    assert wire_names(heads[0]) == [
         "Host", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
         "Upgrade-Insecure-Requests", "User-Agent", "Accept", "Sec-Fetch-Site",
         "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest", "Accept-Encoding",
@@ -424,9 +428,8 @@ def test_real_explicit_user_agent_takes_the_profile_slot_without_the_client_hint
 
     real_fetcher(user_agent="Custom-UA/1.0").get(base + "/p", kind="navigate")
 
-    lines = wire_lines(heads[0])
-    assert "User-Agent: Custom-UA/1.0" in lines
-    assert [line.split(":", 1)[0].lower() for line in lines] == [
+    assert "User-Agent: Custom-UA/1.0" in wire_lines(heads[0])
+    assert [name.lower() for name in wire_names(heads[0])] == [
         "upgrade-insecure-requests", "user-agent", "accept", "sec-fetch-site",
         "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "accept-encoding",
         "accept-language", "cache-control", "host"]
@@ -458,16 +461,16 @@ def test_real_user_headers_replace_in_place_and_reach_robots_txt(raw_server):
     slot with the user's value; a new one is added; robots.txt requests carry them too."""
     base, heads = raw_server(OK_REPLY)
     real_fetcher().get(base + "/p", kind="navigate")
-    profile = [line.split(":", 1)[0] for line in wire_lines(heads.pop())]
+    profile = wire_names(heads.pop())
     policy = build_policy(retries=0, headers=(("accept-language", "pt-BR"), ("X-Test", "1")))
     f = CurlCffiFetcher(policy, sleep=lambda _s: None)
 
     f.robots_for(base)
     f.get(base + "/p", kind="navigate")
 
-    robots, page = (wire_lines(h) for h in heads)
-    assert "accept-language: pt-BR" in page and "X-Test: 1" in page and "X-Test: 1" in robots
-    assert [line.split(":", 1)[0] for line in page if line != "X-Test: 1"] == profile
+    robots, page = heads
+    assert "accept-language: pt-BR" in wire_lines(page) and "X-Test: 1" in wire_lines(robots)
+    assert wire_names(page) == profile + ["X-Test"]
 
 
 def test_real_client_hint_given_as_a_header_survives_an_explicit_user_agent(raw_server):
