@@ -102,3 +102,17 @@ Entradas abaixo, uma seção `##` por termo.
 **Onde apareceu:** `lib/fire_engine/fetcher.py` (`HTTP_VERSION` = `V2TLS`), #156, 2026-11-20.
 **Por que importa pra decisão:** essas linhas denunciavam o fire-engine como não-navegador em sites só `http://`; com HTTP/2 só sobre TLS elas somem, e o HTTPS segue em HTTP/2.
 **Nível:** 🆕 novo
+
+## p99 (percentil 99)
+**Em uma frase:** o tamanho abaixo do qual ficam 99% dos registros; só o 1% maior passa dele.
+**Analogia:** numa fila de 100 pessoas em ordem de altura, a altura da 99ª: diz quão alto é "quase todo mundo" sem deixar o mais alto de todos decidir.
+**Onde apareceu:** limite de palavras por registro de membro na tabela da ADR-0009; o Doxygen ficou com ≤ 550 depois da medição de `docs/discovery/doxygen-api-records-acceptance.md` (ICU 506, libstdc++ 138), 2026-11-20.
+**Por que importa pra decisão:** um p99 baixo exige cortar a documentação dos membros mais longos; um alto aceita registros maiores, que podem cair no ranking da busca (o `ucnv_open`, com 325 palavras, caiu).
+**Nível:** 🆕 novo
+
+## restrição de template (C++, SFINAE)
+**Em uma frase:** uma condição escrita na lista de parâmetros de um template de C++ que decide para quais tipos aquela versão da função existe; duas sobrecargas podem diferir só nela.
+**Analogia:** duas portas com a mesma placa, cada uma com um porteiro que só deixa passar um tipo de visitante.
+**Onde apareceu:** `std::optional` e `std::pair` do libstdc++, cujas sobrecargas assim recebem a mesma âncora do Doxygen 1.9.8 e por isso ficam inteiras em `pack --api-records` (`docs/discovery/doxygen-api-records-acceptance.md`, 2026-11-20).
+**Por que importa pra decisão:** dois registros com o mesmo id quebram a regra de um id por registro, então a página inteira vira um registro só; juntar as duas sobrecargas num registro seria uma regra nova a decidir.
+**Nível:** 🆕 novo

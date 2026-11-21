@@ -87,11 +87,11 @@ content.
 | total_chunks | int | no | Total sub-chunks for this file. Same condition as `chunk_index`. |
 | url | string | no | Original URL. Present only with `--context-header` **and** either a matching manifest entry that has a `url` or a valid HTTrack / saved-from marker in the page head — `--score` alone never populates it, even against a matching manifest. On a member record it ends with the member's anchor, percent-encoded as the generator links it (`#%3Cinit%3E(int)`). |
 | readiness_grade | string | no | Bare grade letter ("A"/"B"/"C"). Present with `--score`. Not the same shape as the header's `llm_readiness` object — see below. |
-| symbol | string | no | API records only. Qualified name of the record's symbol, e.g. `zombie.characters.IsoGameCharacter#getInventory()` (Javadoc), `packaging.version.Version.is_prerelease` (Sphinx), `itertools::Itertools::interleave` (rustdoc). |
+| symbol | string | no | API records only. Qualified name of the record's symbol, e.g. `zombie.characters.IsoGameCharacter#getInventory()` (Javadoc), `packaging.version.Version.is_prerelease` (Sphinx), `itertools::Itertools::interleave` (rustdoc), `std::vector< _Tp, _Alloc >::push_back` (Doxygen, the class name as its page title writes it). |
 | kind | string | no | API records only. `container` or `member`. |
-| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). Sphinx containers: `module`, `class`, `exception`; members: `function`, `method` (classmethods and staticmethods too; the signature says which), `property`, `attribute`, `data` (module-level variable). rustdoc containers: `crate`, `module`, `struct`, `enum`, `union`, `trait`, `type_alias`; members: `field` (a tuple field is `0`, `1`, …), `variant`, `method` (associated functions and required trait methods too; the signature says which), `associated_constant`, `associated_type`, and the one-symbol pages `function`, `constant`, `static`, `macro`. TypeDoc containers: `module`, `namespace`, `class`, `interface`, `enum`, `type_alias` (a type alias whose type has members); members: `constructor`, `property`, `method`, `accessor`, `enum_member`, and on their own pages `function`, `variable`, `type_alias`. |
+| symbol_kind | string | no | API records only. Javadoc containers: `class`, `interface`, `enum`, `record`, `annotation`; members: `field`, `enum_constant`, `constructor`, `method`, `element` (annotation element). Sphinx containers: `module`, `class`, `exception`; members: `function`, `method` (classmethods and staticmethods too; the signature says which), `property`, `attribute`, `data` (module-level variable). rustdoc containers: `crate`, `module`, `struct`, `enum`, `union`, `trait`, `type_alias`; members: `field` (a tuple field is `0`, `1`, …), `variant`, `method` (associated functions and required trait methods too; the signature says which), `associated_constant`, `associated_type`, and the one-symbol pages `function`, `constant`, `static`, `macro`. TypeDoc containers: `module`, `namespace`, `class`, `interface`, `enum`, `type_alias` (a type alias whose type has members); members: `constructor`, `property`, `method`, `accessor`, `enum_member`, and on their own pages `function`, `variable`, `type_alias`. Doxygen containers: `class`, `struct`, `union`, `namespace`, `file`; members: `function` (constructors, operators, friend and related functions too), `variable`, `enum` (its enumerators in its content; an enum with no name is `anonymous enum`), `typedef` (`using` aliases too), `define`; a friend class gets no record. |
 | container | string | no | Member records only. Qualified name of the container that declares the member. Absent on a TypeDoc function, variable or type alias page whose breadcrumb starts at the symbol. |
-| generator | string | no | API records only. The adapter that split the page: `javadoc`, `sphinx`, `rustdoc` or `typedoc`. |
+| generator | string | no | API records only. The adapter that split the page: `javadoc`, `sphinx`, `rustdoc`, `typedoc` or `doxygen`. |
 | version | string | no | Page metadata of a MediaWiki page, as in the header above. Present with `--context-header` or `--score`, only when the page states its version. |
 | version_status | string | no | As in the header above. Same condition as `version`, and only when the version comes from the banner. |
 
@@ -149,6 +149,17 @@ keep the plain record above, without the API fields.
   function, variable or type alias page is one member record, `id`
   `NN_path`, whose `container` is the module or namespace above it (absent
   when there is none).
+- **Doxygen page**: a class, struct, union or namespace page, or a file
+  page that documents members, starts with its container record
+  (`std::vector< _Tp, _Alloc > (class)`, then its labels such as
+  `abstract`, the description and template parameters, the member names by
+  summary section and the inherited members by base). Each member the page
+  documents has a member record anchored at Doxygen's member id
+  (`a9b2c9af7709c2bb0ffabf015a63b470a`): the qualified name
+  (`std::vector< _Tp, _Alloc >::push_back`; on a file page the name as the
+  page writes it, `ring_push`, with the file as `container`), the template headers, the
+  signature, its labels and the documentation. A member documented by a
+  brief description only holds its summary row and that brief.
 
 ```json
 {"id": "01_fixture/api/Box.html#of(U)", "source": "fixture/api/Box.html", "words": 37,

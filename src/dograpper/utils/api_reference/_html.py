@@ -63,6 +63,7 @@ class Regions(HTMLParser):
         self._open = {}    # tag -> count on the stack: a stray end tag is dropped in O(1)
         self._sinks = []   # regions whose text is kept, innermost last
         self._raw = 0      # inside <script>, <style> or a skipped element
+        self._copy: Optional[Text] = None  # also gets the text, see copy_until_end
 
     def start(self, tag: str, attr: dict, classes: List[str], closers: list) -> None:
         """Called for each non-void start tag outside <script>/<style>; ``closers`` run at its end tag."""
@@ -79,6 +80,12 @@ class Regions(HTMLParser):
         previous = getattr(self, name)
         setattr(self, name, value)
         closers.append(lambda: setattr(self, name, previous))
+
+    def copy_until_end(self, text: Text, closers) -> None:
+        """Add the element's text to ``text`` too until the element ends; the region it is in
+        keeps it as well, e.g. a name inside a signature line. sphinx.py and typedoc.py still
+        carry their own copy of this (``_tap``)."""
+        self.set_until_end("_copy", text, closers)
 
     def skip(self, closers) -> None:
         """Drop the element's text, e.g. a permalink sign."""
@@ -125,5 +132,9 @@ class Regions(HTMLParser):
                 return
 
     def handle_data(self, data):
-        if self._sinks and not self._raw:
+        if self._raw:
+            return
+        if self._sinks:
             self._sinks[-1].add(data)
+        if self._copy is not None:
+            self._copy.add(data)

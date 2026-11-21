@@ -1,7 +1,7 @@
 """API reference pages split into container and member records (ADR-0009): detection and dispatch.
 
 A page is split only when an adapter here recognises its generator and its markup
-is the measured one. Javadoc and rustdoc declare themselves in ``<meta name="generator">``;
+is the measured one. Javadoc, rustdoc and Doxygen declare themselves in ``<meta name="generator">``;
 Sphinx writes no such meta, so its object markup tells, and TypeDoc's page title block does
 the same for TypeDoc. Any other page keeps one record and is reported, with the reason, by
 ``format_kept_whole``.
@@ -19,9 +19,9 @@ NO_ADAPTER = "no supported generator"
 # Shown before "... N more (use --verbose)"; same cap as lib/source_urls.py MAX_SHOWN_MISSING.
 MAX_SHOWN_KEPT_WHOLE = 10
 # Records repeat their container's qualified name (every Javadoc member the type's, every Sphinx
-# object its ancestors', every rustdoc member also its impl block's header, every TypeDoc member
-# its page's), so a huge or deeply nested name would make the output quadratic in the page size;
-# no real qualified name is this long.
+# object its ancestors', every rustdoc member also its impl block's header, every TypeDoc and
+# Doxygen member its page's), so a huge or deeply nested name would make the output quadratic in
+# the page size; no real qualified name is this long.
 MAX_SYMBOL = 1000
 
 
@@ -93,6 +93,9 @@ def split_page(html: str) -> List[ApiRecord]:
     if generator == "rustdoc":
         from . import rustdoc
         return rustdoc.records(html)
+    if generator and generator.startswith("Doxygen "):
+        from . import doxygen
+        return doxygen.records(html, generator)
     from . import sphinx
     if sphinx.SIGNATURE in html:  # Sphinx writes no generator meta: its object markup tells
         return sphinx.records(html)
