@@ -194,9 +194,11 @@ da worktree, gates, hooks, limpeza e documentos vivos estão nas seções acima.
   #158 foi lote; #161, #164 e #165, próprios).
 - **Registro de decisões:** `docs/DECISIONS.md`, entrada nova no topo; a
   entrada de fechamento da onda segue o mesmo formato.
-- **Flakes conhecidos:** nenhum aberto. O último
-  (`test_real_timeout_is_inactivity_like_the_stdlib_socket_timeout`) foi
-  corrigido no #158.
+- **Flakes conhecidos:** os testes de linearidade por razão de CPU de
+  `tests/test_api_reference.py` (`test_parsing_stays_linear_on_hostile_markup`,
+  `test_sphinx_parsing_stays_linear_on_hostile_markup`) falham sob a carga de
+  várias raias rodando a suíte ao mesmo tempo (onda 2). Reexecute o teste isolado 3x
+  antes de concluir que quebrou.
 
 ## Armadilhas do ambiente
 
