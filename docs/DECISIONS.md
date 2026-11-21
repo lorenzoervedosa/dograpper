@@ -63,6 +63,18 @@ Entry format:
   - One lane's DEBT entry had no heading of its own, so it landed under another issue's heading.
   - One lane's first report lacked its commit list, its HEAD suite line and its code-review.
   - Merging inventory conflicts needed a line-by-line three-way merge keyed on the file name. `check-living-docs.py` checks the result but does not merge.
+- **Environment changes from the retro:**
+  - in this repo, `tests/test_decisions_log.py` guards the newest-first order of this file;
+  - in the user's wave skills (outside the repo):
+    - a `resolve-living-docs.py` script, with `--both`, `--inventory` and a self-test, cited by the landing step;
+    - a code-identity check that compares only `+`/`-` lines;
+    - the file-order and DEBT-heading rule in the lane protocol;
+    - a resume-after-reboot recipe;
+    - "the lane measures and proposes" for limits an ADR declares by measurement;
+    - a fast-forward of the main checkout when a wave closes.
+  - Not done, by choice:
+    - feeding the ready-step file maps to the zone mapper (its independent pass found ten divergences the verifiers had missed);
+    - a lane report template (the landing check already caught the one gap).
 - **Rejected:** a single PR for the whole wave (a #136-sized lane would have held the small issues back), and merging `main` into the unpublished lane branches (rebase kept each commit verifiable on the new base).
 - **Pending:** none.
 
