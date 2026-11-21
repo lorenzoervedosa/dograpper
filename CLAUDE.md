@@ -254,6 +254,7 @@ consentimento.
 | `docs/adr/` | Decisão arquitetural nova, revertida ou contornada, ou mudança de contrato inviolável. ADR supersedido nunca é apagado: marque `Superseded by` |
 | `docs/DECISIONS.md` | Decisão autônoma de sessão: escolha entre leituras do pedido, desvio do brief, convenção nova, pendência para o mantenedor |
 | `docs/DEBT.md` | Achado de review aceito sem fix (com o gatilho do fix); item corrigido é marcado ✅, não apagado |
+| `docs/MANUAL-CHECKS.md` | Verificação que só uma pessoa pode fazer (navegador real com janela, conta em outro serviço, report upstream): entrada nova com o gatilho; feita é marcada ✅, não apagada |
 | `GLOSSARY.md` | Termo de domínio novo, renomeado ou com sentido mudado (skill `domain-modeling`) |
 | `docs/glossario.md` | Jargão técnico explicado ao mantenedor (seção "Glossário vivo" abaixo) |
 | `docs/superpowers/` | Spec ou plano de uma fase nova |
