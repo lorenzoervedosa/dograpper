@@ -22,6 +22,50 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-20 — Wave 2 closed: 11 issues in 4 PRs (#181, #182, #184, #185)
+
+- **Decision:** five parallel lanes, each in its own worktree. Landed in this order:
+  - #181 (lane browser: #166, #159, #167, #160);
+  - #182 (batch: the agent-skills setup, plus lanes cli (#139, #163) and rustdoc (#162), cherry-picked);
+  - #184 (lane fire: #156, #157, #136, plus the Firecrawl research);
+  - #185 (lane doxygen: #168, the last phase of #75).
+
+  Every commit passed the full suite on its own, in a disposable detached worktree. CI was green on 3.10 and 3.12 for each PR. The suite was run again on `main` after the last merge.
+- **Why:** the zone map put each lane on its own files. The bridges went to one owner per file, with named exceptions:
+  - `_httrack_profile.py` and `download.py` belong to fire;
+  - browser edits only the browser-pass wiring;
+  - cli edits only the summary calls.
+
+  #169–#171 (PR 5 of #78) wait for wave 3, because they cross both fire's and browser's files.
+- **Maintainer decisions during the wave** (each one is also on its issue):
+  - #136: `--header` goes on same-host `http://` requests too (HTTrack parity);
+  - #136: an empty User-Agent sends none, filed as #183;
+  - #139: `pack --report` prints no terminal summary under `-q`;
+  - #168: member p99 ≤ 550 words;
+  - #168: a brief-only member becomes a record;
+  - #171: `--browser-login` gets a config key and `sync` passthrough, and `--browser-login` with `--header 'User-Agent'` is exit 2.
+- **Cross-checks:**
+  - after each rebase or cherry-pick, the changed lines outside the living docs were identical to the lane's;
+  - every conflict was in a living doc (CHANGELOG, DECISIONS, DEBT, glossario, two CLAUDE.md inventories), plus one import line in `download.py`;
+  - `check-living-docs.py --sides` passed on each resolution.
+
+  No defect turned up in the combined tree.
+- **Outside the zone, wanted and not done** (in `docs/DEBT.md`):
+  - `config_note()` belongs in `lib/config_loader.py`;
+  - the `_Silent` server of `test_httrack_mirror.py` still sits outside the `conftest.py` mold;
+  - Sphinx and TypeDoc keep their own `_tap` next to `Regions.copy_until_end()`;
+  - four API-reference test files repeat their pack and JSONL helpers.
+- **What the briefs and the protocol got wrong** (input for the next wave):
+  - "new entry at the top" of this file was in the root `CLAUDE.md` but not in the lane protocol. Three of five lanes inserted their entry at the bottom or beside a related entry, and the integrator moved them. The protocol must state it.
+  - "Known flakes: none" was wrong under five lanes. `tests/test_api_reference.py::test_parsing_stays_linear_on_hostile_markup` and `::test_sphinx_parsing_stays_linear_on_hostile_markup` failed once each on CPU-time ratio. Both were green alone three times. They are now listed as known flakes.
+  - A brief set a limit before measuring: the ≤ 300 member p99 of #168. ADR-0009 has each generator declare its own limit from evidence, so the measurement became a maintainer question.
+  - The briefs named the integrator by session name, and a reboot changed it (`dograpper-64` became `dograpper-23`). Lanes resumed with `claude --continue` and an updated brief.
+  - One lane's DEBT entry had no heading of its own, so it landed under another issue's heading.
+  - One lane's first report lacked its commit list, its HEAD suite line and its code-review.
+  - Merging inventory conflicts needed a line-by-line three-way merge keyed on the file name. `check-living-docs.py` checks the result but does not merge.
+- **Rejected:** a single PR for the whole wave (a #136-sized lane would have held the small issues back), and merging `main` into the unpublished lane branches (rebase kept each commit verifiable on the new base).
+- **Pending:** none.
+
 ## 2026-11-20 — rustdoc accepts one measured nightly build (#162)
 
 - **Decision:** `MEASURED_VERSIONS` accepts `1.96.` and the exact prefix
