@@ -28,6 +28,7 @@ tests/
 ├── test_content_extractor.py # Extração inteligente: semantic, density, blacklist (elemento void ou não fechado não engole a página), edge cases, CLI; <pre> verbatim em bloco cercado com a linguagem, `<`/`>` escapados preservados
 ├── test_context_v1.py      # Formato dograpper-context-v1: JSON header, campos opcionais, schema
 ├── test_dedup.py           # Dedup: _split_blocks, _simhash, _hamming_distance, exact/fuzzy/both, regras que mantêm o bloco (mesma página, 1º token, só números), boilerplate entre páginas, blocos de código, definições de link, CLI
+├── test_decisions_log.py   # Guard do docs/DECISIONS.md: entradas datadas da mais nova para a mais antiga
 ├── test_delta_artifacts.py # Delta como portão de mudança: artefatos completos, pack_state.json, fluxo sync (ADR-0008), árvore httrack com mtime do Last-Modified
 ├── test_delta_manifest.py  # Delta: diff_manifests e o contrato do delta_manifest.json; URL gravada pelo build_manifest (a buscada, sem credenciais, None com query fora da allowlist, nunca a de outro arquivo), records do build_manifest, manifest antigo legível, falha de escrita do manifest e do pack_state
 ├── test_dep_resolver.py    # Resolução de wget/chromium via DOGRAPPER_HOME (fallback para PATH, reload de módulo)
