@@ -361,3 +361,19 @@ def test_an_ip_host_gets_no_cookie_by_domain_suffix(tmp_path):
     path = tmp_path / "cookies.txt"
     path.write_text(".2.3.4\tTRUE\t/\tFALSE\t0\ta\t1\n1.2.3.4\tFALSE\t/\tFALSE\t0\tb\t2\n")
     assert load_jar(str(path)).header("http://1.2.3.4/") == "b=2"
+
+
+def test_a_secure_cookie_is_taken_over_https_alone_and_plain_http_cannot_touch_one():
+    """RFC 6265bis 5.6 (htslib.c:1983-1987): plain http may neither set a Secure cookie
+    (nor a __Secure- / __Host- one) nor shadow, replace or erase one."""
+    from dograpper.lib.httrack.cookies import Jar
+    jar = Jar(None)
+    jar.take("http://h.test/", _set_cookies("plain=1; Secure", "__Secure-a=1",
+                                            "__Host-b=1; Path=/"))
+    assert jar.header("https://h.test/") is None
+    jar.take("https://h.test/", _set_cookies("s=1; Secure; Path=/", "__Secure-a=1; Secure",
+                                             "__Host-b=1; Secure; Path=/"))
+    jar.take("http://h.test/", _set_cookies("s=2; Path=/"))  # would shadow it
+    jar.take("http://h.test/", _set_cookies("s=; Path=/; Max-Age=0"))  # would erase it
+    assert jar.header("https://h.test/") == "s=1; __Secure-a=1; __Host-b=1"
+    assert jar.header("http://h.test/") is None

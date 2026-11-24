@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # C0 controls (HTAB and an obs-fold's CRLF included) and DEL: no cookie-octet (RFC 6265 4.1.1)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 HTTPONLY_PREFIX = "#HttpOnly_"
+_SECURE_PREFIXES = ("__Secure-", "__Host-")  # RFC 6265bis 4.1.3: set over https only
 _FIRST_LINE = "# Netscape HTTP Cookie File\n"  # what curl and MozillaCookieJar look for
 _BOM = "\xef\xbb\xbf"  # UTF-8's, as latin-1 reads it
 # shortcut: no cap on the jar's size (HTTrack's COOKIE_MAX_JAR); add one if a site floods it
@@ -106,15 +107,41 @@ def _claimable(host: str, domain: str) -> bool:
     return not _is_ip(host) and "." in name and not _is_ip(name)
 
 
+def _path_match(path: str, cpath: str) -> bool:
+    """RFC 6265 5.1.4: `path` is `cpath` or below it."""
+    return path == cpath or path.startswith(cpath if cpath.endswith("/") else cpath + "/")
+
+
 def _matches(cookie: http.cookiejar.Cookie, host: str, path: str, secure: bool,
              now: float) -> bool:
     """RFC 6265 5.4: domain-match, path-match, Secure over https only, not expired."""
-    cpath = cookie.path
-    if not _domain_match(host, cookie.domain):
-        return False
-    if path != cpath and not path.startswith(cpath if cpath.endswith("/") else cpath + "/"):
-        return False
-    return (secure or not cookie.secure) and not cookie.is_expired(now)
+    return (_domain_match(host, cookie.domain) and _path_match(path, cookie.path)
+            and (secure or not cookie.secure) and not cookie.is_expired(now))
+
+
+def _overlap(a: str, b: str) -> bool:
+    """Whether one of two cookie domains domain-matches the other (RFC 6265bis 5.6 step 16)."""
+    a, b = a.lstrip("."), b.lstrip(".")
+    return a == b or a.endswith("." + b) or b.endswith("." + a)
+
+
+class _Store(http.cookiejar.CookieJar):
+    """The stdlib's jar, its deletion (an expired Set-Cookie: make_cookies calls clear())
+    kept to what the request may erase: over plain http, never a Secure cookie (RFC 6265bis
+    5.6, htslib.c:1983-1987). `secure` is the request's scheme, set under the Jar's lock."""
+    secure = True
+
+    def clear(self, domain=None, path=None, name=None):
+        if not self.secure and name is not None and any(
+                c.secure for c in self if (c.domain, c.path, c.name) == (domain, path, name)):
+            return
+        super().clear(domain, path, name)
+
+    def hides_secure(self, cookie: http.cookiejar.Cookie) -> bool:
+        """Whether `cookie`, from plain http, would shadow a Secure one: same name, either
+        domain matching the other, its path below the Secure one's."""
+        return any(c.secure and c.name == cookie.name and _overlap(c.domain, cookie.domain)
+                   and _path_match(cookie.path, c.path) for c in self)
 
 
 class Jar:
@@ -125,7 +152,7 @@ class Jar:
     def __init__(self, path: str | None, host: str | None = None):
         self.path = path  # None: a jar for the run alone (--browser-login without --cookies)
         self.host = host
-        self._jar = http.cookiejar.CookieJar()
+        self._jar = _Store()
         self._lock = threading.Lock()  # the Fetcher's workers share the jar; so does its walk
 
     def header(self, url: str) -> str | None:
@@ -150,10 +177,12 @@ class Jar:
         email.message.Message such as http.client's), the stdlib's policy checking the
         Domain each claims; one with no Domain is the host's own, dot or no dot."""
         request = urllib.request.Request(url)
-        host = urlsplit(url).hostname or ""
+        parts = urlsplit(url)
+        host, secure = parts.hostname or "", parts.scheme == "https"
         if not self._binds(host):
             return
         with self._lock:
+            self._jar.secure = secure
             for cookie in self._jar.make_cookies(_Response(headers), request):
                 if not _clean(cookie.name, cookie.value, cookie.path):
                     continue  # a server must not make the next run's jar unreadable
@@ -161,6 +190,9 @@ class Jar:
                     cookie.domain = host
                 elif not _claimable(host, cookie.domain):
                     continue
+                if not secure and (cookie.secure or cookie.name.startswith(_SECURE_PREFIXES)
+                                   or self._jar.hides_secure(cookie)):
+                    continue  # plain http sets, shadows or replaces no Secure cookie
                 self._jar.set_cookie_if_ok(cookie, request)
 
     def _binds(self, host: str) -> bool:

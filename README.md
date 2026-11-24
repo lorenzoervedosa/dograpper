@@ -605,7 +605,10 @@ jar's cookies for that host, and its `Set-Cookie` never enters the jar. A
 unless its name or value holds a control character (NUL, a tab, a folded
 line): that one is refused, so a server cannot make the next run's jar
 unreadable. So is a `Domain` that is an IP address or a name with no dot, or
-any `Domain` set by an IP host (there is no public suffix list). The `Cookie` line goes through the same check as a `--header`
+any `Domain` set by an IP host (there is no public suffix list). A `Secure`
+cookie, or one named `__Secure-…` or `__Host-…`, is taken over https alone,
+and a plain-http `Set-Cookie` never shadows, replaces or erases a `Secure`
+one, as HTTrack does. The `Cookie` line goes through the same check as a `--header`
 line. At the end of the
 run, a failed one included, the jar is written back to `FILE`: `#HttpOnly_`
 lines and session cookies kept (expiry `0`, as curl writes them), expired ones
