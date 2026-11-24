@@ -21,6 +21,7 @@ file, and no byte can fail to decode (contract 7).
 """
 
 import http.cookiejar
+import ipaddress
 import logging
 import re
 import threading
@@ -81,12 +82,28 @@ def _clean(*fields) -> bool:
     return not any(f is not None and _CONTROL.search(f) for f in fields)
 
 
+def _is_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
 def _domain_match(host: str, domain: str) -> bool:
     """RFC 6265 5.1.3: a host-only cookie's domain is the host itself; a domain cookie's
-    (leading dot) is the host or one of its parents."""
+    (leading dot) is the host or one of its parents, never by suffix on an IP host."""
     if not domain.startswith("."):
         return host == domain
-    return host == domain[1:] or host.endswith(domain)
+    return host == domain[1:] or (not _is_ip(host) and host.endswith(domain))
+
+
+def _claimable(host: str, domain: str) -> bool:
+    """Whether `host` may set a cookie for Domain `domain`: never from an IP host, never an
+    IP or a name with no dot (a top-level name; shortcut: no public suffix list, see
+    docs/DEBT.md). The stdlib checks the rest (the host is in that domain)."""
+    name = domain.lstrip(".")
+    return not _is_ip(host) and "." in name and not _is_ip(name)
 
 
 def _matches(cookie: http.cookiejar.Cookie, host: str, path: str, secure: bool,
@@ -142,6 +159,8 @@ class Jar:
                     continue  # a server must not make the next run's jar unreadable
                 if not cookie.domain_specified:  # not the stdlib's `<host>.local`
                     cookie.domain = host
+                elif not _claimable(host, cookie.domain):
+                    continue
                 self._jar.set_cookie_if_ok(cookie, request)
 
     def _binds(self, host: str) -> bool:

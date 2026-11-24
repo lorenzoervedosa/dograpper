@@ -343,3 +343,21 @@ def test_a_jar_line_with_a_control_character_is_a_bad_line(tmp_path, field):
     path.write_text(f"127.0.0.1\tFALSE\t/\tFALSE\t0\ts\t{field}\n")
     with pytest.raises(ValueError, match="^line 1 "):
         load_jar(str(path))
+
+
+@pytest.mark.parametrize("url, line, other", [
+    ("http://1.2.3.4/", "a=1; Domain=2.3.4", "http://5.2.3.4/"),       # from an IP host
+    ("http://foo/", "a=1; Domain=local", "http://x.local/"),          # a Domain with no dot
+    ("http://h.example.com/", "a=1; Domain=1.2.3.4", "http://1.2.3.4/"),  # an IP Domain
+])
+def test_a_domain_that_is_an_ip_or_has_no_dot_is_refused(url, line, other):
+    from dograpper.lib.httrack.cookies import Jar
+    jar = Jar(None)
+    jar.take(url, _set_cookies(line))
+    assert jar.header(url) is None and jar.header(other) is None
+
+
+def test_an_ip_host_gets_no_cookie_by_domain_suffix(tmp_path):
+    path = tmp_path / "cookies.txt"
+    path.write_text(".2.3.4\tTRUE\t/\tFALSE\t0\ta\t1\n1.2.3.4\tFALSE\t/\tFALSE\t0\tb\t2\n")
+    assert load_jar(str(path)).header("http://1.2.3.4/") == "b=2"
