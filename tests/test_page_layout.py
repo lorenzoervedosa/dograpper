@@ -471,6 +471,7 @@ T = "<main><p>The target page.</p></main>"
 @pytest.mark.parametrize("files, href, definition", [
     ({"s.html": _stub("t.html")}, "s.html", "<t.md>"),                          # P -> S -> T
     ({"s.html": _stub("t.html#b")}, "s.html", "<t.md#b>"),                      # the stub target's fragment
+    ({"s.html": _stub("t.html#b&gt;&#10;[x](y)")}, "s.html", "<t.md>"),         # an unsafe fragment is dropped
     ({"s.html": _stub("t.html#b")}, "s.html#a", "<t.md#a>"),                    # the link's fragment wins
     ({"sub/s1.html": _stub("s2.html"), "sub/s2.html": _stub("../t.html")},      # chain, each hop
      "sub/s1.html", "<t.md>"),                                                  # resolved from its stub
@@ -480,8 +481,10 @@ T = "<main><p>The target page.</p></main>"
     ({"s.html": _stub("/t.html")}, "s.html", "s.html"),                         # root-relative
     ({"s.html": _stub("t.html?x=1")}, "s.html", "s.html"),                      # query
     ({"s.html": _stub("../t.html")}, "s.html", "s.html"),                       # outside the mirror
-    ({f"s{i}.html": _stub(f"s{i + 1}.html") for i in range(1, 12)} | {"s12.html": _stub("t.html")},
-     "s1.html", "s1.html"),                                                     # past the bound
+    ({f"s{i}.html": _stub(f"s{i + 1}.html") for i in range(1, 8)} | {"s8.html": _stub("t.html")},
+     "s1.html", "<t.md>"),                                                      # 8 stubs: at the bound
+    ({f"s{i}.html": _stub(f"s{i + 1}.html") for i in range(1, 9)} | {"s9.html": _stub("t.html")},
+     "s1.html", "s1.html"),                                                     # 9 stubs: past it
 ])
 def test_a_link_to_a_skipped_redirect_stub_points_at_its_target(files, href, definition):
     _write("docs", {"p.html": _linked(href), "t.html": T, **files})

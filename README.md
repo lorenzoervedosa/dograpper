@@ -1398,8 +1398,9 @@ out/
   stub's own location, a chain of stubs is followed up to 8 hops; a loop, a
   longer chain, or a target that is absolute, root-relative, outside the input,
   carries a query or is not packed leaves the link as written). The link's own
-  fragment wins; without one, the stub target's fragment is kept. A link to anything else (an absolute URL, a file outside the
-  pack) keeps its target as the page wrote it.
+  fragment wins; without one, the stub target's fragment is kept. A link to
+  anything else (an absolute URL, a file outside the pack) keeps its target as
+  the page wrote it.
 - **Whole pages.** Pages are never split and lines never wrapped: a page
   larger than one `Read` call takes stays reachable with `grep -n` plus a
   `Read` with an offset. There is no word cap, no chunk cap and no size

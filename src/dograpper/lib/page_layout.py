@@ -12,6 +12,7 @@ to a packed page points at that page's file (#118).
 
 import os
 import posixpath
+import re
 import shutil
 from collections import Counter
 from html.parser import HTMLParser
@@ -162,6 +163,7 @@ def _local_path(url: str, rel: str):
 
 
 _MAX_STUB_HOPS = 8
+_UNSAFE_FRAGMENT = re.compile(r"[\s<>\x00-\x1f\x7f]")
 
 
 def _follow_stubs(local: str, stubs: dict):
@@ -175,7 +177,8 @@ def _follow_stubs(local: str, stubs: dict):
             return None
         seen.add(local)
         url, _, frag = target.partition("#")
-        fragment = frag or fragment
+        # entity-decoded page text lands inside the <...> destination: drop what could end it
+        fragment = (frag if frag and not _UNSAFE_FRAGMENT.search(frag) else "") or fragment
         nxt = _local_path(url, local)
         if nxt is None:
             return None
