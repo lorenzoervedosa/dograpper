@@ -38,7 +38,6 @@ logger = logging.getLogger(__name__)
 # C0 controls (HTAB and an obs-fold's CRLF included) and DEL: no cookie-octet (RFC 6265 4.1.1)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 HTTPONLY_PREFIX = "#HttpOnly_"
-_SECURE_PREFIXES = ("__Secure-", "__Host-")  # RFC 6265bis 4.1.3: set over https only
 _FIRST_LINE = "# Netscape HTTP Cookie File\n"  # what curl and MozillaCookieJar look for
 _BOM = "\xef\xbb\xbf"  # UTF-8's, as latin-1 reads it
 # shortcut: no cap on the jar's size (HTTrack's COOKIE_MAX_JAR); add one if a site floods it
@@ -112,6 +111,19 @@ def _domain_match(host: str, domain: str) -> bool:
     if not domain.startswith("."):
         return host == domain
     return host == domain[1:] or (not _is_ip(host) and host.endswith(domain))
+
+
+def _prefix_ok(cookie: http.cookiejar.Cookie) -> bool:
+    """RFC 6265bis 4.1.3, its prefixes read without case: a `__Secure-` cookie is Secure; a
+    `__Host-` one is Secure, has no Domain and was set with Path=/ (so it stays on its
+    host). Secure is taken over https alone, so are both."""
+    name = cookie.name.lower()
+    if name.startswith("__secure-"):
+        return bool(cookie.secure)
+    if name.startswith("__host-"):
+        return bool(cookie.secure) and not cookie.domain_specified and \
+            cookie.path_specified and cookie.path == "/"
+    return True
 
 
 def _claimable(host: str, domain: str) -> bool:
@@ -204,12 +216,13 @@ class Jar:
             for cookie in self._jar.make_cookies(_Response(headers), request):
                 if not _clean(cookie.name, cookie.value, cookie.path):
                     continue  # a server must not make the next run's jar unreadable
+                if not _prefix_ok(cookie):
+                    continue
                 if not cookie.domain_specified:  # not the stdlib's `<host>.local`
                     cookie.domain = host
                 elif not _claimable(host, cookie.domain):
                     continue
-                if not secure and (cookie.secure or cookie.name.startswith(_SECURE_PREFIXES)
-                                   or self._jar.hides_secure(cookie)):
+                if not secure and (cookie.secure or self._jar.hides_secure(cookie)):
                     continue  # plain http sets, shadows or replaces no Secure cookie
                 self._jar.set_cookie_if_ok(cookie, request)
 

@@ -427,3 +427,15 @@ def test_same_site_survives_the_round_trip_with_the_browser():
     jar.take("https://h.test/", _set_cookies("l=1; SameSite=lax", "x=1"))
     got = {c["name"]: c.get("sameSite") for c in jar.to_browser()}
     assert got == {"s": "Strict", "n": "None", "l": "Lax", "x": None}
+
+
+def test_a_prefixed_cookie_must_meet_its_prefix():
+    """RFC 6265bis 4.1.3 (case-insensitive prefixes): __Secure- needs Secure; __Host- needs
+    Secure, no Domain and Path=/, so it stays on its host."""
+    from dograpper.lib.httrack.cookies import Jar
+    jar = Jar(None)
+    jar.take("https://a.x.com/", _set_cookies(
+        "__Secure-s=v", "__SECURE-c=v", "__Host-d=v; Secure; Domain=x.com; Path=/",
+        "__Host-p=v; Secure", "__Host-q=v; Secure; Path=/docs", "__Host-ok=v; Secure; Path=/"))
+    assert jar.header("https://a.x.com/docs/x") == "__Host-ok=v"
+    assert jar.header("https://b.x.com/") is None and jar.header("http://a.x.com/") is None
