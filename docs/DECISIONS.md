@@ -22,6 +22,13 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-24 — Redirect-stub links in the page layout (#174)
+
+- **Decision:** the skipped stubs live in a separate `stubs` dict (source path → meta-refresh target), not in `page_of`; in a chain the fragment of the last hop that has one wins; an empty `#` on the link counts as a fragment, so the stub's is not used; `redirect_target` unescapes HTML entities in the target; a stub fragment holding `<`, `>`, whitespace or a control character is dropped (the link keeps no fragment from the stub).
+- **Why:** `page_of` maps a source path to an output file and a stub has none; the chain follows the browser's fragment inheritance; entity-decoded page text lands inside the `<...>` destination of a Markdown link, so it must not be able to end it.
+- **Rejected:** adding stubs to `page_of` (the brief's wording; would need a fake output path); dropping the whole link on an unsafe fragment (the page is still the right target); percent-encoding the fragment (changes what a reader sees for a legitimate anchor).
+- **Pending:** none.
+
 ## 2026-11-20 — Wave 2 closed: 11 issues in 4 PRs (#181, #182, #184, #185)
 
 - **Decision:** five parallel lanes, each in its own worktree. Landed in this order:

@@ -124,6 +124,11 @@ Entry format, grouped under one heading per issue or PR:
   ⏸ **accepted: same reason and same trigger as the #139/#163 entry above:
   extract the later stages (dedup, scoring, summary) when the next stage lands
   in `pack.py`.**
+- **A meta-refresh target with a space inside its quotes is cut at the first
+  space** (`_REFRESH_URL` in `utils/redirect_stub.py`, from #163): the link is
+  left as written, or points at another page when the prefix happens to match one.
+  ⏸ **accepted: rare in generated stubs (rustdoc, MediaWiki write none). Fix
+  (quote-aware capture) when a mirror with such a stub shows up.**
 
 ## httrack browser pass, in-memory stores (#160, #167, 2026-11-20)
 
