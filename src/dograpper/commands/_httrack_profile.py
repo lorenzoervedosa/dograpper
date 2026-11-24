@@ -272,9 +272,15 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
             unreached(report)
             lines = [*format_report(report, verbose), "Playwright pass:",
                      *(f"  {line}" for line in format_report(pw_report, verbose))]
-    if changes is not None:  # written for a completed run only (htscore.c:2360-2367)
+    path = os.path.join(output, CHANGES_FILE)
+    if browse and policy.changes:  # the browser pass rewrote the files the report describes (#172)
+        try:
+            os.remove(path)  # a report an earlier run left would describe another run
+        except FileNotFoundError:
+            pass
+        lines.append("Change report skipped: the browser pass rewrote the files")
+    elif changes is not None:  # written for a completed run only (htscore.c:2360-2367)
         text, summary = changes
-        path = os.path.join(output, CHANGES_FILE)
         try:
             atomic_write_bytes(path, text.encode("utf-8"))
         except OSError as e:  # HTTrack logs it and the run goes on (htschanges.c:575-586)

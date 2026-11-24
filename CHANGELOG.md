@@ -380,6 +380,7 @@ stays `0.0.0.dev0`.
 ### Fixed
 
 - `dograpper docs`: every usage line on the page reads `dograpper <command> …` instead of `cli <command> …`. ([#180])
+- `download --downloader httrack --changes`, when the result looks client-rendered and the browser pass runs, writes no `hts-changes.json` (it described the engine's shell, not the rendered files), removes one an earlier run left in `-o`, and prints `Change report skipped: the browser pass rewrote the files`. ([#172])
 - `download --headless` (also with `--downloader httrack`, and `sync`) without an installed Chromium prints one line naming `dograpper doctor --install` and exits 1, instead of a Playwright traceback; any other browser launch failure prints Playwright's first line. ([#166])
 - `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
 - `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
@@ -638,6 +639,7 @@ stays `0.0.0.dev0`.
 [#136]: https://github.com/lorenzoervedosa/dograpper/issues/136
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
+[#172]: https://github.com/lorenzoervedosa/dograpper/issues/172
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159
 [#167]: https://github.com/lorenzoervedosa/dograpper/issues/167
 [#160]: https://github.com/lorenzoervedosa/dograpper/issues/160

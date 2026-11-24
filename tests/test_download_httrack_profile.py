@@ -853,3 +853,35 @@ def test_header_name_given_twice_is_usage_error(ht, first, second, named):
     assert f"--header {named} is given more than once" in res.output
     assert "A/1" not in res.output and "B/2" not in res.output
     fu.assert_not_called()
+
+
+# --- #172: the browser pass rewrites the engine's files, so --changes writes no report ---
+
+def _with_changes(out, *a, **k):
+    res = _res(out)
+    res.changes = ('{"report": "engine shell"}', "Changes: 1 new")
+    return res
+
+
+def test_changes_run_that_falls_back_to_the_browser_writes_no_report(ht):
+    out, fu, _ = ht
+    fu.side_effect = lambda urls, o, *a, **k: _with_changes(o)
+    stale = os.path.join(out, "hts-changes.json")
+    with open(stale, "w") as fh:
+        fh.write("{}")
+    with patch(f"{P}.is_spa", return_value=True), \
+         patch(f"{P}.run_playwright_crawl", side_effect=_rendered(out, ("p0.html",))):
+        res = run(out, "--downloader", "httrack", "--changes")
+    assert res.exit_code == 0, res.output
+    assert not os.path.exists(stale)
+    assert "Change report skipped: the browser pass rewrote the files" in res.output
+    assert "Changes: 1 new" not in res.output
+
+
+def test_changes_run_that_needs_no_browser_still_writes_the_report(ht):
+    out, fu, _ = ht
+    fu.side_effect = lambda urls, o, *a, **k: _with_changes(o)
+    res = run(out, "--downloader", "httrack", "--changes")
+    assert res.exit_code == 0, res.output
+    assert os.path.exists(os.path.join(out, "hts-changes.json"))
+    assert "Changes: 1 new" in res.output

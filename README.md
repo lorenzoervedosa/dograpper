@@ -517,6 +517,11 @@ records none); a `gone` file, and a file of the previous run that was
 requested without being kept, has `"url": ""`, and a `gone` file has no
 `size`. A run that fails leaves the previous report as it was.
 
+When the engine's result looks client-rendered and the browser pass runs, it
+rewrites the files the report would describe: the run writes no report, removes
+an `hts-changes.json` an earlier run left in `-o`, prints `Change report
+skipped: the browser pass rewrote the files` and keeps its exit code.
+
 **`--do-not-recatch` (HTTrack `-%n`, off).** A recorded file other than a
 page, a script or a stylesheet that was erased or emptied since is not fetched
 again: a missing one is created empty, and its URL is listed under `Errors` as
