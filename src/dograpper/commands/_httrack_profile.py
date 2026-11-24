@@ -36,8 +36,9 @@ PROFILE_OPTIONS = ('user_agent', 'header', 'no_robots', 'connections', 'max_conn
                    'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
                    'cache', 'updatehack', 'do_not_recatch', 'changes')
 # The [httrack] options of `download`, which fire-engine lacks (#152); sync forwards them too.
-# Not policy fields: the profile runner takes them (run_httrack keyword arguments).
-HTTRACK_OPTIONS = ('cookies',)
+HTTRACK_OPTIONS = ('cookies', 'browser_headers')
+# Of them, the ones the profile runner takes (run_httrack keyword arguments), not the policy
+_RUN_OPTIONS = ('cookies',)
 # --no-X flags: the policy holds the positive switch
 _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
             'no_extended_parsing': 'extended_parsing'}
@@ -57,7 +58,7 @@ def config_note(from_config: bool) -> str:
 
 def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     """Return (policy_kw, from_config, session) for the profile options, `session` the
-    HTTRACK_OPTIONS for run_httrack. A value not set on the command line goes through its
+    _RUN_OPTIONS for run_httrack. A value not set on the command line goes through its
     option's click type (ranges, booleans), so config gets the CLI's checks and messages;
     under wget a profile option, and under any downloader but httrack an [httrack] one,
     given on the command line or set away from its default in config, is a usage error."""
@@ -87,8 +88,9 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
         allowed = downloader == 'httrack' if only_httrack else downloader != 'wget'
         if not allowed and (param.name not in from_config or values[param.name] != param.default):
             needs = "httrack" if only_httrack else "httrack or fire-engine"
-            raise click.UsageError(f"{_flag(param.name)} requires --downloader {needs}")
-    session = {k: values.pop(k) for k in HTTRACK_OPTIONS}
+            flags = "/".join((*param.opts, *param.secondary_opts))  # --x/--no-x: both
+            raise click.UsageError(f"{flags} requires --downloader {needs}")
+    session = {k: values.pop(k) for k in _RUN_OPTIONS}
     header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
     user_agent = checked_user_agent(values['user_agent'],
                                     config_note('user_agent' in from_config))

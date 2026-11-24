@@ -555,13 +555,26 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     malformed line is a usage error naming its number, never its content
     (HTTrack instead skips it and leaves the file unchanged at the end).
 - **`--browser-headers` / `--no-browser-headers`** (HTTrack `-%Q`, on by
-  default). With the default UA it amounts to the `Sec-Fetch-*` behavior of
-  §5.1. When `--user-agent` names Chrome/Edge ≥ 108 or Firefox, the profile
-  also sends what that browser sends, ported from HTTrack's tables:
-  - per-kind `Accept`;
-  - `Accept-Language: en-US,en;q=0.9`;
-  - client hints with Chromium's GREASE brand list, for Chrome/Edge;
-  - the recorded header order.
+  default; `lib/httrack/policy.py`, implemented, #170). With the default UA it
+  amounts to the `Sec-Fetch-*` behavior of §5.1. When `--user-agent` names
+  Chrome/Edge ≥ 108 or Firefox ≥ 90 (`browser_family`, htslib.c:820-866: every
+  product token must be one that browser sends), the profile also sends what
+  that browser sends, ported from HTTrack's tables:
+  - per-kind `Accept` (htsfetch.c:549-578, looked up by `Sec-Fetch-Dest` as
+    htsfetch.c:629-648 does);
+  - `Accept-Language: en-US,en;q=0.9` (htsfetch.h:135);
+  - client hints with Chromium's GREASE brand list, for Chrome/Edge, over
+    https only (`client_hints`, htslib.c:728-811, sent at htslib.c:1213-1235);
+  - the recorded header order (htslib.c:913-946: Chrome's navigation and
+    subresource orders, Firefox's).
+  - The tables go with the fetch metadata: a link with none (robots.txt, an
+    unclassified link) gets HTTrack's own `Accept`, `Accept-Language` and
+    order (htslib.c:1002-1004); a `--header` line still takes the place of the
+    header of the same name (#136).
+  - `--no-browser-headers` (HTTrack `-%Q0`) drops `Sec-Fetch-*`,
+    `Upgrade-Insecure-Requests` and the client hints.
+  - Not ported: `Origin` on a CORS request (htslib.c:1323-1340), which needs
+    the request's initiator; a known gap, below.
 - **`--browser-login`:**
   1. Opens headed Chromium on the start URL.
   2. The user logs in or passes the challenge, then presses Enter in the
@@ -596,6 +609,10 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
+
+- **`Origin` on CORS requests under `--browser-headers`** (htslib.c:1323-1340):
+  Chrome sends it on every `cors` request, Firefox on a cross-origin one. The
+  profile's `FetchMeta` carries no initiator to take it from (#170).
 
 
 ## 6. Code layout
@@ -693,6 +710,7 @@ README and CHANGELOG.
    `--browser-login`, the profile's first `httrack`-only flags
    (`HTTRACK_OPTIONS`: exit 2 under `wget` and under `fire-engine`).
    - **`--cookies`: implemented (#169),** §5.7.
+   - **`--browser-headers`: implemented (#170),** §5.7.
 
 **Before PRs 2 and 4 land** (*call*, no silent fallback): when
 `--downloader httrack` needs a path that does not exist yet (recursive crawl,

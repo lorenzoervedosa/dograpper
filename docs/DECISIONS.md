@@ -22,6 +22,18 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-24 — `--browser-headers`: F1 reconciled, and how far the port goes (#170)
+
+- **Decision:**
+  - F1 (header-level browser imitation) leaves the `httrack` profile's non-goals in the HTTrack mirroring requirements: HTTrack sends it by default (`-%Q`), and the profile spec wins over that list (maintainer, 2026-11-24);
+  - the port follows HTTrack's code at the pinned commit, not only the brief's list: the client hints go on every https request with a Chrome or Edge User-Agent, robots.txt included (htslib.c:1213-1235 does not look at the fetch metadata), while the `Accept`, `Accept-Language` and order tables go only with fetch metadata (htslib.c:1002-1004);
+  - `--no-browser-headers` also drops the client hints, as `-%Q0` does (HTTrack's tests/597), beyond the brief's `Sec-Fetch-*` and `Upgrade-Insecure-Requests`;
+  - `Origin` on a CORS request is not ported: the profile's `FetchMeta` carries no initiator; listed as a known gap in the spec;
+  - the usage error of a `--x/--no-x` flag names both forms (`--browser-headers/--no-browser-headers requires --downloader httrack`).
+- **Why:** the brief asks for HTTrack's tables, and HTTrack's own test vectors (tests/597, 602, 603) are the expected values of the tests.
+- **Rejected:** sending `Origin` from the `Referer` page: the initiator is not always the referer (a redirect target keeps the original link's), so it would be a guess.
+- **Pending:** none.
+
 ## 2026-11-24 — `--cookies`: what the jar does where HTTrack and the brief are silent (#169)
 
 - **Decision:**

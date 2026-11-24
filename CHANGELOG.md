@@ -302,6 +302,15 @@ stays `0.0.0.dev0`.
   and comes back merged. Cookie values never reach the logs, the report or the
   manifest. `--cookies` under `--downloader wget` or `fire-engine` exits 2, as
   does a malformed line in the file. ([#169])
+- `download --downloader httrack --browser-headers` / `--no-browser-headers`
+  (and `sync`, and `"browser-headers"` in `.dograpper.json`), as HTTrack
+  `-%Q`, on by default. With a `--user-agent` naming Chrome or Edge 108+ or
+  Firefox 90+, the profile sends that browser's `Accept` per kind of request,
+  `Accept-Language: en-US,en;q=0.9`, its header order and, for Chrome and Edge
+  over https, its `sec-ch-ua*` client hints, from HTTrack's tables; the default
+  User-Agent's headers are unchanged. `--no-browser-headers` drops
+  `Sec-Fetch-*`, `Upgrade-Insecure-Requests` and the client hints. The flag
+  under `--downloader wget` or `fire-engine` exits 2. ([#170])
 
 ### Changed
 
@@ -667,3 +676,4 @@ stays `0.0.0.dev0`.
 [#174]: https://github.com/lorenzoervedosa/dograpper/issues/174
 [#183]: https://github.com/lorenzoervedosa/dograpper/issues/183
 [#169]: https://github.com/lorenzoervedosa/dograpper/issues/169
+[#170]: https://github.com/lorenzoervedosa/dograpper/issues/170

@@ -337,10 +337,12 @@ pages carry Cloudflare's injected `jsd` beacon. Use only `cf-mitigated` and the
 
 - **F1: browser-header mimicry (`-%Q/--browser-headers`).** On by default, with full effect once `-F` names a browser:
   - Chrome/Edge client hints, with brand lists built by Chromium's GREASE algorithm (`src/htslib.c:728-811`);
-  - the browser's own `Accept` tables per link kind (`src/htsfetch.c:629-648`) and `Accept-Language: en-US,en;q=0.9` (`src/htsfetch.h:135`);
+  - the browser's own `Accept` tables per link kind (`src/htsfetch.c:549-578`, looked up at `src/htsfetch.c:629-648`) and `Accept-Language: en-US,en;q=0.9` (`src/htsfetch.h:135`);
   - `Origin` on CORS requests;
   - the header order recorded from Chrome 155 and Firefox 158 (`src/htslib.c:913-966`, `1214-1340`).
+  - The browser family is told by the User-Agent alone: Chrome/Edge when the client hints parse, Firefox from 90 with only Firefox's products (`src/htslib.c:820-866`); the tables go with the fetch metadata (`src/htslib.c:1002-1004`), and `-%Q0` turns all of it off (`fetch_meta_sent`, `src/htslib.c:878`; hints `src/htslib.c:1214`).
   - The docs justify it as sending what a browser sends, because "a wrong value can get it refused" (WinHTTrack `html/cmdguide.html` §7). **This is header-level fingerprint impersonation.**
+  - **The `httrack` profile ports it (#170, 2026-11-24):** HTTrack has it on by default, and the profile spec wins over the non-goal below (user decision, 2026-11-24). The port is `client_hints()`, `browser_family()`, `BROWSER_ACCEPT` and `_ORDERS` in `src/dograpper/lib/httrack/policy.py`; `Origin` is not ported.
 - **F2: UA-spoof recipe.** The docs include "Get past a crawler-UA block" with a browser `--user-agent` (WinHTTrack `html/cmdguide.html` §11), and the FAQ suggests changing the UA when HTTrack is filtered (WinHTTrack `html/faq.html`).
 - **F3: clearance transplant.**
   - The `cf-mitigated` log message and `login.html` advise solving the challenge in a browser and passing its cookies and exact UA (`src/htsback.c:4207-4215`; WinHTTrack `html/login.html` "Limits").
@@ -388,7 +390,7 @@ These next three are non-goals **of the `httrack` profile only**, which stays
 behaviourally identical to HTTrack. They are no longer dograpper-wide non-goals
 since 2026-11-18 (`docs/DECISIONS.md`); a separate downloader may adopt them.
 
-- **Header-level browser impersonation** (§2.10 F1): client hints, `Sec-Fetch-*` synthesized to look like a browser, browser `Accept` tables, browser header order. DL-01 deliberately goes the other way.
+- ~~**Header-level browser impersonation** (§2.10 F1): client hints, `Sec-Fetch-*` synthesized to look like a browser, browser `Accept` tables, browser header order. DL-01 deliberately goes the other way.~~ **Reconciled 2026-11-24 (#170):** no longer a non-goal of the `httrack` profile. HTTrack sends these by default (`-%Q`), the profile spec wins over this list (user decision, 2026-11-24), and the profile ports them behind `--browser-headers`; with the default User-Agent nothing changes, so DL-01 still holds.
 - **UA spoofing as a WAF workaround** (§2.10 F2). This includes the current README claim (`README.md:264-265`), which DL-01 replaces.
 - **Clearance transplant:** embedded-browser cookie/UA harvesting, and documenting cookies.txt as a way past challenges (§2.10 F3). DL-19 is limited to sessions the user is entitled to.
 - **Evasion HTTrack does not have either:** TLS or HTTP/2 fingerprint impersonation, challenge or CAPTCHA solving, proxy rotation. Out of scope for the `httrack` profile only, which stays identical to HTTrack; no longer a dograpper non-goal since 2026-11-18 (`docs/DECISIONS.md`).

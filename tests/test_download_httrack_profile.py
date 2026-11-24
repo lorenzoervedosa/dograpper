@@ -126,19 +126,39 @@ def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
 
 
 @pytest.mark.parametrize("downloader", ["wget", "fire-engine"])
-@pytest.mark.parametrize("config", [False, True])
-@pytest.mark.parametrize("flag, key, value", [("--cookies", "cookies", "c.txt")])
+@pytest.mark.parametrize("given, config, flag", [
+    (["--cookies", "c.txt"], None, "--cookies"),
+    ([], {"cookies": "c.txt"}, "--cookies"),
+    (["--no-browser-headers"], None, "--browser-headers/--no-browser-headers"),
+    (["--browser-headers"], None, "--browser-headers/--no-browser-headers"),  # even at default
+    ([], {"browser-headers": False}, "--browser-headers/--no-browser-headers"),
+])
 def test_httrack_only_flag_under_another_downloader_is_usage_error(tmp_path, downloader,
-                                                                   config, flag, key, value):
-    """#169: the [httrack] flags have no fire-engine counterpart (#152) nor a wget one."""
-    if config:
-        res = run(str(tmp_path / "o"), "--downloader", downloader,
-                  config=_config(tmp_path, **{key: value}))
-    else:
-        res = run(str(tmp_path / "o"), "--downloader", downloader, f"{flag}={value}")
+                                                                   given, config, flag):
+    """#169, #170: the [httrack] flags have no fire-engine counterpart (#152) nor a wget one."""
+    res = run(str(tmp_path / "o"), "--downloader", downloader, *given,
+              config=_config(tmp_path, **config) if config else None)
     assert res.exit_code == 2
-    assert f"{flag} requires --downloader httrack" in res.output
-    assert not os.path.exists(tmp_path / value)
+    assert f"{flag} requires --downloader httrack\n" in res.output
+    assert not os.path.exists(tmp_path / "c.txt")
+
+
+def test_a_config_browser_headers_at_its_default_is_no_error_under_wget(tmp_path):
+    res = run(str(tmp_path / "o"), config=_config(tmp_path, **{"browser-headers": True}))
+    assert "requires --downloader" not in res.output
+
+
+@pytest.mark.parametrize("args, config, want", [
+    ([], {}, True), (["--no-browser-headers"], {}, False),
+    ([], {"browser-headers": False}, False), ([], {"browser-headers": "false"}, False),
+    (["--browser-headers"], {"browser-headers": False}, True),  # the CLI wins
+])
+def test_browser_headers_reaches_the_policy(ht, tmp_path, args, config, want):
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", *args,
+              config=_config(tmp_path, **config) if config else None)
+    assert res.exit_code == 0, res.output
+    assert fu.call_args.args[2].browser_headers is want
 
 
 def test_httrack_only_options_tuple_matches_download_and_sync():

@@ -27,6 +27,48 @@ ACCEPT = ("text/html,image/png,image/jpeg,image/pjpeg,image/x-xbitmap,"
           "image/svg+xml,image/gif;q=0.9,*/*;q=0.1")
 ACCEPT_LANGUAGE = "en, *"
 
+# --browser-headers (HTTrack -%Q, #170): what the browser a --user-agent names sends, from
+# HTTrack's tables (Chrome 155 and Firefox 158 captures). Accept by Sec-Fetch-Dest,
+# htsfetch.c:549-578 (embed was never captured, so it follows object):
+_CHROME_NAV = ("text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,"
+               "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+_FIREFOX_NAV = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+_STYLE = "text/css,*/*;q=0.1"
+BROWSER_ACCEPT = {
+    "chrome": {"document": _CHROME_NAV, "iframe": _CHROME_NAV, "frame": _CHROME_NAV,
+               "image": "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,"
+                        "*/*;q=0.8",
+               "style": _STYLE, "script": "*/*", "font": "*/*", "audio": "*/*",
+               "video": "*/*", "object": _CHROME_NAV, "embed": _CHROME_NAV},
+    "firefox": {"document": _FIREFOX_NAV, "iframe": _FIREFOX_NAV, "frame": _FIREFOX_NAV,
+                "image": "image/avif,image/jxl,image/webp,image/png,image/svg+xml,"
+                         "image/*;q=0.8,*/*;q=0.5",
+                "style": _STYLE, "script": "*/*",
+                "font": "application/font-woff2;q=1.0,application/font-woff;q=0.9,*/*;q=0.8",
+                "audio": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,"
+                         "video/*;q=0.6,*/*;q=0.5",
+                "video": "video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,"
+                         "audio/*;q=0.6,*/*;q=0.5",
+                "object": "*/*", "embed": "*/*"}}
+BROWSER_ACCEPT_LANGUAGE = "en-US,en;q=0.9"  # htsfetch.h:135
+# htslib.c:913-946 header_orders: HTTrack's own, then Chrome's navigation and subresource
+# orders and Firefox's, without the headers the profile never sends (Content-length, From,
+# Origin)
+_CH = ("sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform")
+_FETCH = ("Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest")
+_ORDERS = {
+    None: ("Referer", "Connection", "Host", *_CH, "Upgrade-Insecure-Requests", "User-Agent",
+           "Accept", *_FETCH, "Accept-Language", "Accept-Encoding"),
+    ("chrome", True): ("Host", "Connection", *_CH, "Accept-Language",
+                       "Upgrade-Insecure-Requests", "User-Agent", "Accept", *_FETCH, "Referer",
+                       "Accept-Encoding"),
+    ("chrome", False): ("Host", "Connection", "sec-ch-ua-platform", "Accept-Language",
+                        "sec-ch-ua", "Upgrade-Insecure-Requests", "User-Agent",
+                        "sec-ch-ua-mobile", "Accept", *_FETCH, "Referer", "Accept-Encoding"),
+    "firefox": ("Host", "User-Agent", "Accept", "Accept-Language", "Accept-Encoding",
+                "Connection", "Referer", "Upgrade-Insecure-Requests", "Sec-Fetch-Dest",
+                "Sec-Fetch-Mode", "Sec-Fetch-Site", "Sec-Fetch-User", *_CH)}
+
 MAX_CONNECTIONS = 8
 MAX_CONN_RATE = 5.0
 MAX_BANDWIDTH = 10_000_000
@@ -74,6 +116,7 @@ class HttrackPolicy:
     changes: bool = False  # HTTrack -%d: write hts-changes.json (lib/httrack/changes.py)
     # --header pairs, checked by utils/http_headers.py; request_headers() merges them in place
     headers: tuple[tuple[str, str], ...] = ()
+    browser_headers: bool = True  # HTTrack -%Q: Sec-Fetch-*, the browser tables, client hints
 
 
 def _clamp(name, value, cap, disabled):
@@ -92,7 +135,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  extended_parsing: bool = True, cache: int | None = None,
                  updatehack: bool = False, do_not_recatch: bool = False,
                  changes: bool = False,
-                 headers: tuple[tuple[str, str], ...] = ()) -> HttrackPolicy:
+                 headers: tuple[tuple[str, str], ...] = (),
+                 browser_headers: bool = True) -> HttrackPolicy:
     # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
     for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
                         ("max_bandwidth", max_bandwidth), ("timeout", timeout),
@@ -129,7 +173,112 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         do_not_recatch=do_not_recatch,
         changes=changes,
         headers=tuple(headers),
+        browser_headers=browser_headers,
     )
+
+
+def _ua_parts(user_agent: str):
+    """(product tokens, first comment or None) of a User-Agent, read as htslib.c reads it;
+    None when a comment never closes or a token is empty (a control character)."""
+    tokens, comment, i = [], None, 0
+    while i < len(user_agent):
+        if user_agent[i] == " ":
+            i += 1
+        elif user_agent[i] == "(":
+            end = user_agent.find(")", i)
+            if end < 0:
+                return None
+            if comment is None:
+                comment = user_agent[i + 1:end]
+            i = end + 1
+        else:
+            n = i
+            while n < len(user_agent) and user_agent[n] > " " and user_agent[n] != "(":
+                n += 1
+            if n == i:  # every caller refuses an empty token (htslib.c:776-778)
+                return None
+            tokens.append(user_agent[i:n])
+            i = n
+    return tokens, comment
+
+
+def _product(token: str, name: str) -> int | None:
+    """htslib.c:692-714 ua_product_is: None when `token` is no `name`/version; else the
+    version's first number, -1 when the version is malformed."""
+    if not token.startswith(name + "/"):
+        return None
+    version = token[len(name) + 1:]
+    digits = len(version) - len(version.lstrip("0123456789"))
+    if (version[:1] == "0" or not digits or int(version[:digits]) >= 100000
+            or version[digits:].strip(".0123456789")):
+        return -1
+    return int(version[:digits])
+
+
+_GREASE_CHARS, _GREASE_VERSIONS = " (:-./);=?_", ("8", "99", "24")
+_BRAND_ORDERS = ((0, 1, 2), (0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0))
+_PLATFORMS = (("Android", '"Android"'), ("CrOS", '"Chrome OS"'), ("Windows", '"Windows"'),
+              ("Macintosh", '"macOS"'), ("Linux", '"Linux"'))  # Android before Linux
+
+
+def client_hints(user_agent: str) -> tuple[str, bool, str] | None:
+    """(sec-ch-ua, mobile, sec-ch-ua-platform) Chrome or Edge >= 108 sends with
+    `user_agent`, with Chromium's GREASE brand seeded by the major (htslib.c:728-811
+    hts_client_hints_of), or None for any other User-Agent."""
+    parts = _ua_parts(user_agent)
+    if parts is None:
+        return None
+    tokens, comment = parts
+    chrome, edge, mobile, mozilla = -1, 0, False, False
+    for token in tokens:  # every product must be one Chrome or Edge sends
+        if (major := _product(token, "Chrome")) is not None:
+            chrome = major
+        elif (major := _product(token, "Edg")) is not None:
+            edge = major
+        elif _product(token, "Mozilla") is not None:
+            mozilla = True
+        elif token == "Mobile":
+            mobile = True
+        elif _product(token, "AppleWebKit") is None and _product(token, "Safari") is None:
+            return None
+    if not mozilla or chrome < 108 or (edge != 0 and edge != chrome):
+        return None
+    platform = next((value for word, value in _PLATFORMS if word in (comment or "")), None)
+    if platform is None:
+        return None
+    brands = (f'"Not{_GREASE_CHARS[chrome % 11]}A{_GREASE_CHARS[(chrome + 1) % 11]}Brand";'
+              f'v="{_GREASE_VERSIONS[chrome % 3]}"', f'"Chromium";v="{chrome}"',
+              f'"Microsoft Edge";v="{edge}"' if edge > 0 else f'"Google Chrome";v="{chrome}"')
+    shuffled = [""] * 3
+    for i, at in enumerate(_BRAND_ORDERS[chrome % 6]):
+        shuffled[at] = brands[i]
+    return ", ".join(shuffled), mobile, platform
+
+
+def _is_firefox(user_agent: str) -> bool:
+    """htslib.c:820-857 ua_is_firefox: Firefox from 90 (its first Sec-Fetch-*), with only
+    the products Firefox sends."""
+    parts = _ua_parts(user_agent)
+    if parts is None:
+        return False
+    firefox, gecko, mozilla = -1, False, False
+    for token in parts[0]:
+        if (major := _product(token, "Firefox")) is not None:
+            firefox = major
+        elif _product(token, "Gecko") is not None:
+            gecko = True
+        elif _product(token, "Mozilla") is not None:
+            mozilla = True
+        else:
+            return False
+    return mozilla and gecko and firefox >= 90
+
+
+def browser_family(user_agent: str) -> str | None:
+    """"chrome" (Chrome or Edge), "firefox" or None, as htslib.c:859-866 tells them."""
+    if client_hints(user_agent) is not None:
+        return "chrome"
+    return "firefox" if _is_firefox(user_agent) else None
 
 
 def _importable(name: str) -> bool:
@@ -274,29 +423,38 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
     (conditional_headers) go first, where http_sendhead writes its xsend lines."""
     if kind not in ("robots", "navigate", "linked"):
         raise ValueError(f"unknown request kind: {kind!r}")
-    secure = scheme == "https"
-    # htslib.c fetch_meta_sent: a classified link, to a trustworthy origin, with a browser UA
-    sent = (kind != "robots" and bool(meta.dest) and _trustworthy(scheme, host)
-            and policy.user_agent.startswith("Mozilla/5.0 "))
+    secure, agent = scheme == "https", policy.user_agent
+    # htslib.c fetch_meta_sent: -%Q on, a classified link, to a trustworthy origin, with a
+    # browser UA; the browser tables go with it (htslib.c:1002-1004)
+    sent = (policy.browser_headers and kind != "robots" and bool(meta.dest)
+            and _trustworthy(scheme, host) and agent.startswith("Mozilla/5.0 "))
+    family = browser_family(agent) if sent else None
     referer = _referer_value(referer)
-    h: list[tuple[str, str]] = list(validators)
+    h: dict[str, str] = {}
     if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
-        h.append(("Referer", referer))  # never an https referer to an http URL
-    h += [("Connection", "keep-alive"), ("Host", host)]
+        h["Referer"] = referer  # never an https referer to an http URL
+    h.update({"Connection": "keep-alive", "Host": host})
+    # client hints: over https only, beside the User-Agent they describe (htslib.c:1213-1235)
+    hints = client_hints(agent) if policy.browser_headers and secure else None
+    if hints is not None:
+        h.update(zip(_CH, (hints[0], "?1" if hints[1] else "?0", hints[2])))
     if sent and secure and meta.mode == "navigate":  # hts_fetch_is_navigation
-        h.append(("Upgrade-Insecure-Requests", "1"))
-    if policy.user_agent:
-        h.append(("User-Agent", policy.user_agent))
-    h.append(("Accept", ACCEPT))
+        h["Upgrade-Insecure-Requests"] = "1"
+    if agent:
+        h["User-Agent"] = agent
+    h["Accept"] = BROWSER_ACCEPT[family].get(meta.dest, ACCEPT) if family else ACCEPT
     if sent:
-        h += [("Sec-Fetch-Site", meta.site or _fetch_site(referer, scheme, host)),
-              ("Sec-Fetch-Mode", meta.mode)]
+        h.update({"Sec-Fetch-Site": meta.site or _fetch_site(referer, scheme, host),
+                  "Sec-Fetch-Mode": meta.mode})
         if meta.user:
-            h.append(("Sec-Fetch-User", "?1"))
-        h.append(("Sec-Fetch-Dest", meta.dest))
-    h += [("Accept-Language", ACCEPT_LANGUAGE), ("Accept-Encoding", accept_encoding(secure))]
+            h["Sec-Fetch-User"] = "?1"
+        h["Sec-Fetch-Dest"] = meta.dest
+    h["Accept-Language"] = BROWSER_ACCEPT_LANGUAGE if family else ACCEPT_LANGUAGE
+    h["Accept-Encoding"] = accept_encoding(secure)
+    order = _ORDERS[(family, meta.mode == "navigate") if family == "chrome" else family]
     # HTTrack -%X: a user line replaces the engine's own of the same name, robots.txt included
-    return merge_headers(h, policy.headers)
+    return merge_headers([*validators, *((name, h[name]) for name in order if name in h)],
+                         policy.headers)
 
 
 def make_ssl_context() -> ssl.SSLContext:

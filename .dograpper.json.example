@@ -5,7 +5,8 @@
     "include-extensions": "html,md",
     "manifest": ".dograpper-manifest.json",
     "header": [],
-    "cookies": null
+    "cookies": null,
+    "browser-headers": true
   },
   "pack": {
     "max-words-per-chunk": 400000,

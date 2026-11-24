@@ -561,6 +561,7 @@ under `fire-engine` alike, on the command line or set away from its default in
 | Flag | Default | Meaning |
 |---|---|---|
 | `--cookies FILE` | — | Netscape cookies.txt jar, read before the run and written back at its end (HTTrack `-%K`, see "Cookies") |
+| `--browser-headers` / `--no-browser-headers` | on | Send what the browser `--user-agent` names sends (HTTrack `-%Q`, see "Browser headers") |
 
 **Request headers (`--header`, HTTrack `-%X`).** `--header 'Name: value'`,
 repeatable, or a `"header"` list in `.dograpper.json` (a list given on the
@@ -606,6 +607,24 @@ never its content. Under the browser pass ("Playwright under the profile"),
 the jar goes into the browser before the first page opens, and what the
 browser holds at the end (the cookies a page's scripts or subresources set) is
 merged back into it before it is written.
+
+**Browser headers (`--browser-headers`, HTTrack `-%Q`, on by default).** With
+the default User-Agent this is the `Sec-Fetch-*` set every request already
+carries: `Sec-Fetch-Site`, `-Mode`, `-User` and `-Dest`, plus
+`Upgrade-Insecure-Requests` on an https navigation, sent to an https or
+loopback URL for a link whose kind HTTrack can tell. When `--user-agent` names
+Chrome or Edge 108 or later, or Firefox 90 or later (read as HTTrack reads it:
+any other product in the string, such as Opera's `OPR/`, is no browser), the
+profile sends what that browser sends, from HTTrack's tables (Chrome 155 and
+Firefox 158 captures): the browser's `Accept` for each kind of request (page,
+stylesheet, script, image, font…), `Accept-Language: en-US,en;q=0.9` and its
+header order; Chrome and Edge also get their `sec-ch-ua`, `sec-ch-ua-mobile`
+and `sec-ch-ua-platform` client hints over https, with Chromium's GREASE brand
+list for that version. A `--header` line still takes the place of the header
+of the same name. `--no-browser-headers` sends HTTrack's plain set instead: no
+`Sec-Fetch-*`, no `Upgrade-Insecure-Requests`, no client hints, HTTrack's own
+`Accept`, `Accept-Language: en, *` and order. The browser's `Origin` on a CORS
+request is not sent (HTTrack sends it).
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -1543,7 +1562,7 @@ dograpper sync <url> -o <dir> [options]
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
 | `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--header`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--cookies` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--cookies`, `--browser-headers` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1791,7 +1810,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl (or of `httrack --headless`'s Playwright crawl), refused/challenged; `fire-engine`: `--headless`, a result that looks client-rendered, or no `fire-engine` extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a malformed line in the `--cookies` file; a `[httrack]` flag (`--cookies`) under any downloader but `httrack`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a malformed line in the `--cookies` file; a `[httrack]` flag (`--cookies`, `--browser-headers`) under any downloader but `httrack`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |

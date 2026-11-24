@@ -313,3 +313,15 @@ def test_sync_forwards_cookies_from_the_cli_over_the_json():
         result, seen = _sync_httrack(runner, ["--cookies", "cli.txt"])
         assert result.exit_code == 0, result.output
         assert seen["session"] == {"cookies": "cli.txt"}
+
+
+def test_sync_forwards_no_browser_headers_into_the_policy():
+    """#170: --no-browser-headers is an [httrack] flag sync forwards to the policy."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        result, seen = _sync_httrack(runner, ["--downloader", "httrack",
+                                              "--no-browser-headers"])
+        assert result.exit_code == 0, result.output
+        assert seen["policy_kw"]["browser_headers"] is False and seen["session"] == {
+            "cookies": None}
