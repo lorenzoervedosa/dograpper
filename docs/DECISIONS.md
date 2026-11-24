@@ -29,12 +29,19 @@ Entry format:
 - **Rejected:** adding stubs to `page_of` (the brief's wording; would need a fake output path); dropping the whole link on an unsafe fragment (the page is still the right target); percent-encoding the fragment (changes what a reader sees for a legitimate anchor).
 - **Pending:** none.
 
+## 2026-11-24 — A change report the browser pass would falsify is skipped, not written (#172)
+
+- **Decision:** under `--changes`, when the browser pass runs the run writes no `hts-changes.json`, removes one an earlier run left, prints `Change report skipped: the browser pass rewrote the files` and exits as before.
+- **Why:** the maintainer decision on the issue; the report was computed from the engine's shell while the disk held the rendered pages.
+- **Rejected:** writing the engine's report anyway (describes files no longer on disk); an error (the run succeeded).
+- **Pending:** none
+
 ## 2026-11-24 — Browser-pass redirect parity takes link metadata from the engine's parse of the page (#173)
 
 - **Decision:** `Navigator` learns a followed link's `FetchMeta` by running `links.page_links()` over the page body it armed (`prepare`), and keeps it next to the Referer; the page that linked a URL is also its initiator. `fetch_page` takes `front` and `initiator` (defaults keep today's behavior), so a linked page's redirect hop is built by `moved_request()` as in the recursive crawl. A link only the render added has no entry and is a plain navigation (`NAVIGATION`).
 - **Why:** `playwright_crawl` hands `follows()` bare URLs, so the metadata (a meta refresh has `Sec-Fetch-User` unset) must come from somewhere; reusing the engine's parser keeps one source of truth and leaves `playwright_crawl.py` untouched.
-- **Rejected:** a second `evaluate()` for refreshes (breaks the call sequence of existing doubles); a cross-site chain test (the redirect scope is same-host, the local fixture has one host, so only `same-origin` hops are reachable).
-- **Pending:** none
+- **Rejected:** a second `evaluate()` for refreshes (breaks the call sequence of existing doubles); a cross-site chain test (the redirect scope is same-host, the local fixture has one host, so only `same-origin` hops are reachable); the `initiator` path of a cross-site chain is wired through `moved_request()` but untested. Meta-refresh metadata comes from `links._classify` (cites HTTrack's `parse_fetch_meta`), not re-read in a clone of the HTTrack source.
+- **Pending:** maintainer to accept dropping the cross-site chain test (acceptance criterion 2 of #173, second half).
 
 ## 2026-11-20 — Wave 2 closed: 11 issues in 4 PRs (#181, #182, #184, #185)
 

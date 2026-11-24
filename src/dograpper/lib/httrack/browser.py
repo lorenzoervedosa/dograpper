@@ -117,6 +117,7 @@ class Navigator:
             return None
         self._prepared += 1
         self._front = url == self._start
+        start_like = self._front or self._seeded  # every seed is a start URL (fetch_url_list)
         reused = self._reuse.take(url) if self._reuse is not None else None
         if reused is not None and self._front and reused[0] != url:
             reused = None  # a start URL's redirect re-bases the scope (_redirect_ok): fetch it
@@ -126,8 +127,9 @@ class Navigator:
             outcome, final, res = fetch_page(url, self.fetcher, self.report, self._lock,
                                              self._redirect_ok,
                                              referer=self._referers.get(url),
-                                             meta=self._metas.get(url, NAVIGATION),
-                                             front=self._front or self._seeded,
+                                             meta=NAVIGATION if start_like
+                                             else self._metas.get(url, NAVIGATION),
+                                             front=start_like,
                                              initiator=self._referers.get(url))
         if outcome != "ok":
             return None
@@ -136,10 +138,12 @@ class Navigator:
             self._local[url_key(url)] = saved
         self._armed, self._last = res, (final, res)
         policy = self.fetcher.policy
-        self._page_metas = {} if not _is_page(res) else {
-            url_key(link.url): link.meta for link in reversed(page_links(
-                res.body, final, robots=policy.obey_robots, parse_scripts=False,
-                extended_parsing=False))}  # reversed: the first link to a URL wins
+        self._page_metas = {}
+        if _is_page(res):  # the engine's parse of this page, scans included (mirror_site)
+            for link in page_links(res.body, final, robots=policy.obey_robots,
+                                   parse_scripts=policy.parse_scripts,
+                                   extended_parsing=policy.extended_parsing):
+                self._page_metas.setdefault(url_key(link.url), link.meta)  # first link wins
         return final
 
     def initiated(self) -> list[str]:
