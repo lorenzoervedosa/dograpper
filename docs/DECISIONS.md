@@ -59,6 +59,7 @@ Entry format:
   - a jar that is a symlink is written to the link's target (resolved when the run ends; a dangling link creates its target, 0600), done in `Jar.save()`, not in `atomic_write_bytes`, whose other callers keep replacing what is at their path;
   - an expiry past what a float holds (over ~308 digits) is a bad line of the file (exit 2 with its number), where `Cookie()` raised `OverflowError`; a `Set-Cookie` with such a `Max-Age` is already dropped by the stdlib, which only warns "http.cookiejar bug!" on stderr, left as it is;
   - under the browser pass, a `--header 'Cookie: …'` line keeps the jar out of the browser context (the header itself still reaches only the navigations the profile fetches, so the browser's own subresource requests carry no cookie); what the context holds at the end is still merged back;
+  - `sameSite` goes between the jar and the browser context and back (a browser cookie's, or a `Set-Cookie`'s `SameSite`), but not into the file: a Netscape cookies.txt has 7 fields and no place for it, and an 8th field would break curl, HTTrack and the cookie exporters that read the file; `None` reaches the browser only beside `Secure`, the one place Chromium keeps it;
 - **Why:** each was reproduced by the review; the tests run the failing case first.
 - **Rejected:** fixing the sub-sitemap rule of `sitemap_parser` instead (kept as it is, as decided).
 - **Pending:** none.

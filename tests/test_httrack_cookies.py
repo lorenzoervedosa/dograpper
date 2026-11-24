@@ -413,3 +413,17 @@ def test_an_expiry_out_of_range_is_a_bad_line_not_a_traceback(tmp_path):
     with pytest.raises(ValueError, match="^line 2 ") as e:
         load_jar(str(path))
     assert "S3CRET" not in str(e.value)
+
+
+def test_same_site_survives_the_round_trip_with_the_browser():
+    """Playwright's sameSite comes back as it went (Strict, Lax; None only beside Secure,
+    the one place Chromium keeps it), and a Set-Cookie's SameSite reaches the browser."""
+    from dograpper.lib.httrack.cookies import Jar
+    jar = Jar(None)
+    jar.merge([{"name": "s", "value": "1", "domain": "h.test", "path": "/", "expires": -1,
+                "httpOnly": False, "secure": False, "sameSite": "Strict"},
+               {"name": "n", "value": "1", "domain": "h.test", "path": "/", "expires": -1,
+                "httpOnly": False, "secure": True, "sameSite": "None"}])
+    jar.take("https://h.test/", _set_cookies("l=1; SameSite=lax", "x=1"))
+    got = {c["name"]: c.get("sameSite") for c in jar.to_browser()}
+    assert got == {"s": "Strict", "n": "None", "l": "Lax", "x": None}

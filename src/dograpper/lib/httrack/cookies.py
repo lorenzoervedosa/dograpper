@@ -59,6 +59,16 @@ def _httponly(cookie: http.cookiejar.Cookie) -> bool:
     return any(name.lower() == "httponly" for name in cookie._rest)
 
 
+def _same_site(cookie: http.cookiejar.Cookie) -> str | None:
+    """The cookie's SameSite as Playwright spells it, or None: unknown, or None without
+    Secure, which Chromium never keeps. A cookies.txt has no field for it: it lives for
+    the run (a Set-Cookie's, or the browser's)."""
+    value = next((v for k, v in cookie._rest.items() if k.lower() == "samesite"), None)
+    value = (value or "").capitalize()
+    return value if value in ("Strict", "Lax") or (value == "None" and cookie.secure) \
+        else None
+
+
 def _pair(cookie: http.cookiejar.Cookie) -> tuple[str, str]:
     """(name, value) as a cookies.txt line holds it: a cookie with no `=` is a value alone
     (MozillaCookieJar's reading)."""
@@ -70,13 +80,17 @@ def _wire(text: str) -> str:
     return text.encode("utf-8").decode("latin-1")
 
 
-def _cookie(domain, path, secure, expires, name, value, httponly) -> http.cookiejar.Cookie:
+def _cookie(domain, path, secure, expires, name, value, httponly,
+            same_site=None) -> http.cookiejar.Cookie:
     """A Netscape cookie: `domain` with a leading dot is a domain cookie, else host-only;
     `expires` None is a session cookie."""
     dotted = domain.startswith(".")
+    rest = {"HttpOnly": ""} if httponly else {}
+    if same_site:
+        rest["SameSite"] = same_site
     return http.cookiejar.Cookie(0, name, value, None, False, domain.lower(), dotted, dotted,
                                  path, True, secure, expires, expires is None, None, None,
-                                 {"HttpOnly": ""} if httponly else {})
+                                 rest)
 
 
 def _clean(*fields) -> bool:
@@ -227,6 +241,8 @@ class Jar:
                      "httpOnly": _httponly(c), "secure": bool(c.secure)}
             if c.expires is not None:
                 entry["expires"] = c.expires
+            if (same_site := _same_site(c)) is not None:
+                entry["sameSite"] = same_site
             out.append(entry)
         if skipped:
             logger.warning("--cookies: %d cookie(s) of the jar are no UTF-8 text; the "
@@ -244,7 +260,7 @@ class Jar:
             expires = c.get("expires", -1)
             self.add(_cookie(_wire(c["domain"]), _wire(c["path"]), bool(c.get("secure")),
                              None if expires < 0 else int(expires), _wire(c["name"]),
-                             _wire(c["value"]), bool(c.get("httpOnly"))))
+                             _wire(c["value"]), bool(c.get("httpOnly")), c.get("sameSite")))
 
     def save(self) -> None:
         """Write the jar back to its file (a symlink's target): created owner-only (0600),

@@ -619,7 +619,8 @@ manifest; a malformed line is a usage error (exit 2) that names its number,
 never its content. Under the browser pass ("Playwright under the profile"),
 the jar goes into the browser before the first page opens, and what the
 browser holds at the end (the cookies a page's scripts or subresources set) is
-merged back into it before it is written.
+merged back into it before it is written. A cookie's `SameSite` goes between
+the jar and the browser for the run; a cookies.txt has no field for it.
 
 **Browser headers (`--browser-headers`, HTTrack `-%Q`, on by default).** With
 the default User-Agent this is the `Sec-Fetch-*` set every request already
