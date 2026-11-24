@@ -38,6 +38,13 @@ def test_every_command_and_option_has_an_anchor():
         assert f'id="global--{flag}"' in page
 
 
+def test_usage_lines_name_the_program_dograpper():
+    usages = re.findall(r"<strong>Usage:</strong> <code>(.*?)</code>", _page())
+    assert len(usages) == len(cli.commands)
+    assert all(u.startswith("dograpper ") for u in usages), usages
+    assert not any(u.startswith("cli ") for u in usages)
+
+
 def test_option_kinds_are_rendered():
     page = _page()
     # choice: accepted values and default

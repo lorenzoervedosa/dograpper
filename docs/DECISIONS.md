@@ -22,6 +22,27 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-24 — Redirect-stub links in the page layout (#174)
+
+- **Decision:** the skipped stubs live in a separate `stubs` dict (source path → meta-refresh target), not in `page_of`; in a chain the fragment of the last hop that has one wins; an empty `#` on the link counts as a fragment, so the stub's is not used; `redirect_target` unescapes HTML entities in the target; a stub fragment holding `<`, `>`, whitespace or a control character is dropped (the link keeps no fragment from the stub).
+- **Why:** `page_of` maps a source path to an output file and a stub has none; the chain follows the browser's fragment inheritance; entity-decoded page text lands inside the `<...>` destination of a Markdown link, so it must not be able to end it.
+- **Rejected:** adding stubs to `page_of` (the brief's wording; would need a fake output path); dropping the whole link on an unsafe fragment (the page is still the right target); percent-encoding the fragment (changes what a reader sees for a legitimate anchor).
+- **Pending:** none.
+
+## 2026-11-24 — A change report the browser pass would falsify is skipped, not written (#172)
+
+- **Decision:** under `--changes`, when the browser pass runs the run writes no `hts-changes.json`, removes one an earlier run left, prints `Change report skipped: the browser pass rewrote the files` and exits as before.
+- **Why:** the maintainer decision on the issue; the report was computed from the engine's shell while the disk held the rendered pages.
+- **Rejected:** writing the engine's report anyway (describes files no longer on disk); an error (the run succeeded).
+- **Pending:** none
+
+## 2026-11-24 — Browser-pass redirect parity takes link metadata from the engine's parse of the page (#173)
+
+- **Decision:** `Navigator` learns a followed link's `FetchMeta` by running `links.page_links()` over the page body it armed (`prepare`), and keeps it next to the Referer; the page that linked a URL is also its initiator. `fetch_page` takes `front` and `initiator` (defaults keep today's behavior), so a linked page's redirect hop is built by `moved_request()` as in the recursive crawl. A link only the render added has no entry and is a plain navigation (`NAVIGATION`).
+- **Why:** `playwright_crawl` hands `follows()` bare URLs, so the metadata (a meta refresh has `Sec-Fetch-User` unset) must come from somewhere; reusing the engine's parser keeps one source of truth and leaves `playwright_crawl.py` untouched.
+- **Rejected:** a second `evaluate()` for refreshes (breaks the call sequence of existing doubles); a cross-site chain test: `mirror.outside()` refuses any URL off the start host (`same_host`) before it reads `--filter`, so the recursive crawl never requests a cross-site link, and `playwright_crawl.follow()` also compares `netloc`. Probe (2026-11-24, `mirror_site` from `http://127.0.0.1:PORT/docs/`, link to `http://localhost:PORT/docs/a`, `--filter +localhost*`): server saw `['/robots.txt', '/docs/']` only and `report.out_of_scope == ['http://localhost:PORT/docs/a']`. The `initiator` path of a cross-site chain is wired through `moved_request()` but unreachable by a real crawl today. Meta-refresh metadata comes from `links._classify` (cites HTTrack's `parse_fetch_meta`), not re-read in a clone of the HTTrack source.
+- **Pending:** none. The README states "A `--filter` rule never widens the crawl to another host.", so a cross-site chain is unreachable by design and the criterion was a brief error (corrected on #173).
+
 ## 2026-11-20 — Wave 2 closed: 11 issues in 4 PRs (#181, #182, #184, #185)
 
 - **Decision:** five parallel lanes, each in its own worktree. Landed in this order:

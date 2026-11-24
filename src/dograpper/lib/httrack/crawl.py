@@ -348,12 +348,14 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                referer: str | None = None, meta: FetchMeta = NAVIGATION,
                prev: Previous | None = None, names: NameRegistry | None = None,
                tried: Callable[[str], None] | None = None,
-               responses: RunResponses | None = None
+               responses: RunResponses | None = None, front: bool = True,
+               initiator: str | None = None
                ) -> tuple[str, str, FetchResult | None]:
     """GET `url` for every fetch path: /cdn-cgi/ is never requested, robots.txt is checked
     before each hop, and a redirect is followed (at most MAX_REDIRECTS) only when
     `redirect_ok(url, target)`, called under `lock`, accepts the target; `url` is then a
-    start URL, and each target is requested as moved_request() says. Return ("ok", final
+    start URL (`front`, as a seed is; a linked page says False and the `initiator` page
+    that linked it), and each target is requested as moved_request() says. Return ("ok", final
     URL, result) for a 2xx that is no challenge, else ("scoped" | "refused", URL, None)
     with the cause recorded in `report` (an error names the request's referer). Without
     `redirect_ok` a redirect is not followed: ("moved", target, result).
@@ -435,8 +437,8 @@ def fetch_page(url: str, fetcher: Fetcher, report: RunReport, lock: threading.Lo
                 if hops >= MAX_REDIRECTS:
                     report.errors.append((safe, "too many redirects", via))
                     return "refused", url, None
-                referer, meta = moved_request(url, referer, meta, nxt, front=True,
-                                              initiator=None)
+                referer, meta = moved_request(url, referer, meta, nxt, front=front,
+                                              initiator=initiator)
                 via = redact_url(referer) if referer else None
                 url, hops = nxt, hops + 1
                 continue

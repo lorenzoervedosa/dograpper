@@ -295,6 +295,7 @@ stays `0.0.0.dev0`.
 
 ### Changed
 
+- `pack --layout page` (md): a link to a redirect stub that `pack` skipped now points at the packed page its meta refresh names, as links to MediaWiki aliases do, instead of keeping a target the output does not have. Chains of stubs are followed (up to 8 hops); loops, absolute, root-relative, out-of-input, query-carrying and unpacked targets leave the link as written. ([#174])
 - `download --downloader httrack` over a result that looks client-rendered (and `sync`) no longer requests each page a second time for the browser pass: the pages the engine already fetched in the run (up to 128 MiB in memory) are handed to the browser. ([#160])
 - `download --downloader httrack --headless` requests a script or stylesheet that several pages share once per run, instead of once per page (a per-run in-memory cache of at most 64 MiB; nothing is written to disk). ([#167])
 - `download --downloader httrack --headless` follows a navigation a page starts itself (meta refresh, `location =`) as a link of that page, within scope, `--filter`, `--depth` and `--max-links`, instead of dropping it. ([#159])
@@ -378,6 +379,9 @@ stays `0.0.0.dev0`.
 
 ### Fixed
 
+- `dograpper docs`: every usage line on the page reads `dograpper <command> …` instead of `cli <command> …`. ([#180])
+- `download --downloader httrack --headless` (and the automatic browser fallback): the redirect of a page reached by a link is requested with the same `Sec-Fetch-Site` (and link metadata) as in the recursive crawl, instead of as if the page were the start URL. ([#173])
+- `download --downloader httrack --changes`, when the result looks client-rendered and the browser pass runs, writes no `hts-changes.json` (it described the engine's shell, not the rendered files), removes one an earlier run left in `-o`, and prints `Change report skipped: the browser pass rewrote the files`. ([#172])
 - `download --headless` (also with `--downloader httrack`, and `sync`) without an installed Chromium prints one line naming `dograpper doctor --install` and exits 1, instead of a Playwright traceback; any other browser launch failure prints Playwright's first line. ([#166])
 - `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
 - `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
@@ -636,8 +640,12 @@ stays `0.0.0.dev0`.
 [#136]: https://github.com/lorenzoervedosa/dograpper/issues/136
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
+[#172]: https://github.com/lorenzoervedosa/dograpper/issues/172
+[#173]: https://github.com/lorenzoervedosa/dograpper/issues/173
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159
 [#167]: https://github.com/lorenzoervedosa/dograpper/issues/167
 [#160]: https://github.com/lorenzoervedosa/dograpper/issues/160
 [#139]: https://github.com/lorenzoervedosa/dograpper/issues/139
 [#163]: https://github.com/lorenzoervedosa/dograpper/issues/163
+[#180]: https://github.com/lorenzoervedosa/dograpper/issues/180
+[#174]: https://github.com/lorenzoervedosa/dograpper/issues/174

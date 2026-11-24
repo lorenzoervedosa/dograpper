@@ -94,7 +94,7 @@ def _arguments(params):
 def command_context(group: click.Group, name: str | None = None) -> click.Context:
     """Context of `group`, or of its subcommand `name`, with the context_settings click applies
     (the root's `-h` alias included); shared with the docs site."""
-    root = click.Context(group, info_name=group.name or "dograpper", **group.context_settings)
+    root = click.Context(group, info_name="dograpper", **group.context_settings)
     if name is None:
         return root
     cmd = group.commands[name]

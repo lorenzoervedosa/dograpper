@@ -607,3 +607,106 @@ def test_reused_page_is_saved_like_a_fetched_one(server, tmp_path):
     path = nav.save(base + "/docs/a", "<p>rendered</p>")
     assert open(path).read() == "<p>rendered</p>"
     assert nav.records[path]["status"] == 200 and nav.records[path]["redirected"] is False
+
+
+# --- #173: a redirect hop of the browser pass is requested as the recursive crawl does ---
+
+WIRE = ("Referer", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-User")
+
+
+def _crawl_default_identity(base, out):
+    """crawl_with, under the profile's own User-Agent: a custom one drops Sec-Fetch-*."""
+    policy = build_policy(retries=0)
+    ft = FakeTime()
+    nav = Navigator(Fetcher(policy, clock=ft.clock, sleep=ft.sleep), str(out), base + "/docs/",
+                    "html")
+    return run_playwright_crawl(base + "/docs/", str(out), navigator=nav)
+
+
+def _redirect_hop_headers(server, tmp_path, browser, start_redirects=False):
+    """Headers of the hop after a redirect of a linked page (or of the start URL), seen
+    once in the recursive crawl and once in the browser pass."""
+    from dograpper.lib.httrack.mirror import mirror_site
+    base, script, _ = server
+    _, _, page = browser
+    seen = []
+    script["/robots.txt"] = (404, {}, b"")
+    if start_redirects:
+        script["/docs/"] = (301, {"location": "/docs/b"}, b"")
+    else:
+        script["/docs/"] = (200, HTML, b'<a href="/docs/a">a</a>')
+        script["/docs/a"] = (301, {"location": "/docs/b"}, b"")
+    script["/docs/b"] = lambda h: seen.append({k: h.get(k) for k in WIRE}) or (200, HTML, b"b")
+    policy = build_policy(retries=0)
+    mirror_site(base + "/docs/", str(tmp_path / "engine"), policy, "html", depth=2,
+                fetcher=Fetcher(policy, clock=FakeTime().clock, sleep=FakeTime().sleep))
+    page.evaluate.side_effect = [[base + "/docs/a"], [], []]
+    _crawl_default_identity(base, tmp_path / "browser")
+    assert len(seen) == 2, seen
+    return seen
+
+
+def test_redirect_of_a_linked_page_is_requested_as_the_recursive_crawl_does(
+        server, tmp_path, browser):
+    engine, browsed = _redirect_hop_headers(server, tmp_path, browser)
+    assert engine["Sec-Fetch-Site"] == "same-origin"
+    assert browsed == engine
+
+
+def test_redirect_of_the_start_url_keeps_sec_fetch_site_none(server, tmp_path, browser):
+    engine, browsed = _redirect_hop_headers(server, tmp_path, browser, start_redirects=True)
+    assert browsed["Sec-Fetch-Site"] == "none"
+    assert browsed == engine
+
+
+def _link_hop_headers(server, tmp_path, browser):
+    """Headers of the redirect hop of a link that is a meta refresh, in both crawls."""
+    from dograpper.lib.httrack.mirror import mirror_site
+    base, script, _ = server
+    _, _, page = browser
+    seen = []
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b'<meta http-equiv="refresh" content="0; url=/docs/a">')
+    script["/docs/a"] = (301, {"location": "/docs/b"}, b"")
+    script["/docs/b"] = lambda h: seen.append({k: h.get(k) for k in WIRE}) or (200, HTML, b"b")
+    policy = build_policy(retries=0)
+    mirror_site(base + "/docs/", str(tmp_path / "engine"), policy, "html", depth=2,
+                fetcher=Fetcher(policy, clock=FakeTime().clock, sleep=FakeTime().sleep))
+    page.evaluate.side_effect = [[base + "/docs/a"], [], []]
+    _crawl_default_identity(base, tmp_path / "browser")
+    return seen
+
+
+def test_redirect_of_a_meta_refresh_link_carries_the_refresh_metadata(
+        server, tmp_path, browser):
+    """HTTrack's refresh link is a navigation that is no user's: no Sec-Fetch-User."""
+    engine, browsed = _link_hop_headers(server, tmp_path, browser)
+    assert engine["Sec-Fetch-User"] is None
+    assert browsed == engine
+
+
+# --- #190: --header reaches the navigations of the browser pass under --headless ---
+
+def test_header_reaches_every_navigation_of_the_headless_browser_pass(
+        server, tmp_path, browser):
+    from click.testing import CliRunner
+    from dograpper.cli import cli
+    base, script, _ = server
+    _, _, page = browser
+    got = {}
+
+    def page_reply(path, body):
+        def reply(h):
+            got[path] = h.get("X-Test")
+            return 200, HTML, body
+        return reply
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = page_reply("/docs/", b"shell")
+    script["/docs/a"] = page_reply("/docs/a", b"shell")
+    page.evaluate.side_effect = [[base + "/docs/a"], []]
+    out = str(tmp_path / "out")
+    res = CliRunner().invoke(cli, [
+        "download", base + "/docs/", "-o", out, "--manifest", out + ".manifest.json",
+        "--downloader", "httrack", "--headless", "--header", "X-Test: 1"])
+    assert res.exit_code == 0, res.output
+    assert got == {"/docs/": "1", "/docs/a": "1"}

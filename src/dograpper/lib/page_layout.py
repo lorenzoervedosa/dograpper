@@ -12,6 +12,7 @@ to a packed page points at that page's file (#118).
 
 import os
 import posixpath
+import re
 import shutil
 from collections import Counter
 from html.parser import HTMLParser
@@ -25,6 +26,7 @@ from ..utils.html_stripper import DEFINITION, escape_link_text, split_definition
 from ..utils.mediawiki import page_config
 from ..utils.portable_names import FORBIDDEN, claim_unique, resolve_under
 from ..utils.redact import neutralize_controls
+from ..utils.redirect_stub import SCAN_BYTES, redirect_target
 from ..utils.word_counter import count_words, count_words_file
 
 PAGES_DIR = "pages"
@@ -151,22 +153,64 @@ def _index_line(title: str, path: str, words: int, url: str) -> str:
     return f"{line}, {url}" if url else line
 
 
-def _page_link(dest: str, rel: str, page_of: dict):
-    """Destination of a link from page ``rel`` to ``dest`` when it names a packed page:
-    that page's file relative to the linking one, fragment kept; else None."""
-    path, sep, fragment = (dest[1:-1] if dest.startswith("<") else dest).partition("#")
-    parts = urlsplit(path)
-    if parts.scheme or parts.netloc or parts.query or not parts.path or path.startswith("/"):
+def _local_path(url: str, rel: str):
+    """The source path that relative URL ``url`` (fragment already cut) names from the page
+    at ``rel``, or None when it is absolute, root-relative, carries a query or is empty."""
+    parts = urlsplit(url)
+    if parts.scheme or parts.netloc or parts.query or not parts.path or url.startswith("/"):
         return None
-    target = page_of.get(posixpath.normpath(posixpath.join(posixpath.dirname(rel),
-                                                           unquote(parts.path))))
+    return posixpath.normpath(posixpath.join(posixpath.dirname(rel), unquote(parts.path)))
+
+
+_MAX_STUB_HOPS = 8
+_UNSAFE_FRAGMENT = re.compile(r"[\s<>\x00-\x1f\x7f]")
+
+
+def _follow_stubs(local: str, stubs: dict):
+    """(source path of the packed page, fragment) a chain of skipped redirect stubs starting
+    at ``local`` ends on, or None for a loop, a chain past the bound or one that is not packed.
+    ``stubs`` maps a stub's source path to its meta-refresh target (a URL)."""
+    seen, fragment = set(), ""
+    for _ in range(_MAX_STUB_HOPS):
+        target = stubs.get(local)
+        if target is None or local in seen:
+            return None
+        seen.add(local)
+        url, _, frag = target.partition("#")
+        # entity-decoded page text lands inside the <...> destination: drop what could end it
+        fragment = (frag if frag and not _UNSAFE_FRAGMENT.search(frag) else "") or fragment
+        nxt = _local_path(url, local)
+        if nxt is None:
+            return None
+        if nxt not in stubs:
+            return nxt, fragment
+        local = nxt
+    return None
+
+
+def _page_link(dest: str, rel: str, page_of: dict, stubs: dict):
+    """Destination of a link from page ``rel`` to ``dest`` when it names a packed page (or a
+    skipped redirect stub that leads to one): that page's file relative to the linking one,
+    fragment kept; else None."""
+    path, sep, fragment = (dest[1:-1] if dest.startswith("<") else dest).partition("#")
+    local = _local_path(path, rel)
+    if local is None:
+        return None
+    if local in stubs:
+        followed = _follow_stubs(local, stubs)
+        if followed is None:
+            return None
+        local, stub_fragment = followed
+        if not sep and stub_fragment:
+            sep, fragment = "#", stub_fragment
+    target = page_of.get(local)
     if target is None:
         return None
     # <...> as in INDEX.md: the path as Read takes it; portable names hold no < > or newline.
     return f"<{posixpath.relpath(target, posixpath.dirname(page_of[rel]))}{sep}{fragment}>"
 
 
-def _link_pages(text: str, rel: str, page_of: dict) -> str:
+def _link_pages(text: str, rel: str, page_of: dict, stubs: dict) -> str:
     """``text`` (md) with each link definition that names a packed page pointing at its file."""
     body, definitions = split_definitions(text)
     if not definitions:
@@ -174,7 +218,7 @@ def _link_pages(text: str, rel: str, page_of: dict) -> str:
     lines = []
     for line in definitions.split("\n"):
         number, dest = DEFINITION.fullmatch(line).groups()
-        lines.append(f"[{number}]: {_page_link(dest, rel, page_of) or dest}")
+        lines.append(f"[{number}]: {_page_link(dest, rel, page_of, stubs) or dest}")
     return "\n\n".join(filter(None, (body, "\n".join(lines))))
 
 
@@ -197,6 +241,17 @@ def _alias_pages(aliases, input_dir: str, page_of: dict) -> dict:
     named.pop(None, None)
     return {os.path.relpath(path, input_dir).replace(os.sep, '/'): named[name]
             for path in aliases if (name := _page_name(path)) in named}
+
+
+def _stub_targets(stub_paths, input_dir: str) -> dict:
+    """Meta-refresh target of each skipped redirect stub, by source path."""
+    targets = {}
+    for path in stub_paths:
+        with open(path, 'rb') as fh:
+            target = redirect_target(fh.read(SCAN_BYTES))
+        if target is not None:
+            targets[os.path.relpath(path, input_dir).replace(os.sep, '/')] = target
+    return targets
 
 
 def owns_pages(output_dir: str) -> bool:
@@ -232,13 +287,14 @@ def _swap_in(new: str, dest: str) -> None:
 def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = False,
                 text_overrides=None, url_map=None, readiness_map=None, annotate=None,
                 with_header: bool = False, markdown: bool = False, page_meta=None,
-                aliases=()) -> str:
+                aliases=(), stub_paths=()) -> str:
     """Write ``pages/`` and ``INDEX.md`` for ``page_chunks`` output. Returns the index path.
 
     ``markdown`` writes HTML pages as Markdown (md) and counts their words
     without its markup; otherwise (txt) code blocks lose their fence, as in
-    txt chunks. In md a link to a packed page, or to one of the skipped
-    redirect ``aliases`` (source paths) of a packed page, points at its file.
+    txt chunks. In md a link to a packed page, to one of the skipped
+    redirect ``aliases`` (source paths) of a packed page, or to a skipped redirect
+    stub (``stub_paths``) that leads to one, points at its file.
     The caller checks ``owns_pages`` first. Raises OSError on any failed
     write, leaving the previous ``pages/`` in place.
     """
@@ -247,6 +303,7 @@ def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = Fals
     page_of = {c.files[0].relative_path: c.page_path for c in chunks}
     if markdown:
         page_of.update(_alias_pages(aliases, input_dir, page_of))
+    stubs = _stub_targets(stub_paths, input_dir) if markdown else {}
     os.makedirs(output_dir, exist_ok=True)
     root = os.path.realpath(output_dir)
     # Created like atomic_write's temp file: a fresh name, mode from the umask.
@@ -263,7 +320,7 @@ def write_pages(chunks, input_dir: str, output_dir: str, no_extract: bool = Fals
             if not markdown:
                 content = _plain_text(chunk.files[0], content)
             elif is_html(rel):
-                content = _link_pages(content, rel, page_of)
+                content = _link_pages(content, rel, page_of, stubs)
             words = count_words(content, markdown and is_html(rel))
             url = (url_map or {}).get(rel, "")
             text = annotate(rel, content) if annotate else content

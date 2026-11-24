@@ -3,9 +3,12 @@
 import json
 import logging
 import pytest
+from pathlib import Path
+from unittest.mock import patch
 from click.testing import CliRunner
 
 from dograpper.cli import cli
+from dograpper.lib.playwright_crawl import CrawlResult
 from dograpper.utils.logger import setup_logger
 
 @pytest.fixture(autouse=True)
@@ -21,6 +24,9 @@ def _restore_logger():
 HTML = {"content-type": "text/html"}
 WORDS = " ".join(["documentation"] * 40)
 PAGE = f"<html><body><main><h1>Home</h1><p>{WORDS}</p></main></body></html>".encode()
+
+
+LINKED = PAGE.replace(b"</main>", b'<a href="/b.html">b</a></main>')  # two pages: one alone triggers the Playwright layer
 
 
 def _docs(tmp_path):
@@ -69,6 +75,64 @@ def test_quiet_download_and_sync_print_nothing(server, tmp_path):
     assert "=== Step 1: Download ===" in loud_sync.stdout
     assert sync.exit_code == loud_sync.exit_code == 0, sync.output
     assert sync.stdout == ""
+
+
+def _assert_quiet_like_loud(tmp_path, args):
+    """The same successful `download` with and without -q: same exit code, empty stdout."""
+    loud = CliRunner().invoke(cli, ["download", *args, "-o", str(tmp_path / "loud")])
+    quiet = CliRunner().invoke(cli, ["-q", "download", *args, "-o", str(tmp_path / "quiet")])
+    assert "Download complete" in loud.output
+    assert quiet.exit_code == loud.exit_code == 0, quiet.output
+    assert quiet.stdout == ""
+
+
+def test_quiet_download_wget_path_prints_nothing(tmp_path):
+    from tests.test_download import _fake_wget  # the suite's wget stand-in
+
+    def popen(cmd, *a, **kw):  # a wget that mirrored two pages into the -P directory
+        out = Path(next(a for a in cmd if a.startswith("--directory-prefix=")).split("=", 1)[1])
+        for name in ("index.html", "b.html"):
+            (out / "example.com").mkdir(parents=True, exist_ok=True)
+            (out / "example.com" / name).write_bytes(PAGE)
+        return _wget_proc()
+
+    from tests.test_download import _wget_proc
+    with _fake_wget(), patch("subprocess.Popen", side_effect=popen), \
+            patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
+            patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
+            patch("dograpper.commands.download.is_spa", return_value=False):
+        _assert_quiet_like_loud(tmp_path, ["http://example.com/"])
+
+
+def test_quiet_download_fire_engine_path_prints_nothing(tmp_path):
+    from tests.test_fire_engine import FakeResp, FakeSession  # curl_cffi's stand-in
+
+    class Site(FakeSession):
+        def request(self, method, url, **kw):
+            self.resp = (FakeResp(404, {}, b"") if url.endswith("/robots.txt")
+                         else FakeResp(200, HTML, LINKED if url.endswith("example.com/") else PAGE))
+            return super().request(method, url, **kw)
+
+    with patch("dograpper.lib.fire_engine.fetcher._default_session_factory",
+               side_effect=lambda imp, timeout: Site(None)):
+        _assert_quiet_like_loud(tmp_path, ["http://example.com/", "--downloader", "fire-engine",
+                                           "--delay", "0"])
+
+
+def test_quiet_download_playwright_path_prints_nothing(tmp_path):
+    def crawl(url, out, *a, **kw):  # the Playwright crawl's result, no browser
+        files = []
+        for name in ("a.html", "b.html"):
+            f = Path(out) / name
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(PAGE)
+            files.append(str(f))
+        return CrawlResult(True, str(out), files, [], 0)
+
+    with patch("dograpper.commands.download.fetch_llms_txt", return_value=[]), \
+            patch("dograpper.commands.download.fetch_sitemap", return_value=[]), \
+            patch("dograpper.commands.download.run_playwright_crawl", side_effect=crawl):
+        _assert_quiet_like_loud(tmp_path, ["http://example.com/", "--headless"])
 
 
 def test_eval_quiet_prints_nothing(tmp_path):

@@ -517,6 +517,11 @@ records none); a `gone` file, and a file of the previous run that was
 requested without being kept, has `"url": ""`, and a `gone` file has no
 `size`. A run that fails leaves the previous report as it was.
 
+When the engine's result looks client-rendered and the browser pass runs, it
+rewrites the files the report would describe: the run writes no report, removes
+an `hts-changes.json` an earlier run left in `-o`, prints `Change report
+skipped: the browser pass rewrote the files` and keeps its exit code.
+
 **`--do-not-recatch` (HTTrack `-%n`, off).** A recorded file other than a
 page, a script or a stylesheet that was erased or emptied since is not fetched
 again: a missing one is created empty, and its URL is listed under `Errors` as
@@ -1393,8 +1398,14 @@ out/
   relative to the linking file and written `<...>` as in `INDEX.md`
   (`[1]: <../inventory/ItemContainer.md#getItems()>`), so it can be opened as
   written; a link to a redirect alias that `pack` skipped points at its
-  target's file. A link to anything else (an absolute URL, a file outside the
-  pack) keeps its target as the page wrote it.
+  target's file, and a link to a redirect stub that `pack` skipped points at
+  the packed page its meta refresh names (the target is resolved from the
+  stub's own location, a chain of stubs is followed up to 8 hops; a loop, a
+  longer chain, or a target that is absolute, root-relative, outside the input,
+  carries a query or is not packed leaves the link as written). The link's own
+  fragment wins; without one, the stub target's fragment is kept. A link to
+  anything else (an absolute URL, a file outside the pack) keeps its target as
+  the page wrote it.
 - **Whole pages.** Pages are never split and lines never wrapped: a page
   larger than one `Read` call takes stays reachable with `grep -n` plus a
   `Read` with an offset. There is no word cap, no chunk cap and no size
@@ -2014,7 +2025,8 @@ Warnings appear when:
   and leaves them out, in both layouts and in `--dry-run`; the summary counts
   them (`Redirect stubs: N`, and in `Files excluded`), apart from the MediaWiki
   `Redirect aliases`; if every file is one, `pack` fails. A page with a refresh
-  and more text is packed. Links to a skipped stub are not rewritten.
+  and more text is packed. In the `md` page layout, links to a skipped stub
+  are rewritten to the page it redirects to (see **Links**).
 - An individual file exceeds `--max-words-per-chunk` (it goes alone
   into a chunk, overshooting the stated limit).
 - Total chunks exceed `--max-chunks` (nothing is discarded — every
