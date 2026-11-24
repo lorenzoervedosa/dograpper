@@ -461,3 +461,22 @@ def test_the_rules_of_a_response_never_spare_an_expired_cookie_at_save(tmp_path)
     jar.take("http://h.test/", _set_cookies("a=1"))
     jar.save()
     assert "\told\t" not in path.read_text()
+
+
+@pytest.mark.parametrize("login", [False, True])
+def test_an_idn_start_host_binds_the_jar_in_its_wire_form(tmp_path, monkeypatch, login):
+    """The Fetcher asks the jar with the host it puts on the wire (IDNA, wire_host); the
+    jar is bound to that same form, so an IDN start URL sends, takes and keeps the login's
+    cookies. No DNS: the jar alone, as the Fetcher calls it."""
+    from dograpper.commands import _run_jar
+    from dograpper.commands._run_jar import RunJar
+    path = tmp_path / "cookies.txt"
+    path.write_text("xn--bcher-kva.example\tFALSE\t/\tFALSE\t0\tf\t1\n")
+    monkeypatch.setattr(_run_jar, "run_browser_login", lambda url, wait: (
+        [{"name": "l", "value": "1", "domain": "xn--bcher-kva.example", "path": "/",
+          "expires": -1, "httpOnly": False, "secure": False}], "UA/1"))
+    _, jar = RunJar("https://bücher.example:8443/docs/", str(path), "", login).open(
+        build_policy())
+    jar.take("https://xn--bcher-kva.example:8443/docs/", _set_cookies("t=1; Path=/"))
+    want = "f=1; l=1; t=1" if login else "f=1; t=1"
+    assert jar.header("https://xn--bcher-kva.example:8443/docs/") == want

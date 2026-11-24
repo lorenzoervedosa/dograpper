@@ -12,10 +12,22 @@ from urllib.parse import urlsplit
 import click
 
 from ..lib.httrack.cookies import Jar, load_jar
+from ..lib.httrack.fetcher import wire_host
 from ..lib.httrack.policy import HttrackPolicy
 from ..lib.playwright_crawl import run_browser_login
 
 logger = logging.getLogger(__name__)
+
+
+def _wire_hostname(url: str) -> str | None:
+    """The start host as the Fetcher asks the jar for it: the name on the wire (IDNA,
+    wire_host), lowercase, without port. One IDNA cannot encode keeps its own form: no
+    request reaches it either (the Fetcher calls its URL invalid)."""
+    parts = urlsplit(url)
+    try:
+        return urlsplit("//" + wire_host(parts)).hostname
+    except ValueError:
+        return parts.hostname
 
 
 def _press_enter() -> None:
@@ -36,7 +48,7 @@ class RunJar:
 
     def __init__(self, url: str, cookies: str | None, note: str, browser_login: bool):
         self._url, self._path, self._note, self._login = url, cookies, note, browser_login
-        self._host = urlsplit(url).hostname  # the jar's cookies go to the start host alone
+        self._host = _wire_hostname(url)  # the jar's cookies go to the start host alone
         self.jar: Jar | None = None
 
     def open(self, policy: HttrackPolicy) -> tuple[HttrackPolicy, Jar | None]:
