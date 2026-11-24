@@ -380,6 +380,7 @@ stays `0.0.0.dev0`.
 ### Fixed
 
 - `dograpper docs`: every usage line on the page reads `dograpper <command> …` instead of `cli <command> …`. ([#180])
+- `download --downloader httrack --headless` (and the automatic browser fallback): the redirect of a page reached by a link is requested with the same `Sec-Fetch-Site` (and link metadata) as in the recursive crawl, instead of as if the page were the start URL. ([#173])
 - `download --downloader httrack --changes`, when the result looks client-rendered and the browser pass runs, writes no `hts-changes.json` (it described the engine's shell, not the rendered files), removes one an earlier run left in `-o`, and prints `Change report skipped: the browser pass rewrote the files`. ([#172])
 - `download --headless` (also with `--downloader httrack`, and `sync`) without an installed Chromium prints one line naming `dograpper doctor --install` and exits 1, instead of a Playwright traceback; any other browser launch failure prints Playwright's first line. ([#166])
 - `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
@@ -640,6 +641,7 @@ stays `0.0.0.dev0`.
 [#78]: https://github.com/lorenzoervedosa/dograpper/issues/78
 [#166]: https://github.com/lorenzoervedosa/dograpper/issues/166
 [#172]: https://github.com/lorenzoervedosa/dograpper/issues/172
+[#173]: https://github.com/lorenzoervedosa/dograpper/issues/173
 [#159]: https://github.com/lorenzoervedosa/dograpper/issues/159
 [#167]: https://github.com/lorenzoervedosa/dograpper/issues/167
 [#160]: https://github.com/lorenzoervedosa/dograpper/issues/160

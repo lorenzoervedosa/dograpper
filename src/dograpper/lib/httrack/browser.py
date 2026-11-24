@@ -22,9 +22,10 @@ from dograpper.utils.redact import redact_url
 from .crawl import (RunResponses, extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
                     stamp)
 from .fetcher import Fetcher
-from .links import url_key
+from .links import page_links, url_key
 from .mirror import outside, rescope, skipped_by_extension, start_rule
 from .naming import NameRegistry, mime_type
+from .policy import NAVIGATION, FetchMeta
 from .report import RunReport
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,9 @@ class Navigator:
         self._pages: dict[str, str] = {}  # the HTML pages among them, for relink
         self._local: dict[str, str] = {}  # url_key -> saved file
         self._referers: dict[str, str] = {}  # link -> the page that first linked it
+        # link -> its FetchMeta there; the page is also the initiator of its redirect chain
+        self._metas: dict[str, FetchMeta] = {}
+        self._page_metas: dict[str, FetchMeta] = {}  # url_key -> meta of the armed page's links
         self.records: dict[str, dict] = {}  # saved file -> manifest RECORD_FIELDS
 
     def context_options(self) -> dict:
@@ -83,11 +87,15 @@ class Navigator:
     def follows(self, url: str, page: str) -> bool:
         """Whether the crawl follows `url`, a link of `page`, as mirror_site queues one: in
         scope (mirror.outside) and not a non-page type --include-extensions leaves out.
-        `page` is then its Referer (the first page linking it, as HTTrack sends it)."""
+        `page` is then its Referer (the first page linking it, as HTTrack sends it), and its
+        FetchMeta is what the engine's parse of that page gives the link (a link only the
+        render added is a plain navigation)."""
         if outside(url, self._start, self._rule, self.filters) is not None \
                 or skipped_by_extension(url, self._exts):
             return False
-        self._referers.setdefault(url, page)
+        if url not in self._referers:
+            self._referers[url] = page
+            self._metas[url] = self._page_metas.get(url_key(url), NAVIGATION)
         return True
 
     def _redirect_ok(self, url: str, nxt: str) -> bool:
@@ -117,13 +125,21 @@ class Navigator:
         else:
             outcome, final, res = fetch_page(url, self.fetcher, self.report, self._lock,
                                              self._redirect_ok,
-                                             referer=self._referers.get(url))
+                                             referer=self._referers.get(url),
+                                             meta=self._metas.get(url, NAVIGATION),
+                                             front=self._front or self._seeded,
+                                             initiator=self._referers.get(url))
         if outcome != "ok":
             return None
         saved = self._local.get(url_key(final))
         if saved is not None:  # a redirect to a page already saved: its links lead there too
             self._local[url_key(url)] = saved
         self._armed, self._last = res, (final, res)
+        policy = self.fetcher.policy
+        self._page_metas = {} if not _is_page(res) else {
+            url_key(link.url): link.meta for link in reversed(page_links(
+                res.body, final, robots=policy.obey_robots, parse_scripts=False,
+                extended_parsing=False))}  # reversed: the first link to a URL wins
         return final
 
     def initiated(self) -> list[str]:
