@@ -22,6 +22,22 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-24 — `--cookies`: what the jar does where HTTrack and the brief are silent (#169)
+
+- **Decision:**
+  - a malformed cookies.txt line is a usage error (exit 2) naming its line number, never its content; HTTrack skips the line and leaves the file unchanged at the end;
+  - a missing `FILE` is an empty jar, created at the end of the run (mode `0600`);
+  - the file is read and written as latin-1, not as UTF-8 with `errors="replace"`: every byte round-trips to the wire and back to the file, and no byte can fail to decode, which is contract 7's purpose;
+  - the jar is written back after a failed run too, as HTTrack's exit macro does (htscore.c:134-147); a run refused with a usage error before its first request (`--headless` with `--cache`, a bad jar) reads and writes no jar;
+  - robots.txt and the discovery requests carry the matching cookies, as every HTTrack request does;
+  - the browser pass merges back every cookie its context holds, a subresource's from another host included;
+  - the `Cookie` line goes after the `--header` lines, last, as `http_sendhead` writes it (htslib.c:1401-1412), read in the clone authorised on #170.
+- **Why:** the Agent Brief and the 2026-11-24 decisions fix the rest; these are the gaps, each filled with the louder or the more HTTrack-faithful option.
+- **Rejected:**
+  - `MozillaCookieJar` for the file: it drops an expiry-0 session cookie, forgets the HttpOnly of a `Set-Cookie` and quotes a bad line, value included, in its error (probed on Python 3.10 and 3.13);
+  - skipping bad lines as HTTrack does: a silent fallback that drops a cookie.
+- **Pending:** none.
+
 ## 2026-11-24 — Redirect-stub links in the page layout (#174)
 
 - **Decision:** the skipped stubs live in a separate `stubs` dict (source path → meta-refresh target), not in `page_of`; in a chain the fragment of the last hop that has one wins; an empty `#` on the link counts as a fragment, so the stub's is not used; `redirect_target` unescapes HTML entities in the target; a stub fragment holding `<`, `>`, whitespace or a control character is dropped (the link keeps no fragment from the stub).

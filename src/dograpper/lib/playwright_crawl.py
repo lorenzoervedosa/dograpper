@@ -244,6 +244,8 @@ def run_playwright_crawl(
                     navigator.error(current_url, e)
             progress.update(done=len(files_downloaded), queued=len(to_visit), last_url=current_url)
                 
+        if navigator is not None:  # the context's cookies are gone once the browser closes
+            navigator.detach(context)
         browser.close()
     progress.finish()
     if navigator is not None:

@@ -240,9 +240,10 @@ def _sync_httrack(runner, args):
     seen = {}
 
     def fake_run(url, output, depth, delay, ext, headless, verbose, policy_kw,
-                 from_config, discover, filters, previous=None):
+                 from_config, discover, filters, previous=None, **session):
         seen["policy_kw"] = policy_kw
         seen["from_config"] = from_config
+        seen["session"] = session
         return 0, 0, [], {}, {}
 
     with patch("dograpper.commands.download.run_httrack", fake_run):
@@ -297,3 +298,18 @@ def test_sync_header_cli_list_replaces_the_json_one():
         assert result.exit_code == 0, result.output
         assert seen["policy_kw"]["headers"] == (("X-Cli", "2"),)
         assert "header" not in seen["from_config"]
+
+
+def test_sync_forwards_cookies_from_the_cli_over_the_json():
+    """#169: --cookies is an [httrack] flag sync forwards; the CLI beats the config."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        with open(".dograpper.json", "w", encoding="utf-8") as f:
+            json.dump({"download": {"downloader": "httrack", "cookies": "json.txt"}}, f)
+        result, seen = _sync_httrack(runner, [])
+        assert result.exit_code == 0, result.output
+        assert seen["session"] == {"cookies": "json.txt"} and "cookies" in seen["from_config"]
+        result, seen = _sync_httrack(runner, ["--cookies", "cli.txt"])
+        assert result.exit_code == 0, result.output
+        assert seen["session"] == {"cookies": "cli.txt"}

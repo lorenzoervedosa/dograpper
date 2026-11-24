@@ -292,6 +292,16 @@ stays `0.0.0.dev0`.
   one name on two lines, a malformed header, a CR, LF or NUL in a value, `Host`, `Content-Length`,
   `Transfer-Encoding` or `Connection`, and `--header` under `wget` are usage
   errors (exit 2) whose message never quotes the value. ([#136])
+- `download --downloader httrack --cookies FILE` (and `sync`, and `"cookies"` in
+  `.dograpper.json`): a Netscape cookies.txt jar, as HTTrack `-%K`. The cookies
+  that match a request go in its last header, each response's `Set-Cookie` is
+  taken in, and the jar is written back to `FILE` at the end of the run,
+  `#HttpOnly_` lines and session cookies kept; a file dograpper creates is
+  owner-only (`0600`), an existing one keeps its mode. A `--header 'Cookie: …'`
+  line wins over the jar; under the browser pass the jar goes into the browser
+  and comes back merged. Cookie values never reach the logs, the report or the
+  manifest. `--cookies` under `--downloader wget` or `fire-engine` exits 2, as
+  does a malformed line in the file. ([#169])
 
 ### Changed
 
@@ -656,3 +666,4 @@ stays `0.0.0.dev0`.
 [#180]: https://github.com/lorenzoervedosa/dograpper/issues/180
 [#174]: https://github.com/lorenzoervedosa/dograpper/issues/174
 [#183]: https://github.com/lorenzoervedosa/dograpper/issues/183
+[#169]: https://github.com/lorenzoervedosa/dograpper/issues/169

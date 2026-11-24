@@ -554,6 +554,14 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--do-not-recatch` | off | Leave a recorded non-page file erased since empty instead of fetching it (HTTrack `-%n`) |
 | `--changes` | off | Write `hts-changes.json` in `-o`: what this run left new, changed, unchanged or gone (HTTrack `-%d`, see "Change report") |
 
+`[httrack]` flags: `httrack` only, so an error under `--downloader wget` and
+under `fire-engine` alike, on the command line or set away from its default in
+`.dograpper.json`:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--cookies FILE` | — | Netscape cookies.txt jar, read before the run and written back at its end (HTTrack `-%K`, see "Cookies") |
+
 **Request headers (`--header`, HTTrack `-%X`).** `--header 'Name: value'`,
 repeatable, or a `"header"` list in `.dograpper.json` (a list given on the
 command line replaces the config one), adds a header to every request,
@@ -579,6 +587,25 @@ position) and never quotes the value, which can carry a credential. A
 `--user-agent` value with CR, LF or NUL is refused the same way. Under
 `--headless`, the headers reach every navigation, which the profile fetches,
 but not the browser's own subresource requests.
+
+**Cookies (`--cookies FILE`, HTTrack `-%K`).** `FILE` (or `"cookies"` in
+`.dograpper.json`) is a Netscape cookies.txt, as curl and the browser
+cookie-export extensions write it, `#HttpOnly_` lines included; a missing file
+is an empty jar. Every request, robots.txt included, carries the cookies that
+match its host, path and scheme (a `Secure` one over `https://` only, a
+host-only one never on a subdomain) in one `Cookie` header, the last of the
+request, after your `--header` lines, as HTTrack writes it. A `--header
+'Cookie: …'` line wins: the jar is not sent on that request. Each response's
+`Set-Cookie` is taken in, and the next request sends it. At the end of the
+run, a failed one included, the jar is written back to `FILE`: `#HttpOnly_`
+lines and session cookies kept (expiry `0`, as curl writes them), expired ones
+dropped. A `FILE` dograpper creates is owner-only (mode `0600`); an existing
+one keeps its mode. Cookie values never appear in the logs, the report or the
+manifest; a malformed line is a usage error (exit 2) that names its number,
+never its content. Under the browser pass ("Playwright under the profile"),
+the jar goes into the browser before the first page opens, and what the
+browser holds at the end (the cookies a page's scripts or subresources set) is
+merged back into it before it is written.
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -1516,6 +1543,7 @@ dograpper sync <url> -o <dir> [options]
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
 | `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--header`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--cookies` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1763,7 +1791,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl (or of `httrack --headless`'s Playwright crawl), refused/challenged; `fire-engine`: `--headless`, a result that looks client-rendered, or no `fire-engine` extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a malformed line in the `--cookies` file; a `[httrack]` flag (`--cookies`) under any downloader but `httrack`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |

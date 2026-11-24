@@ -29,8 +29,8 @@ URLS = [f"http://example.com/p{i}" for i in range(5)]
 class FakeFetcher:
     instances: list = []
 
-    def __init__(self, policy):
-        self.policy = policy
+    def __init__(self, policy, cookies=None):
+        self.policy, self.cookies = policy, cookies
         self.gets: list = []
         self.robots_calls: list = []
         FakeFetcher.instances.append(self)
@@ -123,6 +123,31 @@ def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     res = run(str(tmp_path / "o"), flag)
     assert res.exit_code == 2
     assert f"{flag.split('=')[0]} requires --downloader httrack or fire-engine" in res.output
+
+
+@pytest.mark.parametrize("downloader", ["wget", "fire-engine"])
+@pytest.mark.parametrize("config", [False, True])
+@pytest.mark.parametrize("flag, key, value", [("--cookies", "cookies", "c.txt")])
+def test_httrack_only_flag_under_another_downloader_is_usage_error(tmp_path, downloader,
+                                                                   config, flag, key, value):
+    """#169: the [httrack] flags have no fire-engine counterpart (#152) nor a wget one."""
+    if config:
+        res = run(str(tmp_path / "o"), "--downloader", downloader,
+                  config=_config(tmp_path, **{key: value}))
+    else:
+        res = run(str(tmp_path / "o"), "--downloader", downloader, f"{flag}={value}")
+    assert res.exit_code == 2
+    assert f"{flag} requires --downloader httrack" in res.output
+    assert not os.path.exists(tmp_path / value)
+
+
+def test_httrack_only_options_tuple_matches_download_and_sync():
+    from dograpper.commands._httrack_profile import HTTRACK_OPTIONS
+    from dograpper.commands.sync import sync
+    tagged = {p.name for p in download.params
+              if (getattr(p, "help", None) or "").startswith("[httrack] ")}
+    assert tagged == set(HTTRACK_OPTIONS)
+    assert set(HTTRACK_OPTIONS) <= {p.name for p in sync.params}
 
 
 def test_httrack_flag_in_config_with_wget_is_usage_error(tmp_path):
@@ -624,7 +649,7 @@ def test_discovery_checks_robots_before_fetching_and_uses_robots_kind(tmp_path):
         seen["extra"] = tuple(extra_candidates)
         return []
 
-    with patch(f"{P}.Fetcher", lambda policy: f), patch(f"{P}.warn_if_old_openssl"), \
+    with patch(f"{P}.Fetcher", lambda policy, cookies=None: f), patch(f"{P}.warn_if_old_openssl"), \
          patch("dograpper.commands.download.fetch_llms_txt", side_effect=llms), \
          patch("dograpper.commands.download.fetch_sitemap", side_effect=sm), \
          patch(f"{P}.mirror_site", side_effect=_no_crawl) as ms:
@@ -731,7 +756,7 @@ def test_escape_sequence_in_robots_sitemap_line_never_reaches_output(tmp_path):
                          "Sitemap: http://evil.invalid/\x1b[7mINJECTED\x1b[0m.xml\n"
                          "Sitemap: http://example.com/\x1b[2Jsm.xml\n")
     f, calls = _fetcher_with(rules, status=404)
-    with patch(f"{P}.Fetcher", lambda policy: f), patch(f"{P}.warn_if_old_openssl"), \
+    with patch(f"{P}.Fetcher", lambda policy, cookies=None: f), patch(f"{P}.warn_if_old_openssl"), \
          patch(f"{P}.mirror_site", side_effect=_no_crawl) as ms:
         res = run(str(tmp_path / "o"), "--downloader", "httrack")
     assert res.exit_code == 1 and ms.called  # nothing discovered: the crawl (stubbed) ran

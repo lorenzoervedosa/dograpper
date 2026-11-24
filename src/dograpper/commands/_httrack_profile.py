@@ -13,6 +13,7 @@ import click
 from ..lib.config_loader import is_explicit
 from ..lib.httrack.browser import Navigator
 from ..lib.httrack.changes import CHANGES_FILE
+from ..lib.httrack.cookies import Jar, load_jar
 from ..lib.httrack.crawl import MAX_REDIRECTS, RunResponses, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
@@ -34,6 +35,9 @@ PROFILE_OPTIONS = ('user_agent', 'header', 'no_robots', 'connections', 'max_conn
                    'max_bandwidth', 'timeout', 'retries', 'max_links', 'max_retry_after',
                    'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
                    'cache', 'updatehack', 'do_not_recatch', 'changes')
+# The [httrack] options of `download`, which fire-engine lacks (#152); sync forwards them too.
+# Not policy fields: the profile runner takes them (run_httrack keyword arguments).
+HTTRACK_OPTIONS = ('cookies',)
 # --no-X flags: the policy holds the positive switch
 _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
             'no_extended_parsing': 'extended_parsing'}
@@ -52,12 +56,14 @@ def config_note(from_config: bool) -> str:
 
 
 def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
-    """Return (policy_kw, from_config) for the profile options. A value not set on the
-    command line goes through its option's click type (ranges, booleans), so config
-    gets the CLI's checks and messages; under wget a profile option given on the
-    command line, or set away from its default in config, is a usage error."""
-    params = [p for p in ctx.command.params if p.name in PROFILE_OPTIONS]
-    from_config = frozenset(k for k in (*PROFILE_OPTIONS, 'delay') if not is_explicit(ctx, k))
+    """Return (policy_kw, from_config, session) for the profile options, `session` the
+    HTTRACK_OPTIONS for run_httrack. A value not set on the command line goes through its
+    option's click type (ranges, booleans), so config gets the CLI's checks and messages;
+    under wget a profile option, and under any downloader but httrack an [httrack] one,
+    given on the command line or set away from its default in config, is a usage error."""
+    names = (*PROFILE_OPTIONS, *HTTRACK_OPTIONS)
+    params = [p for p in ctx.command.params if p.name in names]
+    from_config = frozenset(k for k in (*names, 'delay') if not is_explicit(ctx, k))
     values = {}
     for param in params:
         value = merged_params[param.name]
@@ -76,10 +82,13 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
                     e.message, ctx,
                     param_hint=f"'{_flag(param.name)}'{FROM_CONFIG}") from None
         values[param.name] = value
-    if downloader == 'wget':
-        for param in params:
-            if param.name not in from_config or values[param.name] != param.default:
-                raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack or fire-engine")
+    for param in params:
+        only_httrack = param.name in HTTRACK_OPTIONS
+        allowed = downloader == 'httrack' if only_httrack else downloader != 'wget'
+        if not allowed and (param.name not in from_config or values[param.name] != param.default):
+            needs = "httrack" if only_httrack else "httrack or fire-engine"
+            raise click.UsageError(f"{_flag(param.name)} requires --downloader {needs}")
+    session = {k: values.pop(k) for k in HTTRACK_OPTIONS}
     header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
     user_agent = checked_user_agent(values['user_agent'],
                                     config_note('user_agent' in from_config))
@@ -87,7 +96,7 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
                                               "--header 'User-Agent: …'": header_ua})
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     policy_kw['headers'] = headers
-    return policy_kw, from_config
+    return policy_kw, from_config, session
 
 
 def _build_policy(delay, policy_kw, from_config):
@@ -302,12 +311,49 @@ def _front_failed(discovered: bool, challenged: bool) -> str:
     return f"httrack profile: {cause}. See the README section \"Downloader profiles\"."
 
 
+def _jar(path: str | None, from_config) -> Jar | None:
+    """The --cookies jar, loaded before any request; a bad line is a usage error naming
+    its number, never its content (lib/httrack/cookies.py)."""
+    if path is None:
+        return None
+    try:
+        return load_jar(path)
+    except ValueError as e:
+        raise click.UsageError(f"--cookies {path}: {e}{config_note('cookies' in from_config)}")
+    except OSError as e:
+        raise click.ClickException(f"--cookies: cannot read {path}: {e.strerror or e}")
+
+
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
-                policy_kw, from_config, discover, filters, previous: Manifest | None = None
+                policy_kw, from_config, discover, filters, previous: Manifest | None = None,
+                *, cookies: str | None = None
                 ) -> Tuple[int, int, List[str], Dict[str, str], Dict[str, dict]]:
     """The httrack profile: run_profile over the stdlib Fetcher, HTTrack's identity, with
-    the Playwright crawl under its policy for --headless and client-rendered sites."""
+    the Playwright crawl under its policy for --headless and client-rendered sites.
+    `cookies` (--cookies FILE) is the jar the Fetcher sends and fills, written back to
+    FILE when the run ends, a failed one included (HTTrack -%K)."""
     warn_if_old_openssl()
-    return run_profile("httrack", Fetcher, url, output, depth, delay, include_extensions,
-                       verbose, policy_kw, from_config, discover, filters, previous,
-                       front_failed=_front_failed, fallback=None, headless=headless)
+    jar, failed = None, True
+
+    def make_fetcher(policy):  # past run_profile's usage checks: a refused run reads no jar
+        nonlocal jar
+        jar = _jar(cookies, from_config)
+        return Fetcher(policy, cookies=jar)
+
+    try:
+        result = run_profile("httrack", make_fetcher, url, output, depth, delay,
+                             include_extensions, verbose, policy_kw, from_config, discover,
+                             filters, previous, front_failed=_front_failed, fallback=None,
+                             headless=headless)
+        failed = False
+        return result
+    finally:
+        if jar is not None:
+            try:
+                jar.save()
+            except OSError as e:
+                msg = f"--cookies: cannot write {jar.path}: {e.strerror or e}"
+                if failed:  # the run's own error stays the one shown
+                    logger.error(msg)
+                else:
+                    raise click.ClickException(msg) from None

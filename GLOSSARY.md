@@ -57,6 +57,12 @@ changed, unchanged or gone.
 _Avoid_: diff, changelog, delta (the pack's change gate), drift (the comparison
 of two readiness snapshots)
 
+**Cookie jar**:
+The cookies.txt file a download reads before its first request and writes back
+at its end (`--cookies`), with every cookie the run received.
+_Avoid_: session (the jar is a file, not a login), cookie store, cookie file
+(say which: the jar, or a browser's)
+
 ## Input
 
 **Page**:
