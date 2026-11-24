@@ -55,6 +55,7 @@ Entry format:
   - a control character (C0, HTAB and an obs-fold included, or DEL) in a `Set-Cookie` name, value or path refuses that cookie, as one in a browser cookie does; in the file it is a bad line (exit 2); the `Cookie` line passes `check_value` too, and a line that fails is that request's error, never sent, and the error names `Cookie` without the value (http.client's own refusal quoted it into the report);
   - a `Domain` attribute set by an IP host, or naming an IP or a name with no dot, refuses that cookie (`Domain=localhost` from `localhost` included: without the attribute it is a host-only cookie), and an IP host gets a domain cookie only when its domain is the host exactly; the public suffix list stays out (`docs/DEBT.md`);
   - a `Secure` cookie, and one named `__Secure-`/`__Host-`, is taken over https alone; beyond the brief, plain http also may not shadow, replace or erase a Secure one (RFC 6265bis 5.6 step 16, as HTTrack's `htslib.c:1983-1987`): that is how the review's http cookie overwrote the https session; the prefixes' other requirements (`__Host-`: no Domain, `Path=/`) are not checked;
+  - an expired `Set-Cookie` (`Max-Age=0`) on a dotless host erases the cookie the jar holds for that host, where the stdlib named it `<host>.local`;
 - **Why:** each was reproduced by the review; the tests run the failing case first.
 - **Rejected:** fixing the sub-sitemap rule of `sitemap_parser` instead (kept as it is, as decided).
 - **Pending:** none.

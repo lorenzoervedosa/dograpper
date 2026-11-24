@@ -377,3 +377,13 @@ def test_a_secure_cookie_is_taken_over_https_alone_and_plain_http_cannot_touch_o
     jar.take("http://h.test/", _set_cookies("s=; Path=/; Max-Age=0"))  # would erase it
     assert jar.header("https://h.test/") == "s=1; __Secure-a=1; __Host-b=1"
     assert jar.header("http://h.test/") is None
+
+
+def test_max_age_0_deletes_on_a_dotless_host():
+    """The stdlib deletes a host-only cookie as `<host>.local`, where a dotless host's is
+    not: `s=; Max-Age=0` from http://wiki/ must still erase s=1."""
+    from dograpper.lib.httrack.cookies import Jar
+    jar = Jar(None)
+    jar.take("http://wiki/", _set_cookies("s=1", "t=1"))
+    jar.take("http://wiki/", _set_cookies("s=; Max-Age=0"))
+    assert jar.header("http://wiki/") == "t=1"

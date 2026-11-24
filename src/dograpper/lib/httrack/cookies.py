@@ -127,11 +127,14 @@ def _overlap(a: str, b: str) -> bool:
 
 class _Store(http.cookiejar.CookieJar):
     """The stdlib's jar, its deletion (an expired Set-Cookie: make_cookies calls clear())
-    kept to what the request may erase: over plain http, never a Secure cookie (RFC 6265bis
-    5.6, htslib.c:1983-1987). `secure` is the request's scheme, set under the Jar's lock."""
-    secure = True
+    made right: a dotless host's cookie is named as the jar holds it, not `<host>.local`,
+    and over plain http no Secure cookie is erased (RFC 6265bis 5.6, htslib.c:1983-1987).
+    `host` and `secure` are the request's, set under the Jar's lock."""
+    host, secure = "", True
 
     def clear(self, domain=None, path=None, name=None):
+        if self.host and "." not in self.host and domain == self.host + ".local":
+            domain = self.host  # eff_request_host's name for it
         if not self.secure and name is not None and any(
                 c.secure for c in self if (c.domain, c.path, c.name) == (domain, path, name)):
             return
@@ -182,7 +185,7 @@ class Jar:
         if not self._binds(host):
             return
         with self._lock:
-            self._jar.secure = secure
+            self._jar.host, self._jar.secure = host, secure
             for cookie in self._jar.make_cookies(_Response(headers), request):
                 if not _clean(cookie.name, cookie.value, cookie.path):
                     continue  # a server must not make the next run's jar unreadable
