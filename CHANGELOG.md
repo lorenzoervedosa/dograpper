@@ -378,6 +378,7 @@ stays `0.0.0.dev0`.
 
 ### Fixed
 
+- `dograpper docs`: every usage line on the page reads `dograpper <command> …` instead of `cli <command> …`. ([#180])
 - `download --headless` (also with `--downloader httrack`, and `sync`) without an installed Chromium prints one line naming `dograpper doctor --install` and exits 1, instead of a Playwright traceback; any other browser launch failure prints Playwright's first line. ([#166])
 - `pack --bundle`: `IMPORT_GUIDE.md` lists the chunk files the run wrote (its `--prefix` and the extension of `--format`) instead of always `docs_chunk_NN.md`. ([#143])
 - `pack --api-records` help no longer names Javadoc alone; it points at the README list of supported generators. ([#141])
@@ -641,3 +642,4 @@ stays `0.0.0.dev0`.
 [#160]: https://github.com/lorenzoervedosa/dograpper/issues/160
 [#139]: https://github.com/lorenzoervedosa/dograpper/issues/139
 [#163]: https://github.com/lorenzoervedosa/dograpper/issues/163
+[#180]: https://github.com/lorenzoervedosa/dograpper/issues/180
