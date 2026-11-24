@@ -17,7 +17,7 @@ import threading
 from urllib.parse import urlsplit
 
 from dograpper.lib.url_filter import UrlFilters
-from dograpper.utils.redact import redact_url
+from dograpper.utils.redact import first_line, redact_url
 
 from .crawl import (RunResponses, extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
                     stamp)
@@ -192,8 +192,7 @@ class Navigator:
     def error(self, url: str, exc: Exception) -> None:
         """A page the browser failed to open or read (timeout, crash): an error of the report,
         without the Playwright call log that follows the first line."""
-        first = (str(exc).splitlines() or [repr(exc)])[0]
-        self.report.errors.append((redact_url(url), f"browser: {first}", None))
+        self.report.errors.append((redact_url(url), f"browser: {first_line(exc)}", None))
 
     def finish(self) -> None:
         """Rewrite the links between the saved pages (-K0) and set their file times, as the

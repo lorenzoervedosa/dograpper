@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.progress import ProgressReporter
 from dograpper.utils.http_headers import check_value
-from dograpper.utils.redact import redact_url
+from dograpper.utils.redact import first_line, redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def _launch(p, *, headless: bool):
     try:
         return p.chromium.launch(headless=headless)
     except Exception as e:
-        first = (str(e).splitlines() or [type(e).__name__])[0]
+        first = first_line(e)
         if "Executable doesn't exist" in first:
             raise RuntimeError(
                 "Chromium is not installed for Playwright. "

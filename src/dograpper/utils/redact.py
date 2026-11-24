@@ -20,6 +20,11 @@ NAVIGATION_PARAMS = frozenset({
 })
 
 
+def first_line(exc: BaseException) -> str:
+    """The first line of an error's message (Playwright appends a call log), else its type."""
+    return (str(exc).splitlines() or [type(exc).__name__])[0]
+
+
 def neutralize_controls(text: str, fmt: str = "\\x%02x") -> str:
     """Replace each C0, DEL or C1 control character with ``fmt % codepoint``, so text a
     server supplied cannot drive the terminal or log viewer it is printed to."""
