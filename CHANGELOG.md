@@ -294,8 +294,9 @@ stays `0.0.0.dev0`.
   errors (exit 2) whose message never quotes the value. ([#136])
 - `download --downloader httrack --cookies FILE` (and `sync`, and `"cookies"` in
   `.dograpper.json`): a Netscape cookies.txt jar, as HTTrack `-%K`. The cookies
-  that match a request go in its last header, each response's `Set-Cookie` is
-  taken in, and the jar is written back to `FILE` at the end of the run,
+  that match a request to the start URL's host go in its last header (no other
+  host gets any), its `Set-Cookie` is taken in, and the jar is written back to
+  `FILE` at the end of the run,
   `#HttpOnly_` lines and session cookies kept; a file dograpper creates is
   owner-only (`0600`), an existing one keeps its mode. A `--header 'Cookie: …'`
   line wins over the jar; under the browser pass the jar goes into the browser

@@ -593,12 +593,15 @@ but not the browser's own subresource requests.
 **Cookies (`--cookies FILE`, HTTrack `-%K`).** `FILE` (or `"cookies"` in
 `.dograpper.json`) is a Netscape cookies.txt, as curl and the browser
 cookie-export extensions write it, `#HttpOnly_` lines included; a missing file
-is an empty jar. Every request, robots.txt included, carries the cookies that
-match its host, path and scheme (a `Secure` one over `https://` only, a
-host-only one never on a subdomain) in one `Cookie` header, the last of the
-request, after your `--header` lines, as HTTrack writes it. A `--header
-'Cookie: …'` line wins: the jar is not sent on that request. Each response's
-`Set-Cookie` is taken in, and the next request sends it. At the end of the
+is an empty jar. Every request to the start URL's host, robots.txt included,
+carries the cookies that match its path and scheme (a `Secure` one over
+`https://` only, a host-only one never on a subdomain) in one `Cookie` header,
+the last of the
+request, after your `--header` lines, as HTTrack writes it. A request to any
+other host (discovery can fetch a sub-sitemap elsewhere) carries none, even the
+jar's cookies for that host, and its `Set-Cookie` never enters the jar. A
+`--header 'Cookie: …'` line wins: the jar is not sent on that request. Each
+`Set-Cookie` of the start host is taken in, and the next request sends it. At the end of the
 run, a failed one included, the jar is written back to `FILE`: `#HttpOnly_`
 lines and session cookies kept (expiry `0`, as curl writes them), expired ones
 dropped. A `FILE` dograpper creates is owner-only (mode `0600`); an existing

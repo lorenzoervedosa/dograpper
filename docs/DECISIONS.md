@@ -48,6 +48,14 @@ Entry format:
 - **Rejected:** sending `Origin` from the `Referer` page: the initiator is not always the referer (a redirect target keeps the original link's), so it would be a guess.
 - **Pending:** none.
 
+## 2026-11-24 — The cookie jar after the security review of the session flags (#169, #171)
+
+- **Decision:** the maintainer's decisions on #169 (2026-11-24), one fix each; where the code had to pick, it picked:
+  - the jar is bound to the start URL's host: a request to another host gets none of its cookies, and that host's `Set-Cookie` and the browser's cookies for it never enter the jar; the cookies the file holds for other hosts stay in the file, and the browser is given only the ones the start host gets, so a subresource request elsewhere carries none either;
+- **Why:** each was reproduced by the review; the tests run the failing case first.
+- **Rejected:** fixing the sub-sitemap rule of `sitemap_parser` instead (kept as it is, as decided).
+- **Pending:** none.
+
 ## 2026-11-24 — `--cookies`: what the jar does where HTTrack and the brief are silent (#169)
 
 - **Decision:**
@@ -55,7 +63,7 @@ Entry format:
   - a missing `FILE` is an empty jar, created at the end of the run (mode `0600`);
   - the file is read and written as latin-1, not as UTF-8 with `errors="replace"`: every byte round-trips to the wire and back to the file, and no byte can fail to decode, which is contract 7's purpose;
   - the jar is written back after a failed run too, as HTTrack's exit macro does (htscore.c:134-147); a run refused with a usage error before its first request (`--headless` with `--cache`, a bad jar) reads and writes no jar;
-  - robots.txt and the discovery requests carry the matching cookies, as every HTTrack request does;
+  - robots.txt and the discovery requests to the start host carry the matching cookies, as every HTTrack request does; superseded for other hosts by the security review (entry above): no other host gets any;
   - the browser pass merges back every cookie its context holds, a subresource's from another host included;
   - the `Cookie` line goes after the `--header` lines, last, as `http_sendhead` writes it (htslib.c:1401-1412), read in the clone authorised on #170.
   - the jar matches cookies itself, per RFC 6265 5.4, and uses `http.cookiejar` only to read `Set-Cookie`: the stdlib's policy reads a host without a dot (localhost, an intranet `wiki`) as `<host>.local`, so it sent such a host no cookie of the file or the browser and wrote the `.local` name back (lane review);

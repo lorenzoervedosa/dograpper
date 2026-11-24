@@ -244,3 +244,64 @@ def test_a_browser_cookie_beyond_latin1_goes_on_the_wire_and_back_as_utf8(tmp_pa
     jar.save()
     assert path.read_bytes().endswith("\tn\t日本\n".encode())
     assert load_jar(str(path)).to_browser()[0]["value"] == "日本"
+
+
+# -- the security review of the slice-A–C branch (maintainer decisions on #169, 2026-11-24) --
+
+def test_the_jar_goes_to_the_start_host_alone_even_for_a_cross_host_sub_sitemap(
+        server, http_server, tmp_path):
+    """Discovery may fetch a sub-sitemap on another host (sitemap_parser's path-prefix
+    rule); that request, and its robots.txt, carry none of the user's cookies, not even the
+    ones the jar holds for that host, and its Set-Cookie never enters the jar."""
+    from http.server import BaseHTTPRequestHandler
+    other = []
+
+    class Other(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            other.append((self.path, self.headers.get("Cookie")))
+            body = b"<urlset/>"
+            self.send_response(200)
+            self.send_header("Set-Cookie", "planted=P")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    port = http_server(Other).rsplit(":", 1)[1]
+    base, script, _ = server
+    index = (f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap>'
+             f'<loc>http://localhost:{port}/docs/sitemap.xml</loc></sitemap></sitemapindex>')
+    script["/robots.txt"] = (404, {}, b"")
+    script["/sitemap.xml"] = (200, {"Content-Type": "application/xml"}, index.encode())
+    script["/docs/"] = (200, {"Content-Type": "text/html"}, _page("a.html").encode())
+    script["/docs/a.html"] = (200, {"Content-Type": "text/html"}, _page("./").encode())
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("127.0.0.1\tFALSE\t/\tFALSE\t0\ta\tA0\n"
+                   "localhost\tFALSE\t/\tFALSE\t0\tb\tB0\n")
+
+    res = CliRunner().invoke(cli, ["download", f"{base}/docs/", "-o", str(tmp_path / "m"),
+                                   "--downloader", "httrack", "--cookies", str(jar),
+                                   "--disable-security-limits", "--max-conn-rate", "1000"])
+
+    assert res.exit_code == 0, res.output
+    assert "/docs/sitemap.xml" in [path for path, _ in other]  # the sub-sitemap was fetched
+    assert [cookie for _, cookie in other] == [None] * len(other)
+    assert "planted" not in jar.read_text() and "\tb\tB0" in jar.read_text()
+
+
+def test_a_jar_bound_to_the_start_host_keeps_to_it():
+    from dograpper.lib.httrack.cookies import Jar
+    jar = Jar(None, host="docs.test")
+    jar.take("http://other.test/", _set_cookies("o=1"))
+    jar.take("http://docs.test/", _set_cookies("d=1"))
+    jar.merge([{"name": "x", "value": "1", "domain": ".cdn.test", "path": "/",
+                "expires": -1, "httpOnly": False, "secure": False},
+               {"name": "p", "value": "1", "domain": ".test", "path": "/",
+                "expires": -1, "httpOnly": False, "secure": False}])
+    assert jar.header("http://other.test/") is None
+    assert jar.header("http://docs.test/") == "d=1; p=1"
+    assert sorted(c["name"] for c in jar.to_browser()) == ["d", "p"]

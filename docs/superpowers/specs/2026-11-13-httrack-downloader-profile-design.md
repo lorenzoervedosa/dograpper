@@ -541,8 +541,13 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     last of the request, after the `--header` lines (`http_sendhead`,
     htslib.c:1401-1412); a `--header 'Cookie: …'` line wins, and the jar is not
     sent on that request (htslib.c:1403);
-  - takes in every response's `Set-Cookie` (the stdlib's `http.cookiejar`
-    rules, host-only cookies kept to their host);
+  - takes in every `Set-Cookie` of the start host (the stdlib's
+    `http.cookiejar` reads it; matching is RFC 6265's, host-only cookies kept
+    to their host);
+  - the jar's cookies go on requests to the crawl's start host alone, and a
+    `Set-Cookie` from another host never enters it: discovery can fetch a
+    sub-sitemap on another host (user decision after the security review,
+    2026-11-24);
   - at the end of the run, a failed one included, the jar is written back to
     the same file, as HTTrack `-%K` does: `#HttpOnly_` lines and session
     cookies kept, expired ones dropped; a file dograpper creates is mode

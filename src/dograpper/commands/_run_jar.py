@@ -7,6 +7,7 @@ included: the jar goes back to the --cookies file then (HTTrack -%K).
 
 import dataclasses
 import logging
+from urllib.parse import urlsplit
 
 import click
 
@@ -35,6 +36,7 @@ class RunJar:
 
     def __init__(self, url: str, cookies: str | None, note: str, browser_login: bool):
         self._url, self._path, self._note, self._login = url, cookies, note, browser_login
+        self._host = urlsplit(url).hostname  # the jar's cookies go to the start host alone
         self.jar: Jar | None = None
 
     def open(self, policy: HttrackPolicy) -> tuple[HttrackPolicy, Jar | None]:
@@ -49,7 +51,7 @@ class RunJar:
                 raise click.ClickException(str(e))
             except ValueError as e:  # check_value: a User-Agent no header line can carry
                 raise click.ClickException(f"--browser-login: {e}")
-            jar = jar if jar is not None else Jar(None)  # no FILE: kept for the run alone
+            jar = jar if jar is not None else Jar(None, self._host)  # no FILE: the run's alone
             jar.merge(found)
             policy = dataclasses.replace(policy, user_agent=agent)
         self.jar = jar
@@ -59,7 +61,7 @@ class RunJar:
         if self._path is None:
             return None
         try:
-            return load_jar(self._path)
+            return load_jar(self._path, self._host)
         except ValueError as e:
             raise click.UsageError(f"--cookies {self._path}: {e}{self._note}")
         except OSError as e:

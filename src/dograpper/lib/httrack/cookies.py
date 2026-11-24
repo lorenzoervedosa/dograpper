@@ -72,15 +72,19 @@ def _cookie(domain, path, secure, expires, name, value, httponly) -> http.cookie
                                  {"HttpOnly": ""} if httponly else {})
 
 
+def _domain_match(host: str, domain: str) -> bool:
+    """RFC 6265 5.1.3: a host-only cookie's domain is the host itself; a domain cookie's
+    (leading dot) is the host or one of its parents."""
+    if not domain.startswith("."):
+        return host == domain
+    return host == domain[1:] or host.endswith(domain)
+
+
 def _matches(cookie: http.cookiejar.Cookie, host: str, path: str, secure: bool,
              now: float) -> bool:
-    """RFC 6265 5.4: domain-match (host-only: the host itself), path-match, Secure over
-    https only, not expired."""
-    domain, cpath = cookie.domain, cookie.path
-    if domain.startswith("."):
-        if host != domain[1:] and not host.endswith(domain):
-            return False
-    elif host != domain:
+    """RFC 6265 5.4: domain-match, path-match, Secure over https only, not expired."""
+    cpath = cookie.path
+    if not _domain_match(host, cookie.domain):
         return False
     if path != cpath and not path.startswith(cpath if cpath.endswith("/") else cpath + "/"):
         return False
@@ -88,8 +92,13 @@ def _matches(cookie: http.cookiejar.Cookie, host: str, path: str, secure: bool,
 
 
 class Jar:
-    def __init__(self, path: str | None):
+    """`host`: the crawl's start host. The jar's cookies go on requests to it alone, and only
+    its Set-Cookie and the browser's cookies for it come in (#169 security review: discovery
+    may fetch a sub-sitemap on another host). None: no host bound (a jar outside a run)."""
+
+    def __init__(self, path: str | None, host: str | None = None):
         self.path = path  # None: a jar for the run alone (--browser-login without --cookies)
+        self.host = host
         self._jar = http.cookiejar.CookieJar()
         self._lock = threading.Lock()  # the Fetcher's workers share the jar; so does its walk
 
@@ -98,6 +107,8 @@ class Jar:
         longer paths first, then the older cookie (RFC 6265 5.4)."""
         parts = urlsplit(url)
         host, path, now = parts.hostname or "", parts.path or "/", time.time()
+        if not self._binds(host):
+            return None
         with self._lock:
             sent = [c for c in self._jar if _matches(c, host, path, parts.scheme == "https",
                                                     now)]
@@ -111,11 +122,20 @@ class Jar:
         Domain each claims; one with no Domain is the host's own, dot or no dot."""
         request = urllib.request.Request(url)
         host = urlsplit(url).hostname or ""
+        if not self._binds(host):
+            return
         with self._lock:
             for cookie in self._jar.make_cookies(_Response(headers), request):
                 if not cookie.domain_specified:  # not the stdlib's `<host>.local`
                     cookie.domain = host
                 self._jar.set_cookie_if_ok(cookie, request)
+
+    def _binds(self, host: str) -> bool:
+        return self.host is None or host == self.host
+
+    def _for_host(self, domain: str) -> bool:
+        """Whether a cookie of `domain` is one the start host gets."""
+        return self.host is None or _domain_match(self.host, domain)
 
     def add(self, cookie: http.cookiejar.Cookie) -> None:
         with self._lock:
@@ -125,8 +145,8 @@ class Jar:
         """The jar as Playwright's context.add_cookies() takes it. A cookie whose bytes are
         no UTF-8 text cannot reach the browser: left out, and said (no value shown)."""
         out, skipped = [], 0
-        with self._lock:
-            cookies = list(self._jar)
+        with self._lock:  # no other host's cookie: a subresource request would carry it
+            cookies = [c for c in self._jar if self._for_host(c.domain)]
         for c in cookies:
             try:
                 name, value, path = (s.encode("latin-1").decode("utf-8")
@@ -147,8 +167,10 @@ class Jar:
 
     def merge(self, cookies: list[dict]) -> None:
         """Take in what a browser context holds (Playwright's context.cookies()): each one
-        replaces the jar's of the same domain, path and name."""
+        replaces the jar's of the same domain, path and name; another host's stays out."""
         for c in cookies:
+            if not self._for_host(_wire(c["domain"]).lower()):
+                continue
             expires = c.get("expires", -1)
             self.add(_cookie(_wire(c["domain"]), _wire(c["path"]), bool(c.get("secure")),
                              None if expires < 0 else int(expires), _wire(c["name"]),
@@ -169,10 +191,11 @@ class Jar:
         atomic_write_bytes(self.path, "".join(lines).encode("latin-1"), private=True)
 
 
-def load_jar(path: str) -> Jar:
-    """The jar of the cookies.txt at `path`, empty when there is no file yet. ValueError
-    names the bad line by number, never by its content (it holds a cookie value)."""
-    jar = Jar(path)
+def load_jar(path: str, host: str | None = None) -> Jar:
+    """The jar of the cookies.txt at `path` (bound to `host`, see Jar), empty when there is
+    no file yet. ValueError names the bad line by number, never by its content (it holds a
+    cookie value). Every cookie of the file stays in it, another host's too."""
+    jar = Jar(path, host)
     try:
         with open(path, "rb") as f:
             text = f.read().decode("latin-1")
