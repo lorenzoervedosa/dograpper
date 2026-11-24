@@ -387,3 +387,20 @@ def test_max_age_0_deletes_on_a_dotless_host():
     jar.take("http://wiki/", _set_cookies("s=1", "t=1"))
     jar.take("http://wiki/", _set_cookies("s=; Max-Age=0"))
     assert jar.header("http://wiki/") == "t=1"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX symlinks and permission bits")
+def test_a_jar_that_is_a_symlink_is_written_through_it(tmp_path):
+    """As curl and HTTrack write it: the link stays a link, its target gets the jar and
+    keeps its own mode."""
+    target = tmp_path / "real" / "cookies.txt"
+    target.parent.mkdir()
+    target.write_text("127.0.0.1\tFALSE\t/\tFALSE\t0\ta\t1\n")
+    os.chmod(target, 0o640)
+    link = tmp_path / "cookies.txt"
+    link.symlink_to(target)
+    jar = load_jar(str(link))
+    jar.take("http://127.0.0.1/", _set_cookies("b=2"))
+    jar.save()
+    assert link.is_symlink() and "\tb\t2\n" in target.read_text()
+    assert target.stat().st_mode & 0o777 == 0o640

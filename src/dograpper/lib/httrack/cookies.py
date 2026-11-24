@@ -23,6 +23,7 @@ file, and no byte can fail to decode (contract 7).
 import http.cookiejar
 import ipaddress
 import logging
+import os
 import re
 import threading
 import time
@@ -246,8 +247,9 @@ class Jar:
                              _wire(c["value"]), bool(c.get("httpOnly"))))
 
     def save(self) -> None:
-        """Write the jar back to its file: created owner-only (0600), an existing file's
-        mode kept; expired cookies left out, session ones kept (expiry 0, as curl)."""
+        """Write the jar back to its file (a symlink's target): created owner-only (0600),
+        an existing file's mode kept; expired cookies left out, session ones kept (expiry 0,
+        as curl)."""
         with self._lock:
             self._jar.clear_expired_cookies()
             cookies = sorted(self._jar, key=lambda c: (c.domain, c.path, c.name))
@@ -257,7 +259,9 @@ class Jar:
                 (HTTPONLY_PREFIX if _httponly(c) else "") + c.domain,
                 "TRUE" if c.domain.startswith(".") else "FALSE", c.path,
                 "TRUE" if c.secure else "FALSE", str(c.expires or 0), *_pair(c))) + "\n")
-        atomic_write_bytes(self.path, "".join(lines).encode("latin-1"), private=True)
+        # through a symlink, as curl and HTTrack write a jar: the target keeps its mode
+        atomic_write_bytes(os.path.realpath(self.path), "".join(lines).encode("latin-1"),
+                           private=True)
 
 
 def load_jar(path: str, host: str | None = None) -> Jar:

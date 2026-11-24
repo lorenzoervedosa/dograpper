@@ -613,7 +613,7 @@ line. At the end of the
 run, a failed one included, the jar is written back to `FILE`: `#HttpOnly_`
 lines and session cookies kept (expiry `0`, as curl writes them), expired ones
 dropped. A `FILE` dograpper creates is owner-only (mode `0600`); an existing
-one keeps its mode. Cookie values never appear in the logs, the report or the
+one keeps its mode, and a symlink is written through, to its target. Cookie values never appear in the logs, the report or the
 manifest; a malformed line is a usage error (exit 2) that names its number,
 never its content. Under the browser pass ("Playwright under the profile"),
 the jar goes into the browser before the first page opens, and what the
