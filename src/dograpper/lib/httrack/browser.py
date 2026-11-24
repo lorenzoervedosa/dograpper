@@ -82,9 +82,11 @@ class Navigator:
 
     def attach(self, context, page) -> None:
         """Route every request of `context`; `page` is the one the crawl saves. The
-        --cookies jar, the source of truth (#169), goes into the context first."""
+        --cookies jar, the source of truth (#169), goes into the context first, unless a
+        --header 'Cookie: …' line replaces it, as on the profile's own requests."""
         self._frame = page.main_frame
-        if self.fetcher.cookies is not None:
+        replaced = any(name.lower() == "cookie" for name, _ in self.fetcher.policy.headers)
+        if self.fetcher.cookies is not None and not replaced:
             context.add_cookies(self.fetcher.cookies.to_browser())
         context.route("**/*", self._route)
         context.on("response", self._response)

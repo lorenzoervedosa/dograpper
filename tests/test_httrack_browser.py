@@ -757,3 +757,25 @@ def test_no_jar_leaves_the_browser_context_alone(server, tmp_path, browser):
     crawl_with(base, tmp_path)
     ctx.add_cookies.assert_not_called()
     ctx.cookies.assert_not_called()
+
+
+def test_a_cookie_header_line_keeps_the_jar_out_of_the_browser_context(server, tmp_path,
+                                                                       browser):
+    """#169 security review: a --header 'Cookie: …' line replaces the jar in the browser
+    context too, as it does on the profile's own requests."""
+    from dograpper.lib.httrack.cookies import load_jar
+    base, script, _ = server
+    b, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"<p>home</p>")
+    jar = load_jar(str(tmp_path / "missing.txt"))
+    jar.merge([{"name": "sid", "value": "S1", "domain": "127.0.0.1", "path": "/",
+                "expires": -1, "httpOnly": False, "secure": False}])
+    ft = FakeTime()
+    policy = build_policy(retries=0, headers=(("Cookie", "x=1"),))
+    nav = Navigator(Fetcher(policy, clock=ft.clock, sleep=ft.sleep, cookies=jar),
+                    str(tmp_path / "out"), base + "/docs/", "html")
+
+    run_playwright_crawl(base + "/docs/", str(tmp_path / "out"), navigator=nav)
+
+    ctx.add_cookies.assert_not_called()

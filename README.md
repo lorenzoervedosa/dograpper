@@ -600,7 +600,8 @@ the last of the
 request, after your `--header` lines, as HTTrack writes it. A request to any
 other host (discovery can fetch a sub-sitemap elsewhere) carries none, even the
 jar's cookies for that host, and its `Set-Cookie` never enters the jar. A
-`--header 'Cookie: …'` line wins: the jar is not sent on that request. Each
+`--header 'Cookie: …'` line wins: the jar is not sent on that request, nor put
+in the browser of the browser pass. Each
 `Set-Cookie` of the start host is taken in, and the next request sends it,
 unless its name or value holds a control character (NUL, a tab, a folded
 line): that one is refused, so a server cannot make the next run's jar
