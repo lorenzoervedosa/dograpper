@@ -59,3 +59,29 @@ def test_atomic_write_never_sets_the_process_umask(tmp_path, monkeypatch):
     importlib.reload(atomic_write)  # neither at import...
     atomic_write.atomic_write_bytes(str(tmp_path / "page.html"), b"x")  # ...nor per write
     assert (tmp_path / "page.html").read_bytes() == b"x"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+def test_a_private_write_creates_the_file_owner_only(tmp_path):
+    """A file that holds secrets (the --cookies jar, #169) is created 0600, as HTTrack
+    writes its jar, whatever the umask lets through."""
+    old = os.umask(0o002)
+    try:
+        atomic_write_bytes(str(tmp_path / "cookies.txt"), b"x", private=True)
+    finally:
+        os.umask(old)
+    assert (tmp_path / "cookies.txt").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o666])
+def test_a_private_write_keeps_the_mode_of_the_file_it_replaces(tmp_path, mode):
+    """The user chose who reads an existing jar: its rewrite keeps that mode exactly."""
+    target = tmp_path / "cookies.txt"
+    target.write_bytes(b"old")
+    os.chmod(target, mode)
+
+    atomic_write_bytes(str(target), b"new", private=True)
+
+    assert target.read_bytes() == b"new"
+    assert target.stat().st_mode & 0o777 == mode
