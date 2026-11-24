@@ -311,6 +311,16 @@ stays `0.0.0.dev0`.
   User-Agent's headers are unchanged. `--no-browser-headers` drops
   `Sec-Fetch-*`, `Upgrade-Insecure-Requests` and the client hints. The flag
   under `--downloader wget` or `fire-engine` exits 2. ([#170])
+- `download --downloader httrack --browser-login` (and `sync`, and
+  `"browser-login"` in `.dograpper.json`): before the first request, a Chromium
+  window opens on the start URL; a person logs in or passes the challenge, then
+  presses Enter, and the run uses that browser's cookies and its own User-Agent
+  (with `--cookies FILE`, the cookies are saved there for reuse). No
+  CAPTCHA-solving service is involved. Without Playwright, a display or a
+  terminal to press Enter in, the run exits 1 naming the fix; beside
+  `--user-agent` or `--header 'User-Agent: …'`, or under `--downloader wget` or
+  `fire-engine`, it exits 2. A challenged start URL's error now suggests the
+  flag. ([#171])
 
 ### Changed
 
@@ -677,3 +687,4 @@ stays `0.0.0.dev0`.
 [#183]: https://github.com/lorenzoervedosa/dograpper/issues/183
 [#169]: https://github.com/lorenzoervedosa/dograpper/issues/169
 [#170]: https://github.com/lorenzoervedosa/dograpper/issues/170
+[#171]: https://github.com/lorenzoervedosa/dograpper/issues/171

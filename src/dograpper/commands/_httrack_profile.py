@@ -3,6 +3,7 @@
 download.py keeps the click options and the dispatch; this module owns the mode.
 """
 
+import dataclasses
 import logging
 import os
 from typing import Callable, Dict, List, Tuple
@@ -21,7 +22,7 @@ from ..lib.httrack.mirror import mirror_site
 from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import RunReport, format_report
 from ..lib.manifest import Manifest
-from ..lib.playwright_crawl import run_playwright_crawl
+from ..lib.playwright_crawl import run_browser_login, run_playwright_crawl
 from ..lib.spa_detector import is_spa
 from ..utils.atomic_write import atomic_write_bytes
 from ..utils.portable_names import resolve_under
@@ -36,9 +37,9 @@ PROFILE_OPTIONS = ('user_agent', 'header', 'no_robots', 'connections', 'max_conn
                    'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
                    'cache', 'updatehack', 'do_not_recatch', 'changes')
 # The [httrack] options of `download`, which fire-engine lacks (#152); sync forwards them too.
-HTTRACK_OPTIONS = ('cookies', 'browser_headers')
+HTTRACK_OPTIONS = ('cookies', 'browser_headers', 'browser_login')
 # Of them, the ones the profile runner takes (run_httrack keyword arguments), not the policy
-_RUN_OPTIONS = ('cookies',)
+_RUN_OPTIONS = ('cookies', 'browser_login')
 # --no-X flags: the policy holds the positive switch
 _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
             'no_extended_parsing': 'extended_parsing'}
@@ -94,8 +95,11 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
     header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
     user_agent = checked_user_agent(values['user_agent'],
                                     config_note('user_agent' in from_config))
-    values['user_agent'] = single_user_agent({"--user-agent": user_agent,
-                                              "--header 'User-Agent: …'": header_ua})
+    login = session['browser_login']  # its User-Agent is the browser's, known after the login
+    agent = single_user_agent({"--user-agent": user_agent,
+                               "--header 'User-Agent: …'": header_ua,
+                               "--browser-login": "" if login else None})
+    values['user_agent'] = None if login else agent
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     policy_kw['headers'] = headers
     return policy_kw, from_config, session
@@ -216,6 +220,7 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
             raise click.UsageError(f"{', '.join(flags)}: no page is revalidated under "
                                    "--headless (the browser fetches each one in full)")
     fetcher = make_fetcher(policy)
+    policy = fetcher.policy  # the transport's, e.g. with --browser-login's User-Agent
     parts = urlsplit(url)
     sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
     discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints,
@@ -302,11 +307,13 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
 
 def _front_failed(discovered: bool, challenged: bool) -> str:
     if discovered:
-        cause = ("the site refused or challenged every seed URL (likely bot protection)"
+        cause = ("the site refused or challenged every seed URL (likely bot protection; "
+                 "--browser-login lets you pass the challenge in a browser window)"
                  if challenged else
                  "every seed URL was blocked by robots.txt or failed (see the report above)")
     else:
-        cause = ("the site challenged the start URL (likely bot protection)"
+        cause = ("the site challenged the start URL (likely bot protection; "
+                 "--browser-login lets you pass the challenge in a browser window)"
                  if challenged else
                  "the start URL was blocked by robots.txt, redirected out of scope or "
                  "failed (see the report above)")
@@ -326,20 +333,38 @@ def _jar(path: str | None, from_config) -> Jar | None:
         raise click.ClickException(f"--cookies: cannot read {path}: {e.strerror or e}")
 
 
+def _login(url: str) -> tuple[list[dict], str]:
+    """--browser-login's headed Chromium (lib/playwright_crawl.py), failures as exit 1."""
+    try:
+        return run_browser_login(url)
+    except RuntimeError as e:  # Playwright, Chromium or a display missing; no Enter
+        raise click.ClickException(str(e))
+    except ValueError as e:  # check_value: a User-Agent no header line can carry
+        raise click.ClickException(f"--browser-login: {e}")
+
+
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
                 policy_kw, from_config, discover, filters, previous: Manifest | None = None,
-                *, cookies: str | None = None
+                *, cookies: str | None = None, browser_login: bool = False
                 ) -> Tuple[int, int, List[str], Dict[str, str], Dict[str, dict]]:
     """The httrack profile: run_profile over the stdlib Fetcher, HTTrack's identity, with
     the Playwright crawl under its policy for --headless and client-rendered sites.
     `cookies` (--cookies FILE) is the jar the Fetcher sends and fills, written back to
-    FILE when the run ends, a failed one included (HTTrack -%K)."""
+    FILE when the run ends, a failed one included (HTTrack -%K). `browser_login` (#171)
+    opens a headed Chromium on `url` before the first request: its cookies go into the jar
+    and its User-Agent is the run's."""
     warn_if_old_openssl()
     jar, failed = None, True
 
     def make_fetcher(policy):  # past run_profile's usage checks: a refused run reads no jar
         nonlocal jar
-        jar = _jar(cookies, from_config)
+        loaded = _jar(cookies, from_config)
+        if browser_login:
+            found, agent = _login(url)
+            loaded = loaded if loaded is not None else Jar(None)  # no FILE: kept for the run
+            loaded.merge(found)
+            policy = dataclasses.replace(policy, user_agent=agent)
+        jar = loaded
         return Fetcher(policy, cookies=jar)
 
     try:
@@ -350,7 +375,7 @@ def run_httrack(url, output, depth, delay, include_extensions, headless, verbose
         failed = False
         return result
     finally:
-        if jar is not None:
+        if jar is not None and jar.path is not None:
             try:
                 jar.save()
             except OSError as e:

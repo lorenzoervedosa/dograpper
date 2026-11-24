@@ -132,10 +132,12 @@ def test_httrack_flag_with_wget_is_usage_error(tmp_path, flag):
     (["--no-browser-headers"], None, "--browser-headers/--no-browser-headers"),
     (["--browser-headers"], None, "--browser-headers/--no-browser-headers"),  # even at default
     ([], {"browser-headers": False}, "--browser-headers/--no-browser-headers"),
+    (["--browser-login"], None, "--browser-login"),
+    ([], {"browser-login": True}, "--browser-login"),
 ])
 def test_httrack_only_flag_under_another_downloader_is_usage_error(tmp_path, downloader,
                                                                    given, config, flag):
-    """#169, #170: the [httrack] flags have no fire-engine counterpart (#152) nor a wget one."""
+    """#169-#171: the [httrack] flags have no fire-engine counterpart (#152) nor a wget one."""
     res = run(str(tmp_path / "o"), "--downloader", downloader, *given,
               config=_config(tmp_path, **config) if config else None)
     assert res.exit_code == 2
@@ -243,7 +245,8 @@ def test_httrack_all_seeds_challenged_exits_1(ht):
     assert res.exit_code == 1
     assert "bot protection" in res.output
     assert "Downloader profiles" in res.output
-    assert "browser-login" not in res.output
+    # #171: the hint names the flag that lets a person pass the challenge
+    assert "--browser-login lets you pass the challenge in a browser window" in res.output
     assert "Responses:" in res.output  # report printed before the error
 
 
@@ -305,7 +308,8 @@ def test_httrack_no_discovery_runs_the_recursive_crawl(crawl):
 
 
 @pytest.mark.parametrize("challenged,cause", [
-    (["http://example.com/"], "the site challenged the start URL (likely bot protection)"),
+    (["http://example.com/"], "the site challenged the start URL (likely bot protection"
+                              "; --browser-login lets you pass the challenge in a browser window)"),
     ([], "the start URL was blocked by robots.txt, redirected out of scope or failed"),
 ])
 def test_httrack_crawl_front_failure_exits_1(crawl, challenged, cause):
@@ -362,7 +366,8 @@ def test_httrack_headless_front_failure_exits_1(ht):
                side_effect=_rendered(out, (), challenged=URLS)):
         res = run(out, "--downloader", "httrack", "--headless")
     assert res.exit_code == 1
-    assert "the site refused or challenged every seed URL (likely bot protection)" in res.output
+    assert ("the site refused or challenged every seed URL (likely bot protection; "
+            "--browser-login lets you pass the challenge in a browser window)") in res.output
     assert "Challenged: 5" in res.output  # report printed before the error
 
 
@@ -669,7 +674,7 @@ def test_discovery_checks_robots_before_fetching_and_uses_robots_kind(tmp_path):
         seen["extra"] = tuple(extra_candidates)
         return []
 
-    with patch(f"{P}.Fetcher", lambda policy, cookies=None: f), patch(f"{P}.warn_if_old_openssl"), \
+    with patch(f"{P}.Fetcher", lambda policy, cookies=None: setattr(f, "policy", policy) or f), patch(f"{P}.warn_if_old_openssl"), \
          patch("dograpper.commands.download.fetch_llms_txt", side_effect=llms), \
          patch("dograpper.commands.download.fetch_sitemap", side_effect=sm), \
          patch(f"{P}.mirror_site", side_effect=_no_crawl) as ms:
@@ -776,7 +781,7 @@ def test_escape_sequence_in_robots_sitemap_line_never_reaches_output(tmp_path):
                          "Sitemap: http://evil.invalid/\x1b[7mINJECTED\x1b[0m.xml\n"
                          "Sitemap: http://example.com/\x1b[2Jsm.xml\n")
     f, calls = _fetcher_with(rules, status=404)
-    with patch(f"{P}.Fetcher", lambda policy, cookies=None: f), patch(f"{P}.warn_if_old_openssl"), \
+    with patch(f"{P}.Fetcher", lambda policy, cookies=None: setattr(f, "policy", policy) or f), patch(f"{P}.warn_if_old_openssl"), \
          patch(f"{P}.mirror_site", side_effect=_no_crawl) as ms:
         res = run(str(tmp_path / "o"), "--downloader", "httrack")
     assert res.exit_code == 1 and ms.called  # nothing discovered: the crawl (stubbed) ran

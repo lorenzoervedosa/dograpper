@@ -575,13 +575,26 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     `Upgrade-Insecure-Requests` and the client hints.
   - Not ported: `Origin` on a CORS request (htslib.c:1323-1340), which needs
     the request's initiator; a known gap, below.
-- **`--browser-login`:**
-  1. Opens headed Chromium on the start URL.
+- **`--browser-login`** (`run_browser_login` in `lib/playwright_crawl.py`, run
+  by `run_httrack` before the Fetcher is built; implemented, #171):
+  1. Opens headed Chromium on the start URL, after the run's usage checks and
+     the `--cookies` file's load, before any discovery or crawl request.
   2. The user logs in or passes the challenge, then presses Enter in the
      terminal.
-  3. dograpper takes `context.cookies()` and the page's real
-     `navigator.userAgent`, and uses both for the crawl.
-  4. With `--cookies FILE`, the jar is also saved there for reuse.
+  3. dograpper takes `context.cookies()` and the browser's real
+     `navigator.userAgent` (read on a blank page of the same context, where no
+     script of the site can redefine it), and uses both for the crawl: the
+     cookies go into the jar over the file's, the User-Agent becomes the
+     policy's.
+  4. With `--cookies FILE`, the jar is also saved there for reuse; without it,
+     the jar lives for the run alone.
+  - `--user-agent` (even empty) or `--header 'User-Agent: …'` beside it is a
+    usage error: the cookies are tied to the browser's User-Agent
+    (`single_user_agent()` counts `--browser-login` as a source).
+  - A challenged start URL, or every seed challenged, names `--browser-login`
+    in its exit-1 message (§5.4).
+  - Nothing solves a challenge automatically, and no CAPTCHA-solving service
+    is used: a person completes it in the window.
 - **Fail loud:**
   - a profile flag (`--user-agent`, `--no-robots` and every tunable in §5.3,
     shared with `fire-engine`) combined with `--downloader wget` is a usage
@@ -589,8 +602,9 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     `--browser-headers`, `--browser-login`, `httrack` only) is one under `wget`
     and under `fire-engine` (#169). `--filter` left these lists with #96,
     which made it shared;
-  - `--browser-login` without Playwright or without a display exits 1 with the
-    fix in the message.
+  - `--browser-login` without Playwright, without a display (Linux: neither
+    `DISPLAY` nor `WAYLAND_DISPLAY`) or without a terminal to press Enter in
+    exits 1 with the fix in the message, before any request.
 
 ### 5.8 Report and exit codes (DL-18)
 
@@ -711,6 +725,8 @@ README and CHANGELOG.
    (`HTTRACK_OPTIONS`: exit 2 under `wget` and under `fire-engine`).
    - **`--cookies`: implemented (#169),** §5.7.
    - **`--browser-headers`: implemented (#170),** §5.7.
+   - **`--browser-login`: implemented (#171),** §5.7; the real headed login is
+     a manual check (`docs/MANUAL-CHECKS.md`).
 
 **Before PRs 2 and 4 land** (*call*, no silent fallback): when
 `--downloader httrack` needs a path that does not exist yet (recursive crawl,

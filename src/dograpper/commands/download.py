@@ -321,6 +321,12 @@ def _run_download_cascade(
                    "Accept values, Accept-Language, header order and (Chrome, Edge, over "
                    "https) client hints. Default: on; --no-browser-headers sends HTTrack's "
                    "plain header set.")
+@click.option('--browser-login', is_flag=True, default=False,
+              help="[httrack] Before the run, open a Chromium window on the start URL: log in, "
+                   "or pass a challenge, as a person, then press Enter in the terminal. The "
+                   "run then uses that browser's cookies and its own User-Agent (so "
+                   "--user-agent is refused); with --cookies FILE the cookies are saved for "
+                   "reuse. Needs Playwright and a display. Default: off.")
 @click.option('--no-robots', is_flag=True, default=False,
               help="[httrack, fire-engine] Ignore robots.txt")
 @click.option('--connections', type=click.IntRange(min=1), default=4, show_default=True,
@@ -367,7 +373,7 @@ def _run_download_cascade(
                    "reported (HTTrack -%n). Default: off, fetched again in full, as in "
                    "HTTrack")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, header: Tuple[str, ...], cookies, browser_headers: bool, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool, changes: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, header: Tuple[str, ...], cookies, browser_headers: bool, browser_login: bool, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool, changes: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -395,6 +401,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'header': header,
         'cookies': cookies,
         'browser_headers': browser_headers,
+        'browser_login': browser_login,
         'no_robots': no_robots,
         'connections': connections,
         'max_conn_rate': max_conn_rate,

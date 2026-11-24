@@ -51,8 +51,8 @@ def _cookie(domain, path, secure, expires, name, value, httponly) -> http.cookie
 
 
 class Jar:
-    def __init__(self, path: str):
-        self.path = path
+    def __init__(self, path: str | None):
+        self.path = path  # None: a jar for the run alone (--browser-login without --cookies)
         self._jar = http.cookiejar.CookieJar(http.cookiejar.DefaultCookiePolicy(
             strict_ns_domain=http.cookiejar.DefaultCookiePolicy.DomainStrictNonDomain))
 

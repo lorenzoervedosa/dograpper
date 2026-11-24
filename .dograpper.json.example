@@ -6,7 +6,8 @@
     "manifest": ".dograpper-manifest.json",
     "header": [],
     "cookies": null,
-    "browser-headers": true
+    "browser-headers": true,
+    "browser-login": false
   },
   "pack": {
     "max-words-per-chunk": 400000,

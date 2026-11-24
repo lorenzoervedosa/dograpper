@@ -562,6 +562,7 @@ under `fire-engine` alike, on the command line or set away from its default in
 |---|---|---|
 | `--cookies FILE` | — | Netscape cookies.txt jar, read before the run and written back at its end (HTTrack `-%K`, see "Cookies") |
 | `--browser-headers` / `--no-browser-headers` | on | Send what the browser `--user-agent` names sends (HTTrack `-%Q`, see "Browser headers") |
+| `--browser-login` | off | Log in, or pass a challenge, in a browser window before the run, which then uses that browser's cookies and User-Agent (see "Browser login") |
 
 **Request headers (`--header`, HTTrack `-%X`).** `--header 'Name: value'`,
 repeatable, or a `"header"` list in `.dograpper.json` (a list given on the
@@ -625,6 +626,23 @@ of the same name. `--no-browser-headers` sends HTTrack's plain set instead: no
 `Sec-Fetch-*`, no `Upgrade-Insecure-Requests`, no client hints, HTTrack's own
 `Accept`, `Accept-Language: en, *` and order. The browser's `Origin` on a CORS
 request is not sent (HTTrack sends it).
+
+**Browser login (`--browser-login`).** For documentation behind a login, or
+behind a challenge, that a person completes in a browser. Before any request of
+the run, dograpper opens a Chromium window on the start URL; you log in or pass
+the challenge there yourself, then press Enter in the terminal. The run then
+uses that browser's cookies (they go into the jar, see "Cookies") and its own
+User-Agent, on every request, robots.txt and discovery included; with
+`--cookies FILE` the cookies are also written to `FILE` (owner-only when it is
+new), so later runs, on a machine without a display too, reuse them with
+`--cookies FILE` alone. dograpper solves nothing itself, and uses no
+CAPTCHA-solving service: a person does it in the window. The site's cookies are
+tied to that browser's User-Agent, so `--user-agent` (even `''`) or a `--header
+'User-Agent: …'` beside `--browser-login` is a usage error (exit 2). It needs
+Playwright (`uv sync --extra headless`, then `dograpper doctor --install`) and
+a display: without either, or with no terminal to press Enter in, the run
+exits 1 before any request, naming the fix. When the start URL, or every seed,
+is challenged, the error suggests `--browser-login`.
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -1562,7 +1580,7 @@ dograpper sync <url> -o <dir> [options]
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
 | `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--header`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
-| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--cookies`, `--browser-headers` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--cookies`, `--browser-headers`, `--browser-login` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1810,7 +1828,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl (or of `httrack --headless`'s Playwright crawl), refused/challenged; `fire-engine`: `--headless`, a result that looks client-rendered, or no `fire-engine` extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a malformed line in the `--cookies` file; a `[httrack]` flag (`--cookies`, `--browser-headers`) under any downloader but `httrack`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a malformed line in the `--cookies` file; `--browser-login` beside `--user-agent` or `--header 'User-Agent: …'`; a `[httrack]` flag (`--cookies`, `--browser-headers`, `--browser-login`) under any downloader but `httrack`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |

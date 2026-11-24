@@ -22,6 +22,20 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-24 — `--browser-login`: F3 and DL-19 reconciled, and the login's edges (#171)
+
+- **Decision:**
+  - F3 (cookies and User-Agent taken from an embedded browser) and DL-19 leave the `httrack` profile's non-goals in the HTTrack mirroring requirements: the profile spec wins (maintainer, 2026-11-24);
+  - the login runs inside the profile's fetcher factory: after the usage checks (`--headless` with `--cache`) and the `--cookies` file's load, so neither error comes after a person has logged in, and before the first request;
+  - the User-Agent is read on a blank page of the same context, not on the site's page, where a script can redefine `navigator.userAgent`; it goes through the `--header` wire guard (CR, LF, NUL);
+  - "no display" is Linux without `DISPLAY` and `WAYLAND_DISPLAY`; no Enter to read (stdin closed) is exit 1 too, since waiting forever or going on silently would both be wrong;
+  - the login's cookies go into the jar over the file's; without `--cookies` the jar lives for the run alone;
+  - the challenged-start hint also goes on the every-seed-challenged message, the same failure from the seeded fetch;
+  - the shared Chromium launch (its one-line errors, the `doctor --install` hint) moved into `_launch()` in `lib/playwright_crawl.py`, used by the crawl and the login.
+- **Why:** the Agent Brief and the 2026-11-24 addendum fix the flag; these are the gaps.
+- **Rejected:** opening the window before the usage checks (a person would log in for nothing); reading the User-Agent from the logged-in page.
+- **Pending:** the real headed login, `docs/MANUAL-CHECKS.md` (its entry already names the shipped flag).
+
 ## 2026-11-24 — `--browser-headers`: F1 reconciled, and how far the port goes (#170)
 
 - **Decision:**
