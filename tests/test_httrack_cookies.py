@@ -439,3 +439,25 @@ def test_a_prefixed_cookie_must_meet_its_prefix():
         "__Host-p=v; Secure", "__Host-q=v; Secure; Path=/docs", "__Host-ok=v; Secure; Path=/"))
     assert jar.header("https://a.x.com/docs/x") == "__Host-ok=v"
     assert jar.header("https://b.x.com/") is None and jar.header("http://a.x.com/") is None
+
+
+def test_a_response_erases_no_cookie_of_another_domain(tmp_path):
+    """The stdlib deletes on an expired Set-Cookie before any check of its Domain: from
+    x.com, `sid=; Domain=other.com; Max-Age=0` must leave other.com's sid alone."""
+    path = tmp_path / "cookies.txt"
+    path.write_text(".other.com\tTRUE\t/\tFALSE\t0\tsid\tkeep\nx.com\tFALSE\t/\tFALSE\t0\ta\t1\n")
+    jar = load_jar(str(path), "x.com")
+    jar.take("https://x.com/", _set_cookies("sid=; Domain=other.com; Max-Age=0; Path=/"))
+    jar.save()
+    assert "\tsid\tkeep\n" in path.read_text()
+
+
+def test_the_rules_of_a_response_never_spare_an_expired_cookie_at_save(tmp_path):
+    """Only a response's deletion is held to its rules: once the jar is written, an expired
+    cookie goes, a Secure one too, whatever the last response was."""
+    path = tmp_path / "cookies.txt"
+    path.write_text("h.test\tFALSE\t/\tTRUE\t1000\told\t1\n")
+    jar = load_jar(str(path))
+    jar.take("http://h.test/", _set_cookies("a=1"))
+    jar.save()
+    assert "\told\t" not in path.read_text()

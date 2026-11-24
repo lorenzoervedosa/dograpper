@@ -153,18 +153,24 @@ def _overlap(a: str, b: str) -> bool:
 
 
 class _Store(http.cookiejar.CookieJar):
-    """The stdlib's jar, its deletion (an expired Set-Cookie: make_cookies calls clear())
-    made right: a dotless host's cookie is named as the jar holds it, not `<host>.local`,
-    and over plain http no Secure cookie is erased (RFC 6265bis 5.6, htslib.c:1983-1987).
-    `host` and `secure` are the request's, set under the Jar's lock."""
-    host, secure = "", True
+    """The stdlib's jar, the deletion make_cookies does for an expired Set-Cookie (it calls
+    clear() before any check of the cookie) held to the response's rules: a dotless host's
+    cookie named as the jar holds it, not `<host>.local`; no cookie of a domain the
+    response's host is not in; over plain http, no Secure cookie (RFC 6265bis 5.6,
+    htslib.c:1983-1987). `response` is that response's (host, https), set under the Jar's
+    lock while make_cookies runs; any other clear() (expired cookies at save) is plain."""
+    response = None
 
     def clear(self, domain=None, path=None, name=None):
-        if self.host and "." not in self.host and domain == self.host + ".local":
-            domain = self.host  # eff_request_host's name for it
-        if not self.secure and name is not None and any(
-                c.secure for c in self if (c.domain, c.path, c.name) == (domain, path, name)):
-            return
+        if self.response is not None and domain is not None:
+            host, secure = self.response
+            if "." not in host and domain == host + ".local":
+                domain = host  # eff_request_host's name for it
+            if not _domain_match(host, domain):
+                return
+            if not secure and any(c.secure for c in self
+                                  if (c.domain, c.path, c.name) == (domain, path, name)):
+                return
         super().clear(domain, path, name)
 
     def hides_secure(self, cookie: http.cookiejar.Cookie) -> bool:
@@ -212,8 +218,12 @@ class Jar:
         if not self._binds(host):
             return
         with self._lock:
-            self._jar.host, self._jar.secure = host, secure
-            for cookie in self._jar.make_cookies(_Response(headers), request):
+            self._jar.response = (host, secure)
+            try:
+                cookies = self._jar.make_cookies(_Response(headers), request)
+            finally:
+                self._jar.response = None
+            for cookie in cookies:
                 if not _clean(cookie.name, cookie.value, cookie.path):
                     continue  # a server must not make the next run's jar unreadable
                 if not _prefix_ok(cookie):
