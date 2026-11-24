@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from dograpper.lib.httrack import policy
+from dograpper.lib.httrack import browsers, policy
 from dograpper.lib.httrack.policy import (
     FetchMeta,
     build_policy,
@@ -488,7 +488,7 @@ CSS = "text/css,*/*;q=0.1"
 ])
 def test_client_hints_are_chromiums_for_the_user_agent(ua, want):
     """htslib.c:728-811 hts_client_hints_of: Chromium's GREASE brand, seeded by the major."""
-    assert policy.client_hints(ua) == want
+    assert browsers.client_hints(ua) == want
 
 
 @pytest.mark.parametrize("ua", [
@@ -507,7 +507,7 @@ def test_client_hints_are_chromiums_for_the_user_agent(ua, want):
     CHROME[:CHROME.rindex(")")], "", "Mozilla/5.0 (X11)\tChrome/141.0.0.0",
 ])
 def test_no_client_hints_for_any_other_user_agent(ua):
-    assert policy.client_hints(ua) is None
+    assert browsers.client_hints(ua) is None
 
 
 @pytest.mark.parametrize("ua,family", [
@@ -524,7 +524,7 @@ def test_no_client_hints_for_any_other_user_agent(ua):
 ])
 def test_browser_family_is_httracks(ua, family):
     """htslib.c:820-866 hts_browser_family_of (tests/602)."""
-    assert policy.browser_family(ua) == family
+    assert browsers.browser_family(ua) == family
 
 
 PAGE = FetchMeta("document", "navigate", True)
