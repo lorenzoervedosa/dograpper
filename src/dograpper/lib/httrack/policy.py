@@ -111,7 +111,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         max_retry_after = MAX_RETRY_AFTER_CAP
     off = disable_security_limits
     return HttrackPolicy(
-        user_agent=user_agent or DEFAULT_USER_AGENT,
+        # "" sends no User-Agent, as HTTrack -F "" (htslib.c:1249-1252); None is the default
+        user_agent=DEFAULT_USER_AGENT if user_agent is None else user_agent,
         connections=_clamp("connections", connections, MAX_CONNECTIONS, off),
         max_conn_rate=_clamp("max_conn_rate", max_conn_rate, MAX_CONN_RATE, off),
         max_bandwidth=_clamp("max_bandwidth", max_bandwidth, MAX_BANDWIDTH, off),
@@ -284,7 +285,9 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
     h += [("Connection", "keep-alive"), ("Host", host)]
     if sent and secure and meta.mode == "navigate":  # hts_fetch_is_navigation
         h.append(("Upgrade-Insecure-Requests", "1"))
-    h += [("User-Agent", policy.user_agent), ("Accept", ACCEPT)]
+    if policy.user_agent:
+        h.append(("User-Agent", policy.user_agent))
+    h.append(("Accept", ACCEPT))
     if sent:
         h += [("Sec-Fetch-Site", meta.site or _fetch_site(referer, scheme, host)),
               ("Sec-Fetch-Mode", meta.mode)]

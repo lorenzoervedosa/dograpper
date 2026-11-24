@@ -719,3 +719,40 @@ def test_user_headers_go_on_pages_and_robots_txt_replacing_in_place(raw_server):
         "accept-language" if n == "Accept-Language" else n for n in profile] + ["X-Test"]
     assert b"\r\naccept-language: pt-BR\r\n" in page and b"\r\nX-Test: 1\r\n" in page
     assert robots.startswith(b"GET /robots.txt ") and b"\r\nX-Test: 1\r\n" in robots
+
+
+# A two-page site where every path gets the same answer (raw_server): the crawl stays on
+# the engine, with no browser pass. test_fire_engine.py runs it under fire-engine.
+_SITE_PAGE = (b"<html><body><h1>Docs</h1><p>" + b"documentation " * 40
+              + b'</p><a href="a.html">a</a></body></html>')
+SITE_REPLY = (b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: %d\r\n"
+              b"Connection: close\r\n\r\n%s" % (len(_SITE_PAGE), _SITE_PAGE))
+EMPTY_USER_AGENT = {"flag": (["--user-agent", ""], {}),
+                    "header": (["--header", "User-Agent:"], {}),
+                    "config": ([], {"user-agent": ""}),
+                    "config header": ([], {"header": ["User-Agent:"]})}
+
+
+@pytest.mark.parametrize("source", EMPTY_USER_AGENT)
+def test_an_empty_user_agent_sends_no_user_agent_line(raw_server, tmp_path, source):
+    """#183: an empty User-Agent, from either flag or the config, sends none at all, as
+    HTTrack -F "" does (htslib.c:1249-1252); a request with no browser UA gets no
+    Sec-Fetch-* either (fetch_meta_sent, htslib.c:879-880)."""
+    import json
+    from click.testing import CliRunner
+    from dograpper.cli import cli
+    args, config = EMPTY_USER_AGENT[source]
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"download": config}))
+    base, heads = raw_server(SITE_REPLY)
+
+    res = CliRunner().invoke(cli, ["--config", str(cfg), "download", f"{base}/docs/", "-o",
+                                   str(tmp_path / "m"), "--downloader", "httrack",
+                                   "--disable-security-limits", "--max-conn-rate", "1000",
+                                   *args])
+
+    assert res.exit_code == 0, res.output
+    assert "Files downloaded: 2" in res.output
+    assert len(heads) >= 4  # robots.txt, discovery and both pages
+    for head in heads:
+        assert b"\r\nuser-agent:" not in head.lower() and b"\r\nsec-fetch-" not in head.lower()

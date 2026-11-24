@@ -256,6 +256,14 @@ def test_browser_context_carries_the_profile_identity(server, tmp_path):
     assert nav.context_options() == {"user_agent": "Probe/1.0", "service_workers": "block"}
 
 
+def test_an_empty_user_agent_leaves_chromium_its_own(server, tmp_path):
+    """#183: the profile's navigations then carry no User-Agent; Chromium's own requests
+    always send one (out of the issue's scope), so the context sets no override."""
+    base, _, _ = server
+    nav, _, _ = navigator(base, tmp_path, user_agent="")
+    assert nav.context_options() == {"service_workers": "block"}
+
+
 def test_max_links_ends_the_browser_crawl_as_partial(server, tmp_path):
     base, script, seen = server
     script["/robots.txt"] = (404, {}, b"")

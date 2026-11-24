@@ -536,7 +536,7 @@ command line, or set away from its default in `.dograpper.json`). Their
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--user-agent` | `Mozilla/5.0 (compatible; dograpper/<version>)` | User-Agent header |
+| `--user-agent` | `Mozilla/5.0 (compatible; dograpper/<version>)` | User-Agent header; `''` sends none, as HTTrack `-F ""` and `curl -H 'User-Agent:'` do |
 | `--header` | — | Extra request header `'Name: value'`, repeatable (see "Request headers") |
 | `--no-robots` | off | Ignore robots.txt |
 | `--connections` | `4` | Parallel connections (clamped to 8) |
@@ -565,7 +565,12 @@ without case) takes that header's place in the order, with your value and your
 spelling of the name, which shows on HTTP/1.1 only (HTTP/2 lowercases every
 name); any other header is added after the profile's. `--header 'User-Agent:
 X'` is exactly `--user-agent X`, so it goes out spelled `User-Agent` whatever
-the spelling you gave; giving both is a usage error (exit 2), and so
+the spelling you gave, and an empty one (`--header 'User-Agent:'`, like
+`--user-agent ''` or `"user-agent": ""` in config) sends no `User-Agent` at
+all (under `httrack`, no `Sec-Fetch-*` either: the profile sends them only
+beside a browser User-Agent; under `--headless`, the browser's own subresource
+requests keep Chromium's); giving both, even with one of them empty, is a
+usage error (exit 2), and so
 is one name on two `--header` lines (no line silently wins). A line
 that is not `Name: value`, a name that is not an RFC 9110 token, a value with
 CR, LF or NUL, and the names `Host`, `Content-Length`, `Transfer-Encoding` and
@@ -727,7 +732,9 @@ profile's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` client hints
 describe its own User-Agent, they are dropped (a hint you send with `--header`
 stays), and the run warns once that the
 TLS fingerprint still says the `--impersonate` profile: a WAF that compares the
-handshake with the User-Agent can still tell them apart. Without
+handshake with the User-Agent can still tell them apart. An empty User-Agent
+(`--user-agent ''`, `--header 'User-Agent:'`) is one you gave: it sends no
+`User-Agent` and no client hint, with the same warning. Without
 `--user-agent`, the identity is the profile's, coherent end to end.
 
 #### Incremental

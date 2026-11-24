@@ -823,6 +823,18 @@ def test_user_agent_given_two_ways_is_usage_error(ht, tmp_path, config):
     fu.assert_not_called()
 
 
+@pytest.mark.parametrize("given", [["--user-agent", "", "--header", "User-Agent: B/2"],
+                                   ["--user-agent", "A/1", "--header", "User-Agent:"],
+                                   ["--user-agent", "", "--header", "User-Agent:"]])
+def test_an_empty_user_agent_still_counts_as_given(ht, given):
+    """#183: an empty User-Agent sends none, but it is given: two sources stay exit 2."""
+    out, fu, _ = ht
+    res = run(out, "--downloader", "httrack", *given)
+    assert res.exit_code == 2
+    assert "--user-agent and --header 'User-Agent: …' both set the User-Agent" in res.output
+    fu.assert_not_called()
+
+
 @pytest.mark.parametrize("config", [False, True])
 @pytest.mark.parametrize("bad", ["Bot/1\r\nX-Injected: s3cret", "Bot/1\nX-Injected: s3cret",
                                  "Bot/1\x00s3cret"])

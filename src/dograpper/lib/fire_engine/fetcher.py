@@ -133,8 +133,8 @@ class CurlCffiFetcher(Fetcher):
         # each layer replaces a same-named header of the one before; the user's --header last
         pairs = merge_headers(_TARGET_HEADERS.get(self._impersonate, {}).items(),
                               [(k, v) for k, v in headers if k.lower() in _FORWARDED])
-        if self._user_agent:
-            pairs = merge_headers(pairs, [("User-Agent", self._user_agent),
+        if self._user_agent is not None:  # "" sends none, as curl -H 'User-Agent:' (#183)
+            pairs = merge_headers(pairs, [("User-Agent", self._user_agent or None),
                                           # None: curl_cffi drops the profile's line
                                           *((hint, None) for hint in _CLIENT_HINTS)])
         req_headers = dict(merge_headers(pairs, self.policy.headers))

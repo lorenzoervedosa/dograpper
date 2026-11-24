@@ -75,8 +75,10 @@ class Navigator:
 
     def context_options(self) -> dict:
         """browser.new_context() options: the profile's User-Agent on every request, and no
-        service worker, which would answer navigations past the route."""
-        return {"user_agent": self.fetcher.policy.user_agent, "service_workers": "block"}
+        service worker, which would answer navigations past the route. An empty one (#183)
+        sets no override: Chromium's own requests keep its UA."""
+        agent = self.fetcher.policy.user_agent
+        return {**({"user_agent": agent} if agent else {}), "service_workers": "block"}
 
     def attach(self, context, page) -> None:
         """Route every request of `context`; `page` is the one the crawl saves."""

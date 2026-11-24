@@ -584,6 +584,12 @@ stays `0.0.0.dev0`.
 - `download --downloader fire-engine --impersonate chrome_android` sends
   `sec-ch-ua-mobile: ?1` instead of the `?0` that `curl_cffi`'s target puts
   beside its Android User-Agent; the header keeps its position. ([#157])
+- `download --downloader httrack|fire-engine` with an empty User-Agent
+  (`--user-agent ''`, `--header 'User-Agent:'` or `"user-agent": ""` in
+  `.dograpper.json`) sends no `User-Agent` header, as HTTrack `-F ""` and
+  `curl -H 'User-Agent:'` do, instead of falling back silently to the
+  profile's; under fire-engine the profile's `sec-ch-ua*` hints go too and the
+  TLS warning is printed. ([#183])
 
 ### Security
 
@@ -649,3 +655,4 @@ stays `0.0.0.dev0`.
 [#163]: https://github.com/lorenzoervedosa/dograpper/issues/163
 [#180]: https://github.com/lorenzoervedosa/dograpper/issues/180
 [#174]: https://github.com/lorenzoervedosa/dograpper/issues/174
+[#183]: https://github.com/lorenzoervedosa/dograpper/issues/183
