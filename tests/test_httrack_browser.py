@@ -684,3 +684,29 @@ def test_redirect_of_a_meta_refresh_link_carries_the_refresh_metadata(
     assert engine["Sec-Fetch-User"] is None
     assert browsed == engine
 
+
+# --- #190: --header reaches the navigations of the browser pass under --headless ---
+
+def test_header_reaches_every_navigation_of_the_headless_browser_pass(
+        server, tmp_path, browser):
+    from click.testing import CliRunner
+    from dograpper.cli import cli
+    base, script, _ = server
+    _, _, page = browser
+    got = {}
+
+    def page_reply(path, body):
+        def reply(h):
+            got[path] = h.get("X-Test")
+            return 200, HTML, body
+        return reply
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = page_reply("/docs/", b"shell")
+    script["/docs/a"] = page_reply("/docs/a", b"shell")
+    page.evaluate.side_effect = [[base + "/docs/a"], []]
+    out = str(tmp_path / "out")
+    res = CliRunner().invoke(cli, [
+        "download", base + "/docs/", "-o", out, "--manifest", out + ".manifest.json",
+        "--downloader", "httrack", "--headless", "--header", "X-Test: 1"])
+    assert res.exit_code == 0, res.output
+    assert got == {"/docs/": "1", "/docs/a": "1"}
