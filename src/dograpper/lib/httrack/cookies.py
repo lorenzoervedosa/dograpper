@@ -22,15 +22,19 @@ file, and no byte can fail to decode (contract 7).
 
 import http.cookiejar
 import logging
+import re
 import threading
 import time
 import urllib.request
 from urllib.parse import urlsplit
 
 from ...utils.atomic_write import atomic_write_bytes
+from ...utils.http_headers import check_value
 
 logger = logging.getLogger(__name__)
 
+# C0 controls (HTAB and an obs-fold's CRLF included) and DEL: no cookie-octet (RFC 6265 4.1.1)
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 HTTPONLY_PREFIX = "#HttpOnly_"
 _FIRST_LINE = "# Netscape HTTP Cookie File\n"  # what curl and MozillaCookieJar look for
 _BOM = "\xef\xbb\xbf"  # UTF-8's, as latin-1 reads it
@@ -70,6 +74,11 @@ def _cookie(domain, path, secure, expires, name, value, httponly) -> http.cookie
     return http.cookiejar.Cookie(0, name, value, None, False, domain.lower(), dotted, dotted,
                                  path, True, secure, expires, expires is None, None, None,
                                  {"HttpOnly": ""} if httponly else {})
+
+
+def _clean(*fields) -> bool:
+    """No control character in any of `fields` (None: an absent value)."""
+    return not any(f is not None and _CONTROL.search(f) for f in fields)
 
 
 def _domain_match(host: str, domain: str) -> bool:
@@ -113,8 +122,11 @@ class Jar:
             sent = [c for c in self._jar if _matches(c, host, path, parts.scheme == "https",
                                                     now)]
         sent.sort(key=lambda c: -len(c.path))
-        return "; ".join(f"{c.name}={c.value}" if c.value is not None else c.name
+        line = "; ".join(f"{c.name}={c.value}" if c.value is not None else c.name
                          for c in sent) or None
+        if line is not None:  # the --header guard: ValueError names Cookie, never the value
+            check_value("Cookie", line)
+        return line
 
     def take(self, url: str, headers) -> None:
         """Store the Set-Cookie lines of the response to `url` (`headers`, an
@@ -126,6 +138,8 @@ class Jar:
             return
         with self._lock:
             for cookie in self._jar.make_cookies(_Response(headers), request):
+                if not _clean(cookie.name, cookie.value, cookie.path):
+                    continue  # a server must not make the next run's jar unreadable
                 if not cookie.domain_specified:  # not the stdlib's `<host>.local`
                     cookie.domain = host
                 self._jar.set_cookie_if_ok(cookie, request)
@@ -169,7 +183,8 @@ class Jar:
         """Take in what a browser context holds (Playwright's context.cookies()): each one
         replaces the jar's of the same domain, path and name; another host's stays out."""
         for c in cookies:
-            if not self._for_host(_wire(c["domain"]).lower()):
+            if not self._for_host(_wire(c["domain"]).lower()) or not _clean(
+                    c["name"], c["value"], c["path"]):
                 continue
             expires = c.get("expires", -1)
             self.add(_cookie(_wire(c["domain"]), _wire(c["path"]), bool(c.get("secure")),
@@ -211,9 +226,9 @@ def load_jar(path: str, host: str | None = None) -> Jar:
         elif not line.strip() or line.startswith("#"):
             continue
         fields = line.split("\t")
-        if len(fields) != 7 or "\r" in line or "\0" in line:
+        if len(fields) != 7 or not _clean(*fields):
             raise ValueError(f"line {number} is not a cookies.txt record "
-                             "(7 tab-separated fields, no CR or NUL)")
+                             "(7 tab-separated fields, no control character)")
         domain, flag, cpath, secure, expires, name, value = fields
         try:
             expires = int(expires)

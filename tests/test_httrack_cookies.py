@@ -305,3 +305,41 @@ def test_a_jar_bound_to_the_start_host_keeps_to_it():
     assert jar.header("http://other.test/") is None
     assert jar.header("http://docs.test/") == "d=1; p=1"
     assert sorted(c["name"] for c in jar.to_browser()) == ["d", "p"]
+
+
+def test_a_set_cookie_with_a_control_character_is_refused_and_the_jar_stays_readable(
+        raw_server, tmp_path):
+    """NUL, HTAB and an obs-fold (CRLF + HTAB) in a value: refused at Set-Cookie, so a
+    server cannot make the next run's jar unreadable (exit 2 on load)."""
+    bad = (b"HTTP/1.1 200 OK\r\nSet-Cookie: s=a\x00b\r\nSet-Cookie: t=a\tb\r\n"
+           b"Set-Cookie: u=a\r\n\tb\r\nSet-Cookie: ok=1\r\nContent-Length: 2\r\n"
+           b"Connection: close\r\n\r\nok")
+    base, _ = raw_server(bad)
+    path = tmp_path / "cookies.txt"
+    jar = load_jar(str(path))
+    Fetcher(build_policy(retries=0, obey_robots=False), cookies=jar).get(base + "/",
+                                                                         kind="navigate")
+    assert jar.header(base + "/") == "ok=1"
+    jar.save()
+    assert load_jar(str(path)).header(base + "/") == "ok=1"
+
+
+def test_every_cookie_line_passes_the_header_check_before_the_wire(server, tmp_path):
+    """The same check as --header (CR, LF, NUL): a line that would end the header is an
+    error of that request, never sent, and the error does not quote it."""
+    from dograpper.lib.httrack.cookies import _cookie
+    base, _, seen = server
+    jar = load_jar(str(tmp_path / "cookies.txt"))
+    jar.add(_cookie("127.0.0.1", "/", False, None, "s", "a\r\nX-Injected: 1", False))
+    res = Fetcher(build_policy(retries=0, obey_robots=False), cookies=jar).get(
+        base + "/p", kind="navigate")
+    assert res.error == "Cookie has a CR, LF or NUL character in its value"
+    assert seen == [] and "Injected" not in res.error
+
+
+@pytest.mark.parametrize("field", ["a\x01b", "a\x7fb"])
+def test_a_jar_line_with_a_control_character_is_a_bad_line(tmp_path, field):
+    path = tmp_path / "cookies.txt"
+    path.write_text(f"127.0.0.1\tFALSE\t/\tFALSE\t0\ts\t{field}\n")
+    with pytest.raises(ValueError, match="^line 1 "):
+        load_jar(str(path))

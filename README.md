@@ -601,7 +601,11 @@ request, after your `--header` lines, as HTTrack writes it. A request to any
 other host (discovery can fetch a sub-sitemap elsewhere) carries none, even the
 jar's cookies for that host, and its `Set-Cookie` never enters the jar. A
 `--header 'Cookie: …'` line wins: the jar is not sent on that request. Each
-`Set-Cookie` of the start host is taken in, and the next request sends it. At the end of the
+`Set-Cookie` of the start host is taken in, and the next request sends it,
+unless its name or value holds a control character (NUL, a tab, a folded
+line): that one is refused, so a server cannot make the next run's jar
+unreadable. The `Cookie` line goes through the same check as a `--header`
+line. At the end of the
 run, a failed one included, the jar is written back to `FILE`: `#HttpOnly_`
 lines and session cookies kept (expiry `0`, as curl writes them), expired ones
 dropped. A `FILE` dograpper creates is owner-only (mode `0600`); an existing

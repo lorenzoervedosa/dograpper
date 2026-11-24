@@ -52,6 +52,7 @@ Entry format:
 
 - **Decision:** the maintainer's decisions on #169 (2026-11-24), one fix each; where the code had to pick, it picked:
   - the jar is bound to the start URL's host: a request to another host gets none of its cookies, and that host's `Set-Cookie` and the browser's cookies for it never enter the jar; the cookies the file holds for other hosts stay in the file, and the browser is given only the ones the start host gets, so a subresource request elsewhere carries none either;
+  - a control character (C0, HTAB and an obs-fold included, or DEL) in a `Set-Cookie` name, value or path refuses that cookie, as one in a browser cookie does; in the file it is a bad line (exit 2); the `Cookie` line passes `check_value` too, and a line that fails is that request's error, never sent, and the error names `Cookie` without the value (http.client's own refusal quoted it into the report);
 - **Why:** each was reproduced by the review; the tests run the failing case first.
 - **Rejected:** fixing the sub-sitemap rule of `sitemap_parser` instead (kept as it is, as decided).
 - **Pending:** none.

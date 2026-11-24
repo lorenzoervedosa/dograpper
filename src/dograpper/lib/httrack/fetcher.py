@@ -311,7 +311,11 @@ class Fetcher:
             self._acquire(key)
             # last, after the --header lines, as http_sendhead writes it (htslib.c:1401-1412);
             # asked per attempt, so a retry carries what the last answer set
-            cookie = jar.header(_jar_url(parts, target)) if jar is not None else None
+            try:
+                cookie = jar.header(_jar_url(parts, target)) if jar is not None else None
+            except ValueError as exc:  # check_value: a line no header can carry, unquoted
+                res.error = str(exc)
+                return res
             sent = headers + [("Cookie", cookie)] if cookie else headers
             try:
                 status, hdrs, raw = self._request(key, parts, target, sent,
