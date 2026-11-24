@@ -6,19 +6,30 @@ kept. In between, the Fetcher sends the matching cookies (`header`) and takes in
 response's Set-Cookie (`take`); the browser pass pushes the jar into Chromium's context
 (`to_browser`) and merges what the context holds back at its end (`merge`).
 
-Matching and Set-Cookie parsing are the stdlib's (http.cookiejar), with a host-only cookie
-kept to its host (RFC 6265 5.3 step 6). The file is read and written here rather than by
-MozillaCookieJar, which drops an expiry-0 session cookie, forgets the HttpOnly of a
-Set-Cookie and quotes a bad line, cookie value included, in its error.
+Set-Cookie parsing is the stdlib's (http.cookiejar: attributes, expiry, the Domain a host
+may claim). Matching is RFC 6265's, done here: the stdlib reads a host without a dot
+(localhost, an intranet `wiki`) as `<host>.local`, so it never sends that host a cookie
+from the file or the browser, and it would write the `.local` name back. The file is read
+and written here too, not by MozillaCookieJar, which drops an expiry-0 session cookie,
+forgets the HttpOnly of a Set-Cookie and quotes a bad line, cookie value included, in its
+error.
 
-The file is read as latin-1, the byte model of HTTP headers: every byte round-trips to the
-wire and back to the file, and no byte can fail to decode (contract 7).
+Every string the jar holds is wire bytes as latin-1, the byte model of HTTP headers: the
+file is read that way, http.client decodes Set-Cookie that way, and a browser's cookie is
+taken as the UTF-8 bytes Chromium sends. Every byte round-trips to the wire and back to the
+file, and no byte can fail to decode (contract 7).
 """
 
 import http.cookiejar
+import logging
+import threading
+import time
 import urllib.request
+from urllib.parse import urlsplit
 
 from ...utils.atomic_write import atomic_write_bytes
+
+logger = logging.getLogger(__name__)
 
 HTTPONLY_PREFIX = "#HttpOnly_"
 _FIRST_LINE = "# Netscape HTTP Cookie File\n"  # what curl and MozillaCookieJar look for
@@ -27,7 +38,7 @@ _BOM = "\xef\xbb\xbf"  # UTF-8's, as latin-1 reads it
 
 
 class _Response:
-    """What CookieJar.extract_cookies reads of a response: its headers (get_all)."""
+    """What CookieJar.make_cookies reads of a response: its headers (get_all)."""
 
     def __init__(self, headers):
         self._headers = headers
@@ -41,45 +52,97 @@ def _httponly(cookie: http.cookiejar.Cookie) -> bool:
     return any(name.lower() == "httponly" for name in cookie._rest)
 
 
+def _pair(cookie: http.cookiejar.Cookie) -> tuple[str, str]:
+    """(name, value) as a cookies.txt line holds it: a cookie with no `=` is a value alone
+    (MozillaCookieJar's reading)."""
+    return ("", cookie.name) if cookie.value is None else (cookie.name, cookie.value)
+
+
+def _wire(text: str) -> str:
+    """A browser's string as the bytes Chromium puts on the wire (UTF-8), held as latin-1."""
+    return text.encode("utf-8").decode("latin-1")
+
+
 def _cookie(domain, path, secure, expires, name, value, httponly) -> http.cookiejar.Cookie:
     """A Netscape cookie: `domain` with a leading dot is a domain cookie, else host-only;
     `expires` None is a session cookie."""
     dotted = domain.startswith(".")
-    return http.cookiejar.Cookie(0, name, value, None, False, domain, dotted, dotted, path,
-                                 True, secure, expires, expires is None, None, None,
+    return http.cookiejar.Cookie(0, name, value, None, False, domain.lower(), dotted, dotted,
+                                 path, True, secure, expires, expires is None, None, None,
                                  {"HttpOnly": ""} if httponly else {})
+
+
+def _matches(cookie: http.cookiejar.Cookie, host: str, path: str, secure: bool,
+             now: float) -> bool:
+    """RFC 6265 5.4: domain-match (host-only: the host itself), path-match, Secure over
+    https only, not expired."""
+    domain, cpath = cookie.domain, cookie.path
+    if domain.startswith("."):
+        if host != domain[1:] and not host.endswith(domain):
+            return False
+    elif host != domain:
+        return False
+    if path != cpath and not path.startswith(cpath if cpath.endswith("/") else cpath + "/"):
+        return False
+    return (secure or not cookie.secure) and not cookie.is_expired(now)
 
 
 class Jar:
     def __init__(self, path: str | None):
         self.path = path  # None: a jar for the run alone (--browser-login without --cookies)
-        self._jar = http.cookiejar.CookieJar(http.cookiejar.DefaultCookiePolicy(
-            strict_ns_domain=http.cookiejar.DefaultCookiePolicy.DomainStrictNonDomain))
+        self._jar = http.cookiejar.CookieJar()
+        self._lock = threading.Lock()  # the Fetcher's workers share the jar; so does its walk
 
     def header(self, url: str) -> str | None:
-        """The Cookie header value for a request to `url`, or None when nothing matches."""
-        request = urllib.request.Request(url)
-        self._jar.add_cookie_header(request)
-        return request.get_header("Cookie")
+        """The Cookie header value for a request to `url`, or None when nothing matches:
+        longer paths first, then the older cookie (RFC 6265 5.4)."""
+        parts = urlsplit(url)
+        host, path, now = parts.hostname or "", parts.path or "/", time.time()
+        with self._lock:
+            sent = [c for c in self._jar if _matches(c, host, path, parts.scheme == "https",
+                                                    now)]
+        sent.sort(key=lambda c: -len(c.path))
+        return "; ".join(f"{c.name}={c.value}" if c.value is not None else c.name
+                         for c in sent) or None
 
     def take(self, url: str, headers) -> None:
         """Store the Set-Cookie lines of the response to `url` (`headers`, an
-        email.message.Message such as http.client's)."""
-        self._jar.extract_cookies(_Response(headers), urllib.request.Request(url))
+        email.message.Message such as http.client's), the stdlib's policy checking the
+        Domain each claims; one with no Domain is the host's own, dot or no dot."""
+        request = urllib.request.Request(url)
+        host = urlsplit(url).hostname or ""
+        with self._lock:
+            for cookie in self._jar.make_cookies(_Response(headers), request):
+                if not cookie.domain_specified:  # not the stdlib's `<host>.local`
+                    cookie.domain = host
+                self._jar.set_cookie_if_ok(cookie, request)
 
     def add(self, cookie: http.cookiejar.Cookie) -> None:
-        self._jar.set_cookie(cookie)
+        with self._lock:
+            self._jar.set_cookie(cookie)
 
     def to_browser(self) -> list[dict]:
-        """The jar as Playwright's context.add_cookies() takes it."""
-        out = []
-        for c in self._jar:
-            name, value = ("", c.name) if c.value is None else (c.name, c.value)
-            entry = {"name": name, "value": value, "domain": c.domain, "path": c.path,
+        """The jar as Playwright's context.add_cookies() takes it. A cookie whose bytes are
+        no UTF-8 text cannot reach the browser: left out, and said (no value shown)."""
+        out, skipped = [], 0
+        with self._lock:
+            cookies = list(self._jar)
+        for c in cookies:
+            try:
+                name, value, path = (s.encode("latin-1").decode("utf-8")
+                                     for s in (*_pair(c), c.path))
+            except UnicodeDecodeError:
+                skipped += 1
+                continue
+            entry = {"name": name, "value": value, "domain": c.domain, "path": path,
                      "httpOnly": _httponly(c), "secure": bool(c.secure)}
             if c.expires is not None:
                 entry["expires"] = c.expires
             out.append(entry)
+        if skipped:
+            logger.warning("--cookies: %d cookie(s) of the jar are no UTF-8 text; the "
+                           "browser does not get them, the requests of the profile do",
+                           skipped)
         return out
 
     def merge(self, cookies: list[dict]) -> None:
@@ -87,23 +150,23 @@ class Jar:
         replaces the jar's of the same domain, path and name."""
         for c in cookies:
             expires = c.get("expires", -1)
-            self.add(_cookie(c["domain"], c["path"], bool(c.get("secure")),
-                             None if expires < 0 else int(expires), c["name"], c["value"],
-                             bool(c.get("httpOnly"))))
+            self.add(_cookie(_wire(c["domain"]), _wire(c["path"]), bool(c.get("secure")),
+                             None if expires < 0 else int(expires), _wire(c["name"]),
+                             _wire(c["value"]), bool(c.get("httpOnly"))))
 
     def save(self) -> None:
         """Write the jar back to its file: created owner-only (0600), an existing file's
         mode kept; expired cookies left out, session ones kept (expiry 0, as curl)."""
-        self._jar.clear_expired_cookies()
+        with self._lock:
+            self._jar.clear_expired_cookies()
+            cookies = sorted(self._jar, key=lambda c: (c.domain, c.path, c.name))
         lines = [_FIRST_LINE]
-        for c in sorted(self._jar, key=lambda c: (c.domain, c.path, c.name)):
-            name, value = ("", c.name) if c.value is None else (c.name, c.value)
+        for c in cookies:
             lines.append("\t".join((
                 (HTTPONLY_PREFIX if _httponly(c) else "") + c.domain,
                 "TRUE" if c.domain.startswith(".") else "FALSE", c.path,
-                "TRUE" if c.secure else "FALSE", str(c.expires or 0), name, value)) + "\n")
-        atomic_write_bytes(self.path, "".join(lines).encode("latin-1", "replace"),
-                           private=True)
+                "TRUE" if c.secure else "FALSE", str(c.expires or 0), *_pair(c))) + "\n")
+        atomic_write_bytes(self.path, "".join(lines).encode("latin-1"), private=True)
 
 
 def load_jar(path: str) -> Jar:

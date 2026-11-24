@@ -58,6 +58,8 @@ Entry format:
   - robots.txt and the discovery requests carry the matching cookies, as every HTTrack request does;
   - the browser pass merges back every cookie its context holds, a subresource's from another host included;
   - the `Cookie` line goes after the `--header` lines, last, as `http_sendhead` writes it (htslib.c:1401-1412), read in the clone authorised on #170.
+  - the jar matches cookies itself, per RFC 6265 5.4, and uses `http.cookiejar` only to read `Set-Cookie`: the stdlib's policy reads a host without a dot (localhost, an intranet `wiki`) as `<host>.local`, so it sent such a host no cookie of the file or the browser and wrote the `.local` name back (lane review);
+  - every string of the jar is wire bytes as latin-1, a browser's cookie taken as the UTF-8 bytes Chromium sends: nothing is replaced on the way to the file (lane review);
 - **Why:** the Agent Brief and the 2026-11-24 decisions fix the rest; these are the gaps, each filled with the louder or the more HTTrack-faithful option.
 - **Rejected:**
   - `MozillaCookieJar` for the file: it drops an expiry-0 session cookie, forgets the HttpOnly of a `Set-Cookie` and quotes a bad line, value included, in its error (probed on Python 3.10 and 3.13);

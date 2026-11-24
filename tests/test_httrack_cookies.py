@@ -213,3 +213,34 @@ def test_a_refused_run_leaves_the_jar_as_it_was(tmp_path, jar_file):
                                    "--headless", "--cache", "2", "--cookies", str(jar_file)])
     assert res.exit_code == 2, res.output
     assert jar_file.read_bytes() == before
+
+
+def test_a_dotless_host_keeps_its_cookies_and_its_name(tmp_path):
+    """localhost, an intranet `wiki`: http.cookiejar matches them as `<host>.local`; the jar
+    sends them to the host itself and writes the host's own name back (review of #169)."""
+    path = tmp_path / "cookies.txt"
+    path.write_text("localhost\tFALSE\t/\tFALSE\t0\ta\t1\n")
+    jar = load_jar(str(path))
+    jar.take("http://localhost:8080/docs/p", _set_cookies("b=2; Path=/"))
+    jar.merge([{"name": "c", "value": "3", "domain": "wiki", "path": "/", "expires": -1,
+                "httpOnly": False, "secure": False}])
+    assert jar.header("http://localhost:8080/x") == "a=1; b=2"
+    assert jar.header("http://wiki:8080/x") == "c=3"
+    assert jar.header("http://sub.localhost/x") is None
+    jar.save()
+    assert path.read_text().splitlines()[1:] == ["localhost\tFALSE\t/\tFALSE\t0\ta\t1",
+                                                 "localhost\tFALSE\t/\tFALSE\t0\tb\t2",
+                                                 "wiki\tFALSE\t/\tFALSE\t0\tc\t3"]
+
+
+def test_a_browser_cookie_beyond_latin1_goes_on_the_wire_and_back_as_utf8(tmp_path):
+    """The jar holds wire bytes (latin-1): a browser's cookie value goes as its UTF-8 bytes,
+    the bytes Chromium sends, and the file gets them unchanged; nothing turns into '?'."""
+    path = tmp_path / "cookies.txt"
+    jar = load_jar(str(path))
+    jar.merge([{"name": "n", "value": "日本", "domain": "127.0.0.1", "path": "/",
+                "expires": -1, "httpOnly": False, "secure": False}])
+    assert jar.header("http://127.0.0.1/").encode("latin-1") == "n=日本".encode()
+    jar.save()
+    assert path.read_bytes().endswith("\tn\t日本\n".encode())
+    assert load_jar(str(path)).to_browser()[0]["value"] == "日本"
