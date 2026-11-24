@@ -116,6 +116,15 @@ Entry format, grouped under one heading per issue or PR:
   Extract the later stages (dedup, scoring, summary) into their own modules
   when the next stage lands in `pack.py`.**
 
+## `commands/pack.py` size budget, page-layout stub links (#174, 2026-11-24)
+
+- **`commands/pack.py` is 870 lines, above the 800-line budget** (869 before
+  #174, which only passes `stub_paths` to the page layout; the logic lives in
+  `lib/page_layout.py`).
+  ⏸ **accepted: same reason and same trigger as the #139/#163 entry above:
+  extract the later stages (dedup, scoring, summary) when the next stage lands
+  in `pack.py`.**
+
 ## httrack browser pass, in-memory stores (#160, #167, 2026-11-20)
 
 - **The engine's response store also keeps non-HTML bodies.** `RunResponses.keep` (`src/dograpper/lib/httrack/crawl.py`) stores every 2xx body, so images, PDFs or stylesheets of a seeded list can fill the 128 MiB cap before the pages the browser pass needs. ⏸ **accepted: the pages of a documentation site are small and a non-HTML answer is reused too (saved as fetched); fix by keeping only `text/html` when a run is seen to hit the cap, or when memory use of a real crawl matters.**

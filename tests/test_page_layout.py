@@ -457,6 +457,40 @@ def test_a_link_to_a_skipped_redirect_alias_points_at_its_target(tmp_path):
         "See [translation][1].\n\n[1]: <Translation.md>\n")
 
 
+def _stub(target):
+    return f'<html><head><meta http-equiv="refresh" content="0; url={target}"></head><body><p>Redirecting...</p></body></html>'
+
+
+def _linked(href):
+    return f'<main><p>See <a href="{href}">it</a>.</p></main>'
+
+
+T = "<main><p>The target page.</p></main>"
+
+
+@pytest.mark.parametrize("files, href, definition", [
+    ({"s.html": _stub("t.html")}, "s.html", "<t.md>"),                          # P -> S -> T
+    ({"s.html": _stub("t.html#b")}, "s.html", "<t.md#b>"),                      # the stub target's fragment
+    ({"s.html": _stub("t.html#b")}, "s.html#a", "<t.md#a>"),                    # the link's fragment wins
+    ({"sub/s1.html": _stub("s2.html"), "sub/s2.html": _stub("../t.html")},      # chain, each hop
+     "sub/s1.html", "<t.md>"),                                                  # resolved from its stub
+    ({"s1.html": _stub("s2.html"), "s2.html": _stub("s1.html")}, "s1.html", "s1.html"),  # loop
+    ({"s.html": _stub("gone.html")}, "s.html", "s.html"),                       # target not packed
+    ({"s.html": _stub("http://example.com/t.html")}, "s.html", "s.html"),       # absolute
+    ({"s.html": _stub("/t.html")}, "s.html", "s.html"),                         # root-relative
+    ({"s.html": _stub("t.html?x=1")}, "s.html", "s.html"),                      # query
+    ({"s.html": _stub("../t.html")}, "s.html", "s.html"),                       # outside the mirror
+    ({f"s{i}.html": _stub(f"s{i + 1}.html") for i in range(1, 12)} | {"s12.html": _stub("t.html")},
+     "s1.html", "s1.html"),                                                     # past the bound
+])
+def test_a_link_to_a_skipped_redirect_stub_points_at_its_target(files, href, definition):
+    _write("docs", {"p.html": _linked(href), "t.html": T, **files})
+    result = _pack("docs", "-o", "out", "--layout", "page")
+    assert result.exit_code == 0, result.output
+    assert "redirect stub page(s) skipped" in result.output
+    assert _read("out/pages/p.md").endswith(f"\n\n[1]: {definition}\n")
+
+
 def test_cross_refs_point_at_page_paths(tmp_path):
     _write("docs", {
         "a.html": "<html><body><main><p>See <a href=\"sub/b.html\">Beta page</a> now.</p></main></body></html>",

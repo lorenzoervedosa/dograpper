@@ -295,6 +295,7 @@ stays `0.0.0.dev0`.
 
 ### Changed
 
+- `pack --layout page` (md): a link to a redirect stub that `pack` skipped now points at the packed page its meta refresh names, as links to MediaWiki aliases do, instead of keeping a target the output does not have. Chains of stubs are followed (up to 8 hops); loops, absolute, root-relative, out-of-input, query-carrying and unpacked targets leave the link as written. ([#174])
 - `download --downloader httrack` over a result that looks client-rendered (and `sync`) no longer requests each page a second time for the browser pass: the pages the engine already fetched in the run (up to 128 MiB in memory) are handed to the browser. ([#160])
 - `download --downloader httrack --headless` requests a script or stylesheet that several pages share once per run, instead of once per page (a per-run in-memory cache of at most 64 MiB; nothing is written to disk). ([#167])
 - `download --downloader httrack --headless` follows a navigation a page starts itself (meta refresh, `location =`) as a link of that page, within scope, `--filter`, `--depth` and `--max-links`, instead of dropping it. ([#159])
@@ -643,3 +644,4 @@ stays `0.0.0.dev0`.
 [#139]: https://github.com/lorenzoervedosa/dograpper/issues/139
 [#163]: https://github.com/lorenzoervedosa/dograpper/issues/163
 [#180]: https://github.com/lorenzoervedosa/dograpper/issues/180
+[#174]: https://github.com/lorenzoervedosa/dograpper/issues/174
