@@ -404,3 +404,12 @@ def test_a_jar_that_is_a_symlink_is_written_through_it(tmp_path):
     jar.save()
     assert link.is_symlink() and "\tb\t2\n" in target.read_text()
     assert target.stat().st_mode & 0o777 == 0o640
+
+
+def test_an_expiry_out_of_range_is_a_bad_line_not_a_traceback(tmp_path):
+    path = tmp_path / "cookies.txt"
+    path.write_text("# Netscape HTTP Cookie File\n127.0.0.1\tFALSE\t/\tFALSE\t"
+                    + "9" * 400 + "\ta\tS3CRET\n")
+    with pytest.raises(ValueError, match="^line 2 ") as e:
+        load_jar(str(path))
+    assert "S3CRET" not in str(e.value)

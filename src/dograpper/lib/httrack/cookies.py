@@ -290,8 +290,10 @@ def load_jar(path: str, host: str | None = None) -> Jar:
         domain, flag, cpath, secure, expires, name, value = fields
         try:
             expires = int(expires)
-        except ValueError:
-            raise ValueError(f"line {number} has an expiry that is not a number") from None
+            float(expires)  # Cookie() keeps it as a float: past ~1e308 that overflows
+        except (ValueError, OverflowError):
+            raise ValueError(f"line {number} has an expiry that is not a number in "
+                             "range") from None
         domain = domain.lstrip(".")
         if flag.upper() == "TRUE":  # a Netscape jar dots exactly its domain cookies
             domain = "." + domain

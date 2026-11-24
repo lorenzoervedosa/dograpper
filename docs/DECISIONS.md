@@ -57,6 +57,7 @@ Entry format:
   - a `Secure` cookie, and one named `__Secure-`/`__Host-`, is taken over https alone; beyond the brief, plain http also may not shadow, replace or erase a Secure one (RFC 6265bis 5.6 step 16, as HTTrack's `htslib.c:1983-1987`): that is how the review's http cookie overwrote the https session; the prefixes' other requirements (`__Host-`: no Domain, `Path=/`) are not checked;
   - an expired `Set-Cookie` (`Max-Age=0`) on a dotless host erases the cookie the jar holds for that host, where the stdlib named it `<host>.local`;
   - a jar that is a symlink is written to the link's target (resolved when the run ends; a dangling link creates its target, 0600), done in `Jar.save()`, not in `atomic_write_bytes`, whose other callers keep replacing what is at their path;
+  - an expiry past what a float holds (over ~308 digits) is a bad line of the file (exit 2 with its number), where `Cookie()` raised `OverflowError`; a `Set-Cookie` with such a `Max-Age` is already dropped by the stdlib, which only warns "http.cookiejar bug!" on stderr, left as it is;
 - **Why:** each was reproduced by the review; the tests run the failing case first.
 - **Rejected:** fixing the sub-sitemap rule of `sitemap_parser` instead (kept as it is, as decided).
 - **Pending:** none.
