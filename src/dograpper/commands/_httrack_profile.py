@@ -3,7 +3,6 @@
 download.py keeps the click options and the dispatch; this module owns the mode.
 """
 
-import dataclasses
 import logging
 import os
 from typing import Callable, Dict, List, Tuple
@@ -14,7 +13,6 @@ import click
 from ..lib.config_loader import is_explicit
 from ..lib.httrack.browser import Navigator
 from ..lib.httrack.changes import CHANGES_FILE
-from ..lib.httrack.cookies import Jar, load_jar
 from ..lib.httrack.crawl import MAX_REDIRECTS, RunResponses, fetch_url_list
 from ..lib.httrack.escape import request_target
 from ..lib.httrack.fetcher import REDIRECTS, Fetcher, same_host
@@ -22,12 +20,13 @@ from ..lib.httrack.mirror import mirror_site
 from ..lib.httrack.policy import build_policy, warn_if_old_openssl
 from ..lib.httrack.report import RunReport, format_report
 from ..lib.manifest import Manifest
-from ..lib.playwright_crawl import run_browser_login, run_playwright_crawl
+from ..lib.playwright_crawl import run_playwright_crawl
 from ..lib.spa_detector import is_spa
 from ..utils.atomic_write import atomic_write_bytes
 from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
 from ._profile_headers import checked_user_agent, single_user_agent, user_headers
+from ._run_jar import RunJar
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ def config_note(from_config: bool) -> str:
 
 
 def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
-    """Return (policy_kw, from_config, session) for the profile options, `session` the
+    """Return (policy_kw, from_config, run_kw) for the profile options, `run_kw` the
     _RUN_OPTIONS for run_httrack. A value not set on the command line goes through its
     option's click type (ranges, booleans), so config gets the CLI's checks and messages;
     under wget a profile option, and under any downloader but httrack an [httrack] one,
@@ -91,18 +90,18 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
             needs = "httrack" if only_httrack else "httrack or fire-engine"
             flags = "/".join((*param.opts, *param.secondary_opts))  # --x/--no-x: both
             raise click.UsageError(f"{flags} requires --downloader {needs}")
-    session = {k: values.pop(k) for k in _RUN_OPTIONS}
+    run_kw = {k: values.pop(k) for k in _RUN_OPTIONS}
     header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
     user_agent = checked_user_agent(values['user_agent'],
                                     config_note('user_agent' in from_config))
-    login = session['browser_login']  # its User-Agent is the browser's, known after the login
+    login = run_kw["browser_login"]  # its User-Agent is the browser's, known after the login
     agent = single_user_agent({"--user-agent": user_agent,
                                "--header 'User-Agent: …'": header_ua,
                                "--browser-login": "" if login else None})
     values['user_agent'] = None if login else agent
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     policy_kw['headers'] = headers
-    return policy_kw, from_config, session
+    return policy_kw, from_config, run_kw
 
 
 def _build_policy(delay, policy_kw, from_config):
@@ -320,29 +319,6 @@ def _front_failed(discovered: bool, challenged: bool) -> str:
     return f"httrack profile: {cause}. See the README section \"Downloader profiles\"."
 
 
-def _jar(path: str | None, from_config) -> Jar | None:
-    """The --cookies jar, loaded before any request; a bad line is a usage error naming
-    its number, never its content (lib/httrack/cookies.py)."""
-    if path is None:
-        return None
-    try:
-        return load_jar(path)
-    except ValueError as e:
-        raise click.UsageError(f"--cookies {path}: {e}{config_note('cookies' in from_config)}")
-    except OSError as e:
-        raise click.ClickException(f"--cookies: cannot read {path}: {e.strerror or e}")
-
-
-def _login(url: str) -> tuple[list[dict], str]:
-    """--browser-login's headed Chromium (lib/playwright_crawl.py), failures as exit 1."""
-    try:
-        return run_browser_login(url)
-    except RuntimeError as e:  # Playwright, Chromium or a display missing; no Enter
-        raise click.ClickException(str(e))
-    except ValueError as e:  # check_value: a User-Agent no header line can carry
-        raise click.ClickException(f"--browser-login: {e}")
-
-
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
                 policy_kw, from_config, discover, filters, previous: Manifest | None = None,
                 *, cookies: str | None = None, browser_login: bool = False
@@ -354,33 +330,12 @@ def run_httrack(url, output, depth, delay, include_extensions, headless, verbose
     opens a headed Chromium on `url` before the first request: its cookies go into the jar
     and its User-Agent is the run's."""
     warn_if_old_openssl()
-    jar, failed = None, True
+    with RunJar(url, cookies, config_note('cookies' in from_config), browser_login) as run:
+        def make_fetcher(policy):  # past run_profile's usage checks: a refused run reads no jar
+            policy, jar = run.open(policy)
+            return Fetcher(policy, cookies=jar)
 
-    def make_fetcher(policy):  # past run_profile's usage checks: a refused run reads no jar
-        nonlocal jar
-        loaded = _jar(cookies, from_config)
-        if browser_login:
-            found, agent = _login(url)
-            loaded = loaded if loaded is not None else Jar(None)  # no FILE: kept for the run
-            loaded.merge(found)
-            policy = dataclasses.replace(policy, user_agent=agent)
-        jar = loaded
-        return Fetcher(policy, cookies=jar)
-
-    try:
-        result = run_profile("httrack", make_fetcher, url, output, depth, delay,
-                             include_extensions, verbose, policy_kw, from_config, discover,
-                             filters, previous, front_failed=_front_failed, fallback=None,
-                             headless=headless)
-        failed = False
-        return result
-    finally:
-        if jar is not None and jar.path is not None:
-            try:
-                jar.save()
-            except OSError as e:
-                msg = f"--cookies: cannot write {jar.path}: {e.strerror or e}"
-                if failed:  # the run's own error stays the one shown
-                    logger.error(msg)
-                else:
-                    raise click.ClickException(msg) from None
+        return run_profile("httrack", make_fetcher, url, output, depth, delay,
+                           include_extensions, verbose, policy_kw, from_config, discover,
+                           filters, previous, front_failed=_front_failed, fallback=None,
+                           headless=headless)

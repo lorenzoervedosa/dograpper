@@ -61,21 +61,11 @@ _NO_DISPLAY = ("--browser-login opens a browser window, and there is no display 
                "FILE, then run here with --cookies FILE alone.")
 
 
-def _press_enter() -> None:
-    print("Log in, or pass the challenge, in the browser window, then press Enter here.",
-          file=sys.stderr, flush=True)
-    try:
-        input()
-    except EOFError:
-        raise RuntimeError("--browser-login waits for you to press Enter, and the terminal "
-                           "input is closed. Run it in an interactive terminal.") from None
-
-
-def run_browser_login(url: str, wait=_press_enter) -> tuple[list[dict], str]:
+def run_browser_login(url: str, wait) -> tuple[list[dict], str]:
     """--browser-login (#171): a headed Chromium on `url`, where a person logs in or passes a
-    challenge, then `wait` returns (Enter in the terminal). Returns (the context's cookies,
-    the browser's own navigator.userAgent). RuntimeError, with the fix, when Playwright or
-    a display is missing."""
+    challenge; `wait()` returns once they are done (the command's terminal dialog). Returns
+    (the context's cookies, the browser's own navigator.userAgent). RuntimeError, with the
+    fix, when Playwright or a display is missing."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -87,22 +77,26 @@ def run_browser_login(url: str, wait=_press_enter) -> tuple[list[dict], str]:
     with sync_playwright() as p:
         browser = _launch(p, headless=False)
         try:
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto(url, wait_until="commit")  # the person waits for the rest
-            wait()
-            # read on a blank page: a script of the site can redefine navigator.userAgent
-            agent = context.new_page().evaluate("navigator.userAgent")
+            try:
+                context = browser.new_context()
+                context.new_page().goto(url, wait_until="commit")  # the person waits for the rest
+            except Exception as e:
+                raise _login_error(url, e) from None
+            wait()  # the caller's terminal dialog: its errors are its own
+            try:  # on a blank page: a script of the site can redefine navigator.userAgent
+                agent = context.new_page().evaluate("navigator.userAgent")
+                cookies = context.cookies()
+            except Exception as e:  # the window was closed meanwhile
+                raise _login_error(url, e) from None
             check_value("User-Agent", agent)  # the wire guard of --user-agent and --header
-            return context.cookies(), agent
-        except (RuntimeError, ValueError):
-            raise
-        except Exception as e:  # Playwright's: the page did not open, or the window closed
-            first = (str(e).splitlines() or [type(e).__name__])[0]
-            raise RuntimeError(f"--browser-login: {first.replace(url, redact_url(url))}"
-                               ) from None
+            return cookies, agent
         finally:
             browser.close()
+
+
+def _login_error(url: str, e: Exception) -> RuntimeError:
+    """A Playwright error of the login as one line, the start URL's credentials hidden."""
+    return RuntimeError("--browser-login: " + first_line(e).replace(url, redact_url(url)))
 
 
 def run_playwright_crawl(

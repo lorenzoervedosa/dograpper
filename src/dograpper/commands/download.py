@@ -442,7 +442,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
             raise click.UsageError("--proxy requires --downloader fire-engine")
         if impersonate != 'chrome':
             raise click.UsageError("--impersonate requires --downloader fire-engine")
-    policy_kw, from_config, session = resolve_profile(ctx, merged_params, downloader)
+    policy_kw, from_config, run_kw = resolve_profile(ctx, merged_params, downloader)
     filters = _url_filters(ctx, merged_params['filter'])
     if downloader == 'wget':
         try:  # wget --mirror's regexes cannot say every rule order: refuse before any fetch
@@ -464,7 +464,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         files_downloaded, files_skipped, report_lines, fetched, records = run_httrack(
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
-            previous=manifest_data, **session,
+            previous=manifest_data, **run_kw,
         )
     elif downloader == 'fire-engine':
         files_downloaded, files_skipped, report_lines, fetched, records = run_fire_engine(
