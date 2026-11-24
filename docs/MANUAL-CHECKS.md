@@ -48,4 +48,4 @@ Entry format, one heading per check:
   3. Add the expected value: `?1`, which `chrome99_android` already sends.
   4. Add the reproduction: one request to a local socket server that prints the raw request head.
 - **Pass when:** the upstream issue exists and is linked on #157. dograpper already overrides the value (#184).
-- ⏳ **pending**
+- ✅ **done** (2026-11-24): [lexiforest/curl_cffi#911](https://github.com/lexiforest/curl_cffi/issues/911), linked on #157.
