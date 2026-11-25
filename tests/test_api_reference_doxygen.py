@@ -1,11 +1,13 @@
 """`pack --api-records` on Doxygen pages: container and member records (ADR-0009).
 
-The fixture is Doxygen 1.9.8 output for the C++ and C sources in tests/fixtures/doxygen/src
-(regenerate with tests/fixtures/doxygen/regenerate.sh).
+The fixture is Doxygen 1.9.8 output for the C++ and C sources in tests/fixtures/doxygen/src, the C
+one also built with the source browser on (source-browser/); regenerate with
+tests/fixtures/doxygen/regenerate.sh.
 """
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -185,6 +187,41 @@ def test_overloads_are_one_record_each_under_their_own_anchor():
         CLASS_TEMPLATE, "BoxError shapes::Box< T, N >::put ( T && item )", "Stores one item, moving it in."]
 
 
+MAYBE = "maybe::Maybe< T >"
+IMPLICIT = "template<typename U = T, std::enable_if_t< std::is_convertible_v< U, T >, bool > = true>"
+EXPLICIT = "template<typename U = T, std::enable_if_t<!std::is_convertible_v< U, T >, bool > = false>"
+
+
+def test_overloads_that_share_an_anchor_are_one_member_record():
+    # Doxygen 1.9.8 gives overloads that differ only in the default template argument of an
+    # enable_if constraint one anchor (libstdc++'s std::optional and std::pair): the record under
+    # that anchor holds every overload in page order, summary rows and sections alike.
+    page = _page("cpp/classmaybe_1_1Maybe.html")
+    recs = split_page(page)
+    assert [(r.symbol[len(MAYBE) + 2:], r.kind, r.symbol_kind) for r in recs] == [
+        ("", "container", "class"), ("Maybe", "member", "function"), ("Maybe", "member", "function"),
+        ("has_value", "member", "function"), ("operator=", "member", "function")]
+    assert len({r.anchor for r in recs}) == len(recs)
+    assert all(f'<a id="{r.anchor}"' in page for r in recs[1:])
+    _, _, by_value, _, assign = recs
+    assert (by_value.anchor, by_value.container, by_value.breadcrumb) == (
+        "a9d21bb8d8c2ca8a9cbf25e12045dd8c5", MAYBE, [MAYBE, "Maybe"])
+    assert by_value.text == "\n".join([
+        f"{MAYBE}::Maybe",
+        IMPLICIT, "Maybe (U &&value)", "Holds a value that converts to T implicitly.",
+        EXPLICIT, "Maybe (U &&value)", "Holds a value that converts to T only explicitly."])
+    assert assign.anchor == "ae487aaddbf285167dfd0c28a49131fea"
+    assert assign.text == "\n".join([
+        f"{MAYBE}::operator=",
+        "template<typename T >", IMPLICIT, "Maybe & maybe::Maybe< T >::operator= ( U && value )",
+        "Replaces the value with one that converts to T implicitly.",
+        "Parameters", "value", "the new value", "Returns this maybe",
+        "template<typename T >", EXPLICIT, "Maybe & maybe::Maybe< T >::operator= ( U && value )",
+        "Replaces the value with one that converts to T only explicitly.",
+        "Parameters", "value", "the new value, converted with a cast", "Returns this maybe"])
+    assert recs[0].text.split("\n")[-1] == "Public Member Functions: Maybe, operator=, has_value"
+
+
 def test_labels_enumerators_and_notes_stay_on_the_member_record():
     recs = _records("cpp/classshapes_1_1Box.html")
     assert recs["a01f18ac2971596678134b031230cf527"].text == "\n".join([
@@ -308,11 +345,95 @@ def test_c_struct_fields_are_member_records():
     assert [head.symbol, tail.symbol] == ["ring::head", "ring::tail"]
 
 
+def test_a_group_page_is_a_container_of_the_members_it_documents():
+    # A topic page (\defgroup) has no "... Reference" title. Its members are named as the page
+    # writes them: qualified for a namespace member, bare for a \relates one or an enum with no
+    # name; their anchors start with "g". The classes it lists are names: their pages give records.
+    recs = split_page(_page("cpp/group__counting.html"))
+    assert [(r.symbol, r.kind, r.symbol_kind, r.container, r.anchor) for r in recs] == [
+        ("Counting", "container", "group", "", ""),
+        ("algo::count_if", "member", "function", "Counting", "ga1c70cb50feb9f2fc5abe50c75cab7c88"),
+        # Its summary row links its first enumerator, not its section.
+        ("anonymous enum", "member", "enum", "Counting", "gaee94dea4b6199973136da8b263ecf58c"),
+        ("algo::count", "member", "function", "Counting", "ga1e8d4c18ba0a66f3af0eef845ca8ba21"),
+        ("make_tally", "member", "function", "Counting", "ga663bd8b30bed4a4e1f5bd902148824b7")]
+    counting, count_if, anonymous, count, make_tally = recs
+    assert counting.text == "\n".join([
+        "Counting (group)",
+        "Functions that count the items of a range.",
+        "Functions that count the items of a range.",  # the brief, repeated in the description
+        "Each function walks its range once.",
+        "Classes: algo::Tally",
+        "Enumerations: anonymous enum",
+        "Functions: algo::count, algo::count_if, make_tally"])
+    assert anonymous.text == "\n".join([
+        "anonymous enum", "anonymous enum", "How a count treats items that compare equal.",
+        "Enumerator", "COUNT_ALL", "Every equal item counts.", "COUNT_FIRST", "Only the first equal item counts."])
+    assert count_if.text == "\n".join([
+        "algo::count_if", "template<typename It , typename Pred >", "std::size_t algo::count_if (It first, It last, Pred pred)",
+        "The number of items of a range a predicate accepts."])
+    assert (count.breadcrumb, count.url("cpp/group__counting.html")) == (
+        ["Counting", "algo::count"], "cpp/group__counting.html#ga1e8d4c18ba0a66f3af0eef845ca8ba21")
+    assert count.text == "\n".join([
+        "algo::count", "template<typename It , typename T >", "std::size_t algo::count ( It first, It last, const T & value )",
+        "The number of items of a range equal to a value.", "Parameters", "first", "the start of the range", "last",
+        "the end of the range", "value", "the value to look for", "Returns how many items compare equal to value"])
+    assert make_tally.text == "\n".join([
+        "make_tally", "Tally make_tally ( std::size_t start )", "related", "A tally that starts at a count.",
+        "Parameters", "start", "the first count"])
+
+
+def test_a_group_page_without_member_sections_keeps_one_record():
+    # "Algorithms" lists its subgroup only; a group of brief-only members stays whole too.
+    page = _page("cpp/group__algorithms.html")
+    assert 'class="memtitle"' not in page
+    with pytest.raises(NotSplit, match="^Doxygen index, listing, source or topic page$"):
+        split_page(page)
+
+
+@pytest.mark.parametrize("old, new, problem", [
+    ('id="ga1e8d4c18ba0a66f3af0eef845ca8ba21"', 'id="a1e8d4c18ba0a66f3af0eef845ca8ba21"',
+     "a topic page member anchor without the g prefix"),
+    ('<tr class="memitem:ga1e8d4c18ba0a66f3af0eef845ca8ba21"><td class="memTemplItemLeft"',
+     '<tr class="memitem:gother"><td class="memTemplItemLeft"', "a topic page member without a summary row"),
+])
+def test_a_group_page_with_other_markup_is_not_split(old, new, problem):
+    page = _page("cpp/group__counting.html")
+    assert old in page
+    with pytest.raises(NotSplit, match=f"^unsupported Doxygen markup: {problem}$"):
+        split_page(page.replace(old, new, 1))
+
+
+SOURCE_BROWSER = Path(__file__).parent / "fixtures" / "doxygen" / "source-browser"
+RING_INIT, RING_CLEAR, RING_COUNT = (
+    "a75b4c8a8753ae9400ee8f46ea6a091b3", "aa7acb80ec349c5e57aac209e6dbc1409", "ad58c19bce1efa5d66b97448915252c85")
+
+
+@pytest.mark.parametrize("name, same_text", [
+    ("c/ring_8h.html", ["", RING_INIT, RING_CLEAR, RING_COUNT]),
+    ("c/structring.html", [""]),
+])
+def test_the_source_browser_lines_are_dropped(name, same_text):
+    # SOURCE_BROWSER = YES adds "Definition at line N of file F." (a container's "Definition in
+    # file F.") and, for what a function body uses, "References ..." / "Referenced by ...": line
+    # numbers move with every release. The plain build of the same source gives the same records;
+    # a member documented by its brief alone there gets a section here, so its text differs.
+    browsed = {r.anchor: r for r in split_page((SOURCE_BROWSER / name).read_text(encoding="utf-8"))}
+    plain = _records(name)
+    assert {a: (r.symbol, r.kind, r.symbol_kind) for a, r in browsed.items()} == {
+        a: (r.symbol, r.kind, r.symbol_kind) for a, r in plain.items()}
+    assert [browsed[a].text for a in same_text] == [plain[a].text for a in same_text]
+    for record in browsed.values():
+        assert not [ln for ln in record.text.split("\n")
+                    if ln.startswith(("Definition at line", "Definition in file", "References", "Referenced by"))]
+
+
 SYMBOL_PAGES = {
     "cpp/classshapes_1_1Box.html", "cpp/classshapes_1_1Box_1_1View.html", "cpp/classshapes_1_1Shape.html",
     "cpp/classshapes_1_1Square.html", "cpp/structshapes_1_1Point.html", "cpp/unionshapes_1_1Bits.html",
     "cpp/namespaceshapes.html", "cpp/namespaceshapes_1_1detail.html", "cpp/shapes_8hpp.html",
-    "c/ring_8h.html", "c/structring.html",
+    "cpp/classmaybe_1_1Maybe.html", "cpp/namespacemaybe.html", "cpp/classalgo_1_1Tally.html",
+    "cpp/namespacealgo.html", "cpp/group__counting.html", "c/ring_8h.html", "c/structring.html",
 }
 
 
@@ -322,9 +443,11 @@ def test_symbol_pages_are_split_and_the_index_listing_and_source_pages_kept_whol
     assert set(split.records) == SYMBOL_PAGES
     kept = dict(split.kept_whole)
     assert len(kept) == len(paths) - len(SYMBOL_PAGES)
-    # The member lists, sources, class and file lists, symbol indexes, main page and deprecated list.
+    # The member lists, sources, class and file lists, symbol indexes, main page, deprecated list,
+    # topic list and a topic page without member sections.
     assert {"cpp/classshapes_1_1Box-members.html", "cpp/shapes_8hpp_source.html", "cpp/annotated.html",
-            "cpp/functions_func.html", "cpp/index.html", "c/deprecated.html", "c/globals.html"} <= set(kept)
+            "cpp/functions_func.html", "cpp/index.html", "c/deprecated.html", "c/globals.html",
+            "cpp/topics.html", "cpp/group__algorithms.html"} <= set(kept)
     assert set(kept.values()) == {"Doxygen index, listing, source or topic page"}
 
 
@@ -347,7 +470,8 @@ def test_a_file_page_that_documents_no_member_keeps_one_record():
     ('<a id="a8d3c008457f75735d700d3ed5e084290" name="a8d3c008457f75735d700d3ed5e084290"></a>\n<h2', "<h2",
      "an h2.memtitle without an anchor"),
     ('</h2>\n\n<div class="memitem">', '</h2>\n\n<div class="memitem-x">', "an h2.memtitle without its div.memitem"),
-    ('id="ab1ff8e2bd6b1b6d72d3413e74051d165"', 'id="a9b2c9af7709c2bb0ffabf015a63b470a"', "duplicate member anchor"),
+    # Two members under one anchor are one record only when they are overloads of one name.
+    ('id="a8d3c008457f75735d700d3ed5e084290"', 'id="a9b2c9af7709c2bb0ffabf015a63b470a"', "duplicate member anchor"),
     ("&#160;</a></span>map()</h2>", "&#160;</a></span></h2>", "a member without a name"),
 ])
 def test_a_page_with_other_markup_is_not_split(old, new, problem):
@@ -397,6 +521,14 @@ def test_parsing_stays_linear_on_hostile_markup():
         assert len(split_page(page)) == page.count('class="memdesc:') + page.count('class="memtitle"') + 1
     assert_linear(lambda n: hostile(n, 0) + _sections(1), run, n=NEST)
     assert_linear(lambda n: hostile(0, n), run, n=MEMBERS // 2)  # two members per n: one of each form
+
+    # Overloads under one anchor are one record, its text joined once, not once per overload.
+    def shared(n):
+        return HEAD.format(name="S") + re.sub(r'id="d\d+"', 'id="d0"', re.sub(r"g\d+", "g0", _sections(n)))
+
+    def run_shared(page):
+        assert [r.text.count("void g0") for r in split_page(page)] == [0, page.count('class="memtitle"')]
+    assert_linear(shared, run_shared, n=MEMBERS)
 
     # A heading is read once, not once per name listed under it.
     def inherited(n):
@@ -464,7 +596,12 @@ def test_pack_writes_doxygen_records(tmp_path):
     assert (ring_push["symbol"], ring_push["container"]) == ("ring_push", "ring.h")
     assert "symbol" not in by_id["01_cpp/classshapes_1_1Box-members.html"]
     assert "c/annotated.html: Doxygen index, listing, source or topic page" in result.stderr
-    assert "API records:     11 pages split into 57 records (11 container, 46 member), 45 pages kept whole" \
+    merged = by_id["01_cpp/classmaybe_1_1Maybe.html#a9d21bb8d8c2ca8a9cbf25e12045dd8c5"]
+    assert (merged["symbol"], merged["content"].count("Maybe (U &&value)")) == (f"{MAYBE}::Maybe", 2)
+    written = [ln for name in os.listdir(out) if name.endswith(".jsonl")
+               for ln in (out / name).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(written) == len(by_id)  # no two records share an id
+    assert "API records:     16 pages split into 71 records (16 container, 55 member), 52 pages kept whole" \
         in result.output
 
 
@@ -472,12 +609,13 @@ def test_dedup_never_touches_a_doxygen_page(tmp_path):
     src, out = _corpus(tmp_path), tmp_path / "out"
     result = _pack(src, out, "--dedup", "both")
     assert result.exit_code == 0, result.output
-    assert "Pages exempted:    11 (API reference)" in result.output
+    assert "Pages exempted:    16 (API reference)" in result.output
 
 
 @pytest.mark.parametrize("query, expected", [
     ("ring push byte", "01_c/ring_8h.html#ad65c0edeeb4d8558ed0702e20e8bb269"),
     ("Box map function every item", "01_cpp/classshapes_1_1Box.html#a8d3c008457f75735d700d3ed5e084290"),
+    ("make_tally", "01_cpp/group__counting.html#ga663bd8b30bed4a4e1f5bd902148824b7"),  # documented on its group only
 ])
 def test_serve_finds_the_doxygen_member_record(tmp_path, query, expected):
     src, out = _corpus(tmp_path), tmp_path / "out"

@@ -48,7 +48,7 @@ extern int ring_count;
  *
  * @param r the ring
  */
-void ring_init(struct ring *r);
+void ring_init(struct ring *r) { r->head = r->tail = 0; ring_count++; }
 
 /**
  * @brief Stores one byte at the tail.
@@ -74,6 +74,6 @@ void ring_visit(const struct ring *r, ring_visitor visit, void *ctx);
  * @param r the ring
  * @deprecated Use ring_init(), which does the same.
  */
-void ring_clear(struct ring *r);
+void ring_clear(struct ring *r) { ring_init(r); }
 
 #endif

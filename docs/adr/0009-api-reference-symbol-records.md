@@ -227,6 +227,9 @@ differently for Doxygen:
 - **Shared anchors.** Doxygen 1.9.8 gives two overloads that differ only in
   their template constraints the same anchor. Such a page keeps one record,
   as decision 5 needs one id per record.
+  (Superseded on 2026-11-25 by
+  [#188](https://github.com/lorenzoervedosa/dograpper/issues/188), see the
+  amendment below.)
 
 The member record p99 bound for Doxygen is 550 words (table above), set by
 the maintainer on 2026-11-20 above the 300 asked for in #168, after the
@@ -251,4 +254,46 @@ libstdc++ 13 (templated C++, 2,240 member records):
   `--api-records` (3.2 s vs 5.1 s, 7.4 s vs 9.1 s).
 
 Topic (group) pages, related pages and the other Doxygen languages keep one
-record: their markup was not measured.
+record: their markup was not measured. (For topic pages, superseded on
+2026-11-25 by [#187](https://github.com/lorenzoervedosa/dograpper/issues/187),
+see the amendment below.)
+
+## Amendment (2026-11-25): Doxygen overloads under one anchor
+
+[#188](https://github.com/lorenzoervedosa/dograpper/issues/188) reverses the
+"Shared anchors" point of the 2026-11-20 amendment. Overloads that Doxygen
+1.9.8 gives one anchor (they differ only in their template constraints) are
+one member record under that anchor, holding each overload's template
+headers, signature and documentation in page order; decision 5 still holds,
+as the page then has one record per anchor. Members of different names or
+kinds under one anchor keep the page whole. The shared duplicate-anchor
+check of the other adapters is unchanged.
+
+On libstdc++ 13 this splits `std::optional` and `std::pair`, the only pages
+the 2026-11-20 run kept whole for this reason: 7 merged records of 60 to 93
+words, two overloads each, and the member p99 stays 138 words
+([acceptance doc, "Follow-ups"](../discovery/doxygen-api-records-acceptance.md)).
+
+## Amendment (2026-11-25): Doxygen topic (group) pages
+
+[#187](https://github.com/lorenzoervedosa/dograpper/issues/187) reverses the
+2026-11-20 amendment for topic pages. A Doxygen 1.9.8 page whose title has no
+"Reference" suffix and that documents members in sections is a topic page
+(`\defgroup`): a container record with `symbol_kind` `group` (title,
+description, member names by summary section), and one member record per
+member it documents, with the group's title as `container`. A group is not a
+code symbol, so a container here may be the page that documents members no
+code symbol declares, as a file page already was (glossary: **Container**).
+Members are named as the page writes them; the maintainer chose this on
+2026-11-25 after the run showed that Doxygen writes a namespace member
+qualified (`std::copy`) and a `\relates` symbol bare (`make_shared`), with no
+scope anywhere on the page. The section's title drops the namespace, so the
+name comes from the member's summary row. A topic page
+without member sections keeps one record, and its member anchors must start
+with `g`, as Doxygen writes a group member's.
+
+On libstdc++ 13 regenerated with its groups (644 pages, 24 group pages, 11
+with member sections), the 11 pages give 353 member records that had none
+before; the member p99 is 142 words (≤ 550), the largest container 772 (≤
+5,000), and 31 of 34 lookups over both corpora hit in the top 5
+([acceptance doc, "Follow-ups"](../discovery/doxygen-api-records-acceptance.md)).

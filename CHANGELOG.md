@@ -258,9 +258,10 @@ stays `0.0.0.dev0`.
   page documents (`std::vector< _Tp, _Alloc >::push_back`, `ring_push`: its
   template headers, signature, labels such as `virtual`, and documentation;
   a member with only a brief description gets its summary row and brief),
-  anchored at Doxygen's member id. `symbol_kind` gains `file`, `typedef` and
-  `define`; `generator` is `doxygen`. Member lists, source pages, indexes,
-  topic (group) pages and unmeasured markup keep one record. A Doxygen page
+  anchored at Doxygen's member id. `symbol_kind` gains `file`, `group`,
+  `typedef` and `define`; `generator` is `doxygen`. Member lists, source
+  pages, indexes, topic (group) pages without member sections and unmeasured
+  markup keep one record. A Doxygen page
   the adapter splits is now never deduplicated, with or without
   `--api-records`, like the other generators' split pages.
   ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
@@ -400,6 +401,24 @@ stays `0.0.0.dev0`.
   hints, which describe the profile's own User-Agent, and warns once per run
   that the TLS fingerprint stays the `--impersonate` profile's; the User-Agent
   keeps the profile's slot. ([#136], [ADR-0011](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0011-fire-engine-downloader.md))
+- `pack --api-records` drops from Doxygen records the lines a site built with
+  `SOURCE_BROWSER = YES` adds: "Definition at line N of file F." and the
+  "References ..." and "Referenced by ..." lists, whose line numbers move with
+  every release. ([#189](https://github.com/lorenzoervedosa/dograpper/issues/189))
+- `pack --api-records` splits a Doxygen page where overloads share one anchor
+  (Doxygen 1.9.8 gives overloads that differ only in their template
+  constraints one id, as on libstdc++'s `std::optional` and `std::pair`)
+  instead of keeping it whole: the overloads are one member record under that
+  anchor, in page order. ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
+  [#188](https://github.com/lorenzoervedosa/dograpper/issues/188))
+- `pack --api-records` splits a Doxygen topic (group) page that documents
+  members in sections instead of keeping it whole: a container record with
+  the new `symbol_kind` `group` (title, description, member names by summary
+  section) and one member record per member it documents, with the group as
+  `container` and the name the page writes (`std::copy`; `make_shared` for a
+  `\relates` symbol). A group page without member sections keeps one record.
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
+  [#187](https://github.com/lorenzoervedosa/dograpper/issues/187))
 
 ### Removed
 

@@ -6,17 +6,21 @@ Template Reference"), and inside ``div.contents`` the summary tables (``table.me
 one ``h2.groupheader`` per section, one ``tr.memitem`` row per member), then the description
 and one documentation section per member kind.
 
-A class, struct, union or namespace page, or a file page that documents members, is a
-container record: the page text outside the members and the summary tables, then the names
-of the summary tables by section, inherited ones by base. Each member Doxygen documents on
+A class, struct, union or namespace page, a file page that documents members, or a topic
+(group) page that documents members in sections, is a container record: the page text
+outside the members and the summary tables, then the names of the summary tables by
+section, inherited ones by base. Each member Doxygen documents on
 the page gets a member record. A member with a detailed section (an anchor, ``h2.memtitle``,
 then ``div.memitem``) is that section: template headers, signature, labels, documentation.
 A member with only a brief description has no section: its anchor sits in its summary row
 (a member template's, in its template header row), so the row and its brief are the record.
 Summary rows that link to a section are dropped, like the inheritance diagrams, the
-permalink signs and the "generated from" footer. A file page names its members alone and
-leaves out the ones of the namespaces it lists, which have pages of their own. Index,
-listing, source and topic (group) pages keep one record; any other markup raises NotSplit.
+permalink signs, the "generated from" footer and the source browser's "Definition at line ..."
+and "References ..." lines. A file page names its members alone and
+leaves out the ones of the namespaces it lists, which have pages of their own; a topic page
+names each member as its summary row does ("algo::count", a \\relates one bare). Overloads
+that Doxygen gives one anchor are one member record holding each of them in page order. Index,
+listing, source and the other topic pages keep one record; any other markup raises NotSplit.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -72,9 +76,10 @@ _ANONYMOUS_ENUM = "anonymous enum"  # how Doxygen titles the section of an enum 
 class _Row:
     """One tr.memitem of a summary table."""
 
-    def __init__(self, label: Optional[Text], inherited: bool):
+    def __init__(self, label: Optional[Text], inherited: bool, member: str):
         self.label = label  # the section's h2, or for an inherited row its "... inherited from" header
         self.inherited = inherited
+        self.member = member  # the anchor in its "memitem:<anchor>" class: its member's, "" for a class
         self.text: Optional[Text] = None
         self.name: Optional[Text] = None    # copy of the first link or bold name of its right cell
         self.anchor: Optional[str] = None   # id of an anchor in the row: the member is documented here
@@ -102,6 +107,7 @@ class _Page(Regions):
         self.members: List[_Member] = []
         self.sections: List[Text] = []  # h2 of the description and of each documentation section
         self.names: List[Tuple[Optional[Text], Text]] = []  # (section, name) of every summary row
+        self.row_names: Dict[str, Text] = {}  # member anchor -> the name its summary row gives it
         self.problem: Optional[str] = None
         self._in_header = self._in_title = self._in_contents = self._right = False
         self._depth = 0          # stack size with div.contents open
@@ -164,7 +170,10 @@ class _Page(Regions):
                 # line's link to the same page sits one level deeper, in its code
                 or (tag == "a" and href.endswith("_source.html")
                     and len(self._stack) == self._depth + 2)
-                or (tag == "div" and ("dynheader" in classes or "dyncontent" in classes or "ttc" in classes))):
+                or (tag == "div" and ("dynheader" in classes or "dyncontent" in classes or "ttc" in classes))
+                # SOURCE_BROWSER's "Definition at line N of file F." and "References ..." /
+                # "Referenced by ...": line numbers that move with every release
+                or (tag == "p" and ("definition" in classes or "reference" in classes))):
             self.skip(closers)  # permalink sign, "[1/2]" after an overloaded name, "More...", diagrams, code tooltips
         elif tag == "table" and "memberdecls" in classes:
             self.region(closers)  # summary text is dropped; rows, names and briefs are read below
@@ -218,7 +227,7 @@ class _Page(Regions):
             self._inherit = self.region(closers)
         elif tag == "tr" and row_class.startswith("memitem:"):
             inherited = "inherit" in classes
-            row = _Row(self._inherit if inherited else self._label, inherited)
+            row = _Row(self._inherit if inherited else self._label, inherited, row_class[len("memitem:"):])
             row.text = self.region(closers)
             self.set_until_end("_row", row, closers)
             closers.append(lambda: self._end_row(row))
@@ -251,6 +260,8 @@ class _Page(Regions):
             row.name.add(_ANONYMOUS_ENUM)  # the row names its first enumerator
         if row.name is not None:
             self.names.append((row.label, row.name))
+            if row.member and not row.inherited:
+                self.row_names.setdefault(row.member, row.name)
         if row.anchor is None or row.inherited:
             return
         if row.name is None:
@@ -267,10 +278,13 @@ def _unsupported(problem: str) -> NotSplit:
     return NotSplit(f"unsupported Doxygen markup: {problem}")
 
 
-def _kind(title: str):
-    """(name, symbol_kind) of a title "<name> <kind> Reference"."""
+def _kind(title: str, sections: bool):
+    """(name, symbol_kind) of a title "<name> <kind> Reference", or of a topic (group) page's
+    title "<name>" when the page has member ``sections``."""
     if not title.endswith(_REFERENCE):
-        raise NotSplit(NOT_API)  # index, list, member list, source page, topic (group) or text page
+        if sections:
+            return title, "group"
+        raise NotSplit(NOT_API)  # index, list, member list, source page, text page, or a topic page without sections
     for kind, symbol_kind in _PAGES.items():
         suffix = f" {kind}{_REFERENCE}"
         if title.endswith(suffix) and len(title) > len(suffix):
@@ -331,12 +345,14 @@ def records(html: str, generator: str) -> List[ApiRecord]:
 
     if page.title is None:
         raise NotSplit(NOT_API)  # the member and symbol indexes have no title block
-    symbol, symbol_kind = _kind(line(page.title))
+    symbol, symbol_kind = _kind(line(page.title), any(not m.summary for m in page.members))
     if page.contents is None:
         raise _unsupported("no div.contents")
     if page.problem is not None:
         raise _unsupported(page.problem)
     check_symbol(symbol, _unsupported)
+    if symbol_kind == "group" and any(not m.anchor.startswith("g") for m in page.members):
+        raise _unsupported("a topic page member anchor without the g prefix")
     for section in page.sections:
         if line(section) not in _SECTIONS and line(section) != _DESCRIPTION:
             raise _unsupported(f"unknown section {line(section)}")
@@ -352,28 +368,44 @@ def records(html: str, generator: str) -> List[ApiRecord]:
 
     # Namespaces a file page lists have pages of their own, which document their members.
     namespaces = {line(name) for label, name in page.names if cached_line(label) == _NAMESPACES}
+    found: Dict[str, Tuple[ApiRecord, List[str]]] = {}  # anchor -> its record and lines, in page order
     anchors = set()
-    members: List[ApiRecord] = []
     for member in page.members:
-        check_anchor(member.anchor, anchors, _unsupported, "duplicate member anchor")
-        name = line(member.name)
-        if not member.summary and name.endswith("()"):
-            name = name[:-2]  # "put()" names a function; "operator()()" keeps its own
+        if symbol_kind == "group" and not member.summary:
+            # The section's title drops the namespace ("count()"); its summary row names the
+            # member as the signature does: "algo::count", or a \relates one bare.
+            if member.anchor not in page.row_names:
+                raise _unsupported("a topic page member without a summary row")
+            name = cached_line(page.row_names[member.anchor])
+        else:
+            name = line(member.name)
+            if not member.summary and name.endswith("()"):
+                name = name[:-2]  # "put()" names a function; "operator()()" keeps its own
         if not name:
             raise _unsupported("a member without a name")
         body = [ln for text, one_line in member.parts
                 for ln in ([line(text)] if one_line else text.final()) if ln]
-        kind = _member_kind(member, cached_line(member.section))
-        if kind is None:
-            continue  # a friend class: its name stays on the container
+        kind = _member_kind(member, cached_line(member.section))  # None for a friend class
         if symbol_kind == "file" and member.summary and name.rpartition("::")[0] in namespaces:
-            continue  # a namespace member Doxygen also anchors here: documented on the namespace page
-        member_symbol = name if symbol_kind == "file" else f"{symbol}::{name}"
+            kind = None  # a namespace member Doxygen also anchors here: documented on the namespace page
+        member_symbol = name if symbol_kind in ("file", "group") else f"{symbol}::{name}"
+        earlier = found.get(member.anchor)
+        if earlier is not None and (earlier[0].symbol, earlier[0].symbol_kind) == (member_symbol, kind):
+            # Doxygen 1.9.8 gives overloads that differ only in a template constraint one anchor
+            # (libstdc++'s std::optional): their one record holds them all, in page order.
+            earlier[1].extend(body)
+            continue
+        check_anchor(member.anchor, anchors, _unsupported, "duplicate member anchor")
+        if kind is None:
+            continue  # its name stays on the container
         check_symbol(member_symbol, _unsupported)
-        members.append(ApiRecord(
-            text="\n".join([member_symbol] + body), symbol=member_symbol, kind="member",
-            symbol_kind=kind, breadcrumb=[symbol, name], generator=GENERATOR, anchor=member.anchor,
-            container=symbol))
+        found[member.anchor] = (ApiRecord(
+            text="", symbol=member_symbol, kind="member", symbol_kind=kind, breadcrumb=[symbol, name],
+            generator=GENERATOR, anchor=member.anchor, container=symbol), [member_symbol] + body)
+    members = []
+    for record, record_lines in found.values():
+        record.text = "\n".join(record_lines)
+        members.append(record)
 
     if symbol_kind == "file" and not members:
         raise NotSplit("Doxygen file page that documents no member")

@@ -1270,7 +1270,10 @@ dograpper serve ./pack   # search_chunks now ranks member records
     parameters, the member names by summary section
     (`Public Member Functions: ...`) and the inherited members by base
     (`... inherited from std::_Vector_base< _Tp, _Alloc >: ...`). The
-    inheritance diagrams and the "generated from" footer are dropped.
+    inheritance diagrams and the "generated from" footer are dropped, and so
+    are, on every record, the lines a site built with `SOURCE_BROWSER = YES`
+    adds: "Definition at line N of file F." and the "References ..." and
+    "Referenced by ..." lists, whose line numbers move with every release.
   - Each member the page documents gets a member record
     (`std::vector< _Tp, _Alloc >::push_back`; on a file page the name as the
     page writes it, `ring_push`): its template headers, every one for a member template of
@@ -1284,12 +1287,24 @@ dograpper serve ./pack   # search_chunks now ranks member records
     name is `anonymous enum`, as Doxygen titles it. A file page leaves out the
     members of the namespaces it lists, which each namespace's page
     documents; the members of a namespace without a page (libstdc++'s `std`)
-    are the file page's own, under their qualified names.
+    are the file page's own, under their qualified names. Doxygen 1.9.8
+    gives overloads that differ only in their template constraints one
+    anchor (libstdc++'s `std::optional` and `std::pair`): they are one
+    member record under that anchor, holding each overload's template
+    headers, signature and documentation in page order.
+  - A topic (group) page (`\defgroup`; its title has no "Reference") that
+    documents members in sections is a container record with `symbol_kind`
+    `group`: the group's title and description and its member names by
+    summary section. Each member it documents is a member record whose
+    `container` is the group, named as the page writes it: qualified for a
+    namespace member (`std::copy`), bare for a `\relates` one (`make_shared`,
+    as libstdc++'s group page writes it). The classes it lists stay names
+    under the group; their own pages give them records.
   - Member lists (`*-members.html`), source pages, the class, file and
-    symbol indexes, topic (group) pages, related pages, pages from another
-    Doxygen version and unmeasured markup keep one record, as does a page
-    where two members share one anchor (Doxygen 1.9.8 gives overloads that
-    differ only in their template constraints the same id).
+    symbol indexes, topic (group) pages without member sections, related
+    pages, pages from another Doxygen version and unmeasured markup keep one
+    record, as does a page where two members of different names or kinds
+    share one anchor.
 - **Container record** (`id` `NN_path` for the page's main container,
   `NN_path#anchor` for a Sphinx class or exception): qualified name and kind,
   inheritance, implemented interfaces and known subclasses, signature,

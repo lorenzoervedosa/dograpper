@@ -22,6 +22,20 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-25 — Doxygen topic (group) pages are split (#187)
+
+- **Decision:** a Doxygen page whose title has no "Reference" suffix and that documents members in sections is a topic page: a `group` container record named by its title, and one member record per member, with the group as `container`. A member is named as the page writes it, taken from its summary row (the row whose `memitem:` class names its anchor): qualified for a namespace member (`std::copy`), bare for a `\relates` symbol (`make_shared`). A topic page without member sections keeps one record; one whose member anchors do not all start with `g`, or with a section that no summary row names, is unsupported markup. This supersedes the 2026-11-20 rejection of "splitting group pages without a measured rule for their kind" (#168).
+- **Why:** the maintainer decided on #187 to split group pages with member sections. The run on libstdc++ 13 (11 such pages, 192 sections) showed that the section title always drops the namespace (`copy()`) while the signature and the summary row keep it, except for the 21 `\relates` symbols, whose scope the page never writes; the maintainer chose the name as written on 2026-11-25 (comment on #187), so the Agent Brief's `std::make_shared` example no longer holds.
+- **Rejected:** keeping a group page with a `\relates` member whole; parsing the name out of the signature (types, operators and templates make the last token unreliable, and the summary row gives it whole); the link in the summary row (an anonymous enum's row links its first enumerator, not its section); naming a group member under the group (`Counting::count` is not a C++ name).
+- **Pending:** none.
+
+## 2026-11-25 — Doxygen overloads under one anchor are one record (#188)
+
+- **Decision:** a Doxygen member whose anchor repeats one earlier on the page, with the same qualified name and symbol_kind, adds its lines (template headers, signature, documentation) to the earlier member's record, in page order. Any other repeat (another name or kind, or a member that gets no record, such as a friend class) still keeps the page whole. This supersedes the 2026-11-20 rejection of "merging the records of a shared anchor" (#168), as the maintainer decided on #188.
+- **Why:** on libstdc++ 13 the repeats are overloads that differ only in an `enable_if` constraint, all in summary rows; merging them splits `std::optional` and `std::pair` with merged records of 60 to 93 words, under the 550-word p99.
+- **Rejected:** merging any members that share an anchor whatever their names (would mix two symbols in one record); a suffix on the second record's id (the anchor would no longer name the record's place on the page).
+- **Pending:** none.
+
 ## 2026-11-24 — `--browser-login`: F3 and DL-19 reconciled, and the login's edges (#171)
 
 - **Decision:**
