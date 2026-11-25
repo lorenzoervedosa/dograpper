@@ -124,7 +124,10 @@ rápido é só para iterar.
 2. **Completo (cada commit, obrigatório antes de push/PR):** `uv run pytest tests/ -q`
    com `uv sync --extra dev --extra headless --extra httrack --extra fire-engine`, como o CI. Cada
    commit da branch passa sozinho; quem monta o lote confere numa worktree
-   descartável (`git worktree add --detach <dir> <sha>`).
+   descartável (`git worktree add --detach <dir> <sha>`). O CI roda 3.10 e 3.12, e
+   o Python local cobre uma só: antes do push, o HEAD também com
+   `uv run --python 3.10 --extra dev --extra headless --extra httrack --extra fire-engine pytest tests/ -q`
+   (a ordem de iteração da stdlib muda entre versões; onda 3, #196).
 
 Nunca mascare o exit code com pipe: `uv run pytest tests/ -q | tail` devolve o
 status do `tail`. Rode sem pipe, ou leia `${PIPESTATUS[0]}` (bash) /
