@@ -233,8 +233,10 @@ def test_referer_and_fetch_metadata_per_link(server, tmp_path):
     assert calls[f"{base}/"] == {"kind": "navigate", "referer": None,
                                  "meta": FetchMeta()}
     assert calls[f"{base}/a"] == {"kind": "linked", "referer": f"{base}/",
-                                  "meta": FetchMeta("document", "navigate", True)}
-    assert calls[f"{base}/f"]["meta"] == FetchMeta("iframe", "navigate", False)
+                                  "meta": FetchMeta("document", "navigate", True,
+                                                    initiator=f"{base}/")}
+    assert calls[f"{base}/f"]["meta"] == FetchMeta("iframe", "navigate", False,
+                                                   initiator=f"{base}/")
 
 
 def test_redirect_target_is_requested_as_htsmirror_c_requests_it(server, tmp_path):
@@ -248,7 +250,7 @@ def test_redirect_target_is_requested_as_htsmirror_c_requests_it(server, tmp_pat
     script["/doc"] = (301, {"location": "/f.txt"}, b"")
     res, spy = crawl(f"{base}/", tmp_path, exts="html,txt")
     calls = {u: kw for u, kw in spy.calls if not u.endswith("/robots.txt")}
-    linked = FetchMeta("document", "navigate", True, "same-origin")
+    linked = FetchMeta("document", "navigate", True, "same-origin", f"{base}/")
     assert calls[f"{base}/new"] == {"kind": "linked", "referer": f"{base}/old", "meta": linked}
     assert calls[f"{base}/f.txt"] == {"kind": "linked", "referer": f"{base}/", "meta": linked}
 
@@ -283,7 +285,7 @@ def test_redirect_chain_sends_its_worst_sec_fetch_site(server, tmp_path):
         other.shutdown()
         other.server_close()
     assert dict(spy.calls)[target]["meta"] == FetchMeta("document", "navigate", True,
-                                                        "same-site")
+                                                        "same-site", f"{base}/")
 
 
 def test_max_links_ends_the_crawl_partial(server, tmp_path):
@@ -610,7 +612,7 @@ def test_scripts_are_scanned_for_links_as_httrack_does(server, tmp_path):
     assert rel(res, tmp_path) == ["a.html", "b.html", "c.html", "index.html", "static/app.js"]
     calls = {u: kw for u, kw in spy.calls if not u.endswith("/robots.txt")}
     assert calls[f"{base}/c.html"]["referer"] == f"{base}/static/app.js"
-    assert calls[f"{base}/c.html"]["meta"] == FetchMeta("", "no-cors", False)
+    assert calls[f"{base}/c.html"]["meta"] == FetchMeta("", "no-cors", False, None, f"{base}/")
     res, _ = crawl(f"{base}/", tmp_path / "off", exts="html,js", parse_scripts=False,
                    extended_parsing=False)
     assert rel(res, tmp_path / "off") == ["index.html", "static/app.js"]
@@ -738,3 +740,74 @@ def test_mirror_keeps_the_pages_it_fetched_for_a_browser_pass(server, tmp_path):
     mirror_site(f"{base}/docs/", str(tmp_path), build_policy(retries=0), "html", responses=kept)
     assert kept.take(f"{base}/docs/a")[1].body == b"<p>a</p>"
     assert kept.take(f"{base}/docs/") is not None
+
+
+# -- Origin on CORS-mode requests (#195, HTTrack -%Q): the initiator's origin on the wire
+
+CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+             "Chrome/141.0.0.0 Safari/537.36")
+CSS_FONT = ({"content-type": "text/css"}, b"@font-face { src: url(f.woff2) }")
+ALL_EXTS = "html,css,js,png,woff2"
+
+
+def _echo(heads, name):
+    """A server reply that files the request's headers under `name`."""
+    def reply(headers):
+        heads[name] = dict(headers)
+        return 200, {"content-type": "application/octet-stream"}, b"x"
+    return reply
+
+
+def test_cors_requests_send_the_initiators_origin_on_the_wire(server, tmp_path):
+    base, script, _ = server
+    heads = {}
+    site(script, {"/": page(extra='<link rel=stylesheet href=s.css><img src=i.png>'
+                                  '<script src=c.js crossorigin></script>'
+                                  '<script type=module src=m.js></script>'),
+                  "/s.css": CSS_FONT})
+    for name in ("i.png", "c.js", "m.js", "f.woff2"):
+        script[f"/{name}"] = _echo(heads, name)
+    crawl(f"{base}/", tmp_path, exts=ALL_EXTS, user_agent=CHROME_UA)
+    assert {n: h.get("Origin") for n, h in heads.items()} == {
+        "i.png": None, "c.js": base, "m.js": base, "f.woff2": base}
+
+
+def test_a_stylesheets_link_takes_the_origin_of_the_page_that_loaded_it(server, http_server,
+                                                                       tmp_path):
+    base, script, _ = server
+    heads, other = {}, {}
+    other_base = http_server(_serving(other))  # same host, another port
+    site(script, {"/": page(extra=f'<link rel=stylesheet href="{other_base}/s.css">')})
+    other["/s.css"] = (200, {"content-type": "text/css"},
+                       b"@font-face { src: url(f.woff2) }")
+    other["/f.woff2"] = (301, {"location": "/g.woff2"}, b"")
+    other["/g.woff2"] = _echo(heads, "g.woff2")
+    other["/robots.txt"] = (404, {}, b"")
+    _, spy = crawl(f"{base}/", tmp_path, exts=ALL_EXTS, user_agent=CHROME_UA,
+                   filters=UrlFilters([f"+{other_base.split('//')[1]}/*"]))
+    calls = dict(spy.calls)
+    assert calls[f"{other_base}/f.woff2"]["meta"].initiator == f"{base}/"  # not s.css
+    assert heads["g.woff2"]["Origin"] == base
+    # the redirect hop is judged against the page: another port, so same-site (not
+    # same-origin, as it would be against the stylesheet next to the font)
+    assert calls[f"{other_base}/g.woff2"]["meta"].site == "same-site"
+    assert heads["g.woff2"]["Sec-Fetch-Site"] == "same-site"
+
+
+def _serving(script):
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            reply = script.get(self.path, (404, {}, b"nope"))
+            status, hdrs, body = reply(self.headers) if callable(reply) else reply
+            self.send_response(status)
+            for k, v in hdrs.items():
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    return H

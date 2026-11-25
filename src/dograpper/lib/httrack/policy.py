@@ -40,11 +40,14 @@ class FetchMeta(NamedTuple):
     """What a browser declares for a request (htsfetch.c hts_fetch_meta): Sec-Fetch-Dest
     (hts_fetch_dest_name; "" when HTTrack cannot classify the link, which then gets no
     fetch metadata), Sec-Fetch-Mode, Sec-Fetch-User for a user navigation, and the
-    Sec-Fetch-Site a redirect chain fixed (None: from the Referer)."""
+    Sec-Fetch-Site a redirect chain fixed (None: from the Referer), and the `initiator`
+    URL of the page that began the chain (htsfetch.c fetch_meta.initiator), the `Origin` a
+    CORS-mode request sends under --browser-headers (None: none known)."""
     dest: str = "document"
     mode: str = "navigate"
     user: bool = True
     site: str | None = None
+    initiator: str | None = None
 
 
 # htsfetch.h hts_fetch_site, from best to worst: hts_fetch_through keeps the worst hop
@@ -240,6 +243,27 @@ def _fetch_site(referer: str | None, scheme: str, host: str) -> str:
         else "cross-site"
 
 
+def _origin(url: str) -> str | None:
+    """htsfetch.c hts_fetch_origin: `scheme://host[:port]` of `url`, the port left out when it
+    is the scheme's default, None for an empty host or one with a space, control or non-ASCII
+    character. The scheme is https or, for anything else, http."""
+    try:
+        parts = drop_userinfo(urlsplit(url))
+        port = _port(parts)
+    except ValueError:  # "https://[bad/"
+        return None
+    host = parts.netloc
+    if parts.netloc.startswith("["):
+        host = host[:host.find("]") + 1] or host
+    else:
+        host = host.partition(":")[0]
+    if not host or any(c <= " " or c >= "\x7f" for c in host):
+        return None
+    secure = parts.scheme == "https"
+    return f"{'https' if secure else 'http'}://{host}" + (
+        "" if port == (443 if secure else 80) else f":{port}")
+
+
 def site_of(page: str | None, url: str) -> str:
     """Sec-Fetch-Site of a request for `url` made from `page` (htsfetch.c hts_fetch_site_of)."""
     parts = drop_userinfo(urlsplit(url))
@@ -271,6 +295,21 @@ def conditional_headers(etag, last_modified) -> tuple[tuple[str, str], ...]:
                  if ok(value))
 
 
+def _cors_origin(policy: HttrackPolicy, browser, meta: FetchMeta, scheme: str,
+                 host: str) -> str | None:
+    """htslib.c:1323-1340: a CORS-mode request under a browser table carries the initiator's
+    origin; Chrome even to its own origin, Firefox cross-origin only (judged against the
+    request URL, so a redirect target); never over the user's own `Origin` line."""
+    if (browser is None or meta.mode != "cors" or not meta.initiator
+            or any(name.lower() == "origin" for name, _ in policy.headers)):
+        return None
+    origin = _origin(meta.initiator)
+    if origin is None or (browser is BROWSERS["firefox"]
+                          and site_of(meta.initiator, f"{scheme}://{host}") == "same-origin"):
+        return None
+    return origin
+
+
 def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str | None,
                     scheme: str, meta: FetchMeta = NAVIGATION,
                     validators: tuple[tuple[str, str], ...] = ()) -> list[tuple[str, str]]:
@@ -292,6 +331,7 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
     h.update({"Connection": "keep-alive", "Host": host})
     # client hints: over https only, beside the User-Agent they describe (htslib.c:1213-1235)
     hints = client_hints(agent) if policy.browser_headers and secure else None
+    origin = _cors_origin(policy, browser, meta, scheme, host)
     if hints is not None:
         h.update(zip(CLIENT_HINTS, (hints[0], "?1" if hints[1] else "?0", hints[2])))
     if sent and secure and meta.mode == "navigate":  # hts_fetch_is_navigation
@@ -307,6 +347,8 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
         h["Sec-Fetch-Dest"] = meta.dest
     h["Accept-Language"] = BROWSER_ACCEPT_LANGUAGE if browser else ACCEPT_LANGUAGE
     h["Accept-Encoding"] = accept_encoding(secure)
+    if origin:
+        h["Origin"] = origin
     order = (HTTRACK_ORDER if browser is None
              else browser.navigation if meta.mode == "navigate" else browser.subresource)
     # HTTrack -%X: a user line replaces the engine's own of the same name, robots.txt included

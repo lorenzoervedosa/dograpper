@@ -187,9 +187,15 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             report.partial = True
             return "refused"
         mine = carried is not None and sends(carried, u, True, names)
-        queue.append(_Entry(u, hop, referer, meta, front, redirects, initiator,
+        queue.append(_Entry(u, hop, referer, meta._replace(initiator=initiator), front,
+                            redirects, initiator,
                             *_revalidates(prev.get(k), carried, mine)))
         return "queued"
+
+    def _initiator_of(entry: _Entry, mime: str | None) -> str | None:
+        """A link in an HTML page has that page as initiator; one in a stylesheet or script
+        inherits the file's own, the page that loaded it (htsmirror.c)."""
+        return entry.url if mime == "text/html" else entry.initiator
 
     def work(entry: _Entry):
         return fetch_page(entry.url, fetcher, report, lock, None,
@@ -214,10 +220,11 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
             state["front_failed"] |= entry.front and got != "queued"
             return
         if outcome == "kept":
+            kept_mime = mime_type(entry.prev.record["content_type"])
             for link in keep(entry, res, safe, via):
                 # second copy of the loop at the end of handle()
                 got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta,
-                              initiator=entry.url)
+                              initiator=_initiator_of(entry, kept_mime))
                 if got != "refused":
                     requested.setdefault(url_key(link.url), set()).add(entry_of[url_key(link.url)])
             return
@@ -252,7 +259,7 @@ def mirror_site(url: str, output_dir: str, policy: HttrackPolicy, include_extens
                                  mime == "text/css")
         for link in links:
             got = enqueue(link.url, hop=entry.hop + 1, referer=entry.url, meta=link.meta,
-                          initiator=entry.url)
+                          initiator=_initiator_of(entry, mime))
             if got != "refused":
                 requested.setdefault(url_key(link.url), set()).add(entry_of[url_key(link.url)])
 
