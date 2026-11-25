@@ -1270,7 +1270,10 @@ dograpper serve ./pack   # search_chunks now ranks member records
     parameters, the member names by summary section
     (`Public Member Functions: ...`) and the inherited members by base
     (`... inherited from std::_Vector_base< _Tp, _Alloc >: ...`). The
-    inheritance diagrams and the "generated from" footer are dropped.
+    inheritance diagrams and the "generated from" footer are dropped, and so
+    are, on every record, the lines a site built with `SOURCE_BROWSER = YES`
+    adds: "Definition at line N of file F." and the "References ..." and
+    "Referenced by ..." lists, whose line numbers move with every release.
   - Each member the page documents gets a member record
     (`std::vector< _Tp, _Alloc >::push_back`; on a file page the name as the
     page writes it, `ring_push`): its template headers, every one for a member template of

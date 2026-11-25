@@ -14,7 +14,8 @@ then ``div.memitem``) is that section: template headers, signature, labels, docu
 A member with only a brief description has no section: its anchor sits in its summary row
 (a member template's, in its template header row), so the row and its brief are the record.
 Summary rows that link to a section are dropped, like the inheritance diagrams, the
-permalink signs and the "generated from" footer. A file page names its members alone and
+permalink signs, the "generated from" footer and the source browser's "Definition at line ..."
+and "References ..." lines. A file page names its members alone and
 leaves out the ones of the namespaces it lists, which have pages of their own. Index,
 listing, source and topic (group) pages keep one record; any other markup raises NotSplit.
 """
@@ -164,7 +165,10 @@ class _Page(Regions):
                 # line's link to the same page sits one level deeper, in its code
                 or (tag == "a" and href.endswith("_source.html")
                     and len(self._stack) == self._depth + 2)
-                or (tag == "div" and ("dynheader" in classes or "dyncontent" in classes or "ttc" in classes))):
+                or (tag == "div" and ("dynheader" in classes or "dyncontent" in classes or "ttc" in classes))
+                # SOURCE_BROWSER's "Definition at line N of file F." and "References ..." /
+                # "Referenced by ...": line numbers that move with every release
+                or (tag == "p" and ("definition" in classes or "reference" in classes))):
             self.skip(closers)  # permalink sign, "[1/2]" after an overloaded name, "More...", diagrams, code tooltips
         elif tag == "table" and "memberdecls" in classes:
             self.region(closers)  # summary text is dropped; rows, names and briefs are read below

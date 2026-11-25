@@ -199,10 +199,34 @@ ICU headers declare no templates.
   helpers) are documented there, not on a file page.
 - With `SOURCE_BROWSER = YES`, Doxygen adds "Definition at line N of file F"
   and the reference lists to each member; no measured corpus had them, so
-  they stay in the member text.
+  they stay in the member text. (Dropped since #189, see "Follow-ups".)
 - Related pages (`\page`), the main page and directory pages keep one
   record, as do the other Doxygen output languages (Java, Python, IDL,
   Fortran) and page kinds (interfaces, protocols, concepts, modules).
 - A file page whose namespaces have no page of their own (libstdc++'s
   undocumented `std`) documents those members itself: its summary rows and
   sections are its member records, under their qualified names.
+
+## Follow-ups
+
+### Source-browser lines (#189, 2026-11-25)
+
+[#189](https://github.com/lorenzoervedosa/dograpper/issues/189) drops the
+`p.definition` ("Definition at line N of file F.", a container's "Definition
+in file F.") and `p.reference` ("References ...", "Referenced by ...") blocks
+that `SOURCE_BROWSER = YES` with `REFERENCES_RELATION` and
+`REFERENCED_BY_RELATION` adds. The fixture is the C project of
+`tests/fixtures/doxygen/regenerate.sh` built a second time with those three
+keys (`tests/fixtures/doxygen/source-browser/c`), with bodies for
+`ring_init` and `ring_clear` so that both relations appear.
+
+- The source browser also gives a member documented by its brief alone a
+  documentation section of its own (the definition line counts as detailed
+  documentation): its record is then that section, under the same anchor.
+  Ids and anchors match the plain build page for page.
+- Words dropped on the fixture's two split pages: 93 of 412 (15 records),
+  23%. On a C++ build of the `shapes.hpp` fixture with the same keys (not
+  kept; no function body there references another member, so it has only
+  definition lines): 151 of 1,242 words (42 records).
+- The plain build of the same source gives the same records as before; only
+  its source page (`ring_8h_source.html`, kept whole) shows the two bodies.

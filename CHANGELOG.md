@@ -400,6 +400,10 @@ stays `0.0.0.dev0`.
   hints, which describe the profile's own User-Agent, and warns once per run
   that the TLS fingerprint stays the `--impersonate` profile's; the User-Agent
   keeps the profile's slot. ([#136], [ADR-0011](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0011-fire-engine-downloader.md))
+- `pack --api-records` drops from Doxygen records the lines a site built with
+  `SOURCE_BROWSER = YES` adds: "Definition at line N of file F." and the
+  "References ..." and "Referenced by ..." lists, whose line numbers move with
+  every release. ([#189](https://github.com/lorenzoervedosa/dograpper/issues/189))
 
 ### Removed
 

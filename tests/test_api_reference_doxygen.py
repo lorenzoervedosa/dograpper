@@ -1,7 +1,8 @@
 """`pack --api-records` on Doxygen pages: container and member records (ADR-0009).
 
-The fixture is Doxygen 1.9.8 output for the C++ and C sources in tests/fixtures/doxygen/src
-(regenerate with tests/fixtures/doxygen/regenerate.sh).
+The fixture is Doxygen 1.9.8 output for the C++ and C sources in tests/fixtures/doxygen/src, the C
+one also built with the source browser on (source-browser/); regenerate with
+tests/fixtures/doxygen/regenerate.sh.
 """
 
 import json
@@ -306,6 +307,30 @@ def test_c_struct_fields_are_member_records():
     assert (data.symbol, data.symbol_kind, data.container) == ("ring::data", "variable", "ring")
     assert data.text == "ring::data\nunsigned char ring::data[RING_SIZE]\nThe bytes, in a circle."
     assert [head.symbol, tail.symbol] == ["ring::head", "ring::tail"]
+
+
+SOURCE_BROWSER = Path(__file__).parent / "fixtures" / "doxygen" / "source-browser"
+RING_INIT, RING_CLEAR, RING_COUNT = (
+    "a75b4c8a8753ae9400ee8f46ea6a091b3", "aa7acb80ec349c5e57aac209e6dbc1409", "ad58c19bce1efa5d66b97448915252c85")
+
+
+@pytest.mark.parametrize("name, same_text", [
+    ("c/ring_8h.html", ["", RING_INIT, RING_CLEAR, RING_COUNT]),
+    ("c/structring.html", [""]),
+])
+def test_the_source_browser_lines_are_dropped(name, same_text):
+    # SOURCE_BROWSER = YES adds "Definition at line N of file F." (a container's "Definition in
+    # file F.") and, for what a function body uses, "References ..." / "Referenced by ...": line
+    # numbers move with every release. The plain build of the same source gives the same records;
+    # a member documented by its brief alone there gets a section here, so its text differs.
+    browsed = {r.anchor: r for r in split_page((SOURCE_BROWSER / name).read_text(encoding="utf-8"))}
+    plain = _records(name)
+    assert {a: (r.symbol, r.kind, r.symbol_kind) for a, r in browsed.items()} == {
+        a: (r.symbol, r.kind, r.symbol_kind) for a, r in plain.items()}
+    assert [browsed[a].text for a in same_text] == [plain[a].text for a in same_text]
+    for record in browsed.values():
+        assert not [ln for ln in record.text.split("\n")
+                    if ln.startswith(("Definition at line", "Definition in file", "References", "Referenced by"))]
 
 
 SYMBOL_PAGES = {
