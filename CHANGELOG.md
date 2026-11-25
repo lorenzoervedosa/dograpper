@@ -258,9 +258,10 @@ stays `0.0.0.dev0`.
   page documents (`std::vector< _Tp, _Alloc >::push_back`, `ring_push`: its
   template headers, signature, labels such as `virtual`, and documentation;
   a member with only a brief description gets its summary row and brief),
-  anchored at Doxygen's member id. `symbol_kind` gains `file`, `typedef` and
-  `define`; `generator` is `doxygen`. Member lists, source pages, indexes,
-  topic (group) pages and unmeasured markup keep one record. A Doxygen page
+  anchored at Doxygen's member id. `symbol_kind` gains `file`, `group`,
+  `typedef` and `define`; `generator` is `doxygen`. Member lists, source
+  pages, indexes, topic (group) pages without member sections and unmeasured
+  markup keep one record. A Doxygen page
   the adapter splits is now never deduplicated, with or without
   `--api-records`, like the other generators' split pages.
   ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
