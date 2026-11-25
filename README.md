@@ -638,8 +638,13 @@ and `sec-ch-ua-platform` client hints over https, with Chromium's GREASE brand
 list for that version. A `--header` line still takes the place of the header
 of the same name. `--no-browser-headers` sends HTTrack's plain set instead: no
 `Sec-Fetch-*`, no `Upgrade-Insecure-Requests`, no client hints, HTTrack's own
-`Accept`, `Accept-Language: en, *` and order. The browser's `Origin` on a CORS
-request is not sent (HTTrack sends it).
+`Accept`, `Accept-Language: en, *` and order.
+
+A request in CORS mode (a font, a `crossorigin` or `type=module` script) also
+carries `Origin`, the origin of the page that started it, as HTTrack sends it:
+Chrome and Edge always, Firefox only when that page is on another origin than
+the request. A link inside a stylesheet or script has the page that loaded the
+file as its page. A `--header 'Origin: …'` line replaces it.
 
 **Browser login (`--browser-login`).** For documentation behind a login, or
 behind a challenge, that a person completes in a browser. Before any request of

@@ -34,6 +34,13 @@ Entry format:
   - Raising the `meta-robots` and `srcset` inputs (4.9 and 5.7 ms, just above the 4.4 ms threshold of floor 10 ms and bound 7): within the criterion, left alone.
 - **Pending:** none. The known-flake list in the root `CLAUDE.md` is removed at the close of wave 5 if no linearity test fails in that wave.
 
+## 2026-11-25 — `Origin` on CORS-mode requests: the initiator rides in `FetchMeta` (#195)
+
+- **Decision:** `FetchMeta` gained `initiator`, filled when a link is queued (`mirror.py` `enqueue`): the page for a link in HTML, the file's own initiator for one in a stylesheet or script, kept across redirects. `request_headers()` builds `Origin` from it as HTTrack does (htslib.c:1323-1340, htsfetch.c `hts_fetch_origin`). The redirect hops' `Sec-Fetch-Site` is now judged against the same initiator, so a font in a stylesheet on another origin is measured against the page, not the stylesheet.
+- **Why:** the brief's own design: redirects inherit the initiator through `FetchMeta`, so `fetcher.py` (another lane's) stays untouched. The value never comes from the Referer (the 2026-11-24 decision).
+- **Rejected:** a separate `initiator` argument down `Fetcher.get()` (touches `fetcher.py`); `Origin` only when `mode == "cors"` metas carry the initiator (a second rule for the same data).
+- **Pending:** none.
+
 ## 2026-11-25 — Wave 3 closed: 13 issues in 3 PRs (#194, #196, #197)
 
 - **Decision:** four lanes, each in its own worktree. Landed in this order:

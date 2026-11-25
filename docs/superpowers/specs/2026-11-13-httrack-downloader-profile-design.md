@@ -578,8 +578,14 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
     header of the same name (#136).
   - `--no-browser-headers` (HTTrack `-%Q0`) drops `Sec-Fetch-*`,
     `Upgrade-Insecure-Requests` and the client hints.
-  - Not ported: `Origin` on a CORS request (htslib.c:1323-1340), which needs
-    the request's initiator; a known gap, below.
+  - `Origin` on a CORS-mode request (htslib.c:1323-1340, #195): the initiator's
+    `scheme://host[:port]` (default port left out), after `Connection` in
+    Chrome's order and after `Accept-Encoding` in Firefox's. Chrome sends it
+    always, Firefox only cross-origin from the request URL (a redirect's
+    target). The initiator rides in `FetchMeta.initiator`, set when a link is
+    queued: the page for a link in HTML, the file's own initiator for a link in
+    a stylesheet or script, kept across redirects (also what the redirect hops'
+    `Sec-Fetch-Site` is judged against). A `--header Origin` line suppresses it.
 - **`--browser-login`** (`run_browser_login` in `lib/playwright_crawl.py`, run
   by `run_httrack` before the Fetcher is built; implemented, #171):
   1. Opens headed Chromium on the start URL, after the run's usage checks and
@@ -629,9 +635,7 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
-- **`Origin` on CORS requests under `--browser-headers`** (htslib.c:1323-1340):
-  Chrome sends it on every `cors` request, Firefox on a cross-origin one. The
-  profile's `FetchMeta` carries no initiator to take it from (#170).
+- _(none open: `Origin` on CORS requests under `--browser-headers`, htslib.c:1323-1340, is ported, #195.)_
 
 
 ## 6. Code layout
