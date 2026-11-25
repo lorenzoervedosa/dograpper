@@ -22,6 +22,68 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-25 — Wave 3 closed: 13 issues in 3 PRs (#194, #196, #197)
+
+- **Decision:** four lanes, each in its own worktree. Landed in this order:
+  - #194 (batch: lane lote (#180, #191, #174) and lane browser (#172, #173, #190), cherry-picked);
+  - #196 (lane pr5: #183, #169, #170, #171, PR 5 of #78), rebased by the lane onto #194;
+  - #197 (lane doxygen: #189, #188, #187), rebased by the integrator.
+
+  Every commit passed the full suite on its own, in a disposable detached worktree. CI was green on 3.10 and 3.12 for each PR, and on `main` after the last merge. Epics #75 and #78 closed.
+- **Why:** the zone map put PR 5 and #183 in one lane. They share `request_headers()` and the first httrack-only option group. Lane browser touched other hunks of `run_profile`, `browser.py` and `playwright_crawl.py`, so it had no owner per file: it landed first, and pr5 rebased at an issue boundary.
+- **Maintainer decisions during the wave** (each one is also on its issue):
+  - triage:
+    - #172 skips the change report and removes a stale one;
+    - #173 gets full redirect parity;
+    - #174 gets four stub-link rules;
+    - #180 names the root context `dograpper`;
+    - #187 makes the group the container;
+    - #188 gives a shared anchor one record;
+    - #189 drops the three source-browser blocks;
+    - #192 closed, then reopened when another linearity test flaked;
+  - #169: a new jar is created 0600 and an existing jar keeps its mode. After the security review: the jar goes to the start host alone, plus eight more fixes; the public suffix list is deferred;
+  - #170 and #171: the profile spec wins over the discovery doc's Non-goals (F1, F3, DL-19);
+  - #173: the iframe and cross-site-chain criteria dropped, since the README says a `--filter` never widens the crawl to another host;
+  - #187: a group member keeps the name the page writes (`make_shared`, unscoped);
+  - #195 filed for `Origin` on CORS requests; #152 unblocked.
+- **Cross-checks:**
+  - an independent security review of #196 ran in three rounds. It reproduced 12 findings, and each got a failing test before its fix, except the public suffix list (`docs/DEBT.md`);
+  - CI on Python 3.10 failed #196 once. The `Cookie` line followed the stdlib's iteration order, which differs between 3.10 and 3.12, and now follows RFC 6265 §5.4;
+  - after each cherry-pick or rebase, the changed lines outside the living docs were identical to the lane's. Conflicts came only in living docs and in `tests/test_httrack_browser.py`, where both sides appended tests.
+- **Outside the zone, done with a reason:**
+  - pr5: `utils/atomic_write.py` (the private mode), `utils/redact.py` (the third copy of `first_line()`) and `GLOSSARY.md` (*Cookie jar*);
+  - doxygen: the #168 `CHANGELOG.md` entry, aligned at the integrator's request.
+- **What the briefs and the protocol got wrong** (input for the next wave):
+  - #173 had two unreachable criteria. The browser pass never fetches an iframe, and the README's scope rules out a cross-site redirect chain.
+  - #187's `std::make_shared` example is absent from a group page, where a `\relates` symbol has no scope. #187 and #188 reversed recorded decisions (this file, ADR-0009) without saying so; the zone mapper caught it.
+  - #174 said the layout's page map gains the stubs. A stub has no output file, so the lane kept a separate map.
+  - The wave's handoff placed the Non-goals reconciliation on #170, though the issue never asked for it. It also claimed bridges that the zone mapper refuted.
+  - #169 set no security bar for a file of credentials. The lane's own code-review passed twelve holes.
+  - The per-commit gate ran on one Python version, and only CI ran 3.10.
+  - Lane doxygen sat about 15 hours on three `rm -rf` confirmations from the user's global hook. The protocol forbade `rm -r` but gave no alternative, and nothing alerted the integrator.
+  - Lanes wrote their own per-commit loop (one had a bug, which cost a 27-minute rerun) and their own conflict merger, though the wave's scripts already do both. One lane recorded its autonomous decisions here only when asked.
+- **Environment changes from the retro:**
+  - in this repo:
+    - the root `CLAUDE.md` asks for the suite on Python 3.10 at the HEAD before a push;
+    - it lists the `test_httrack_links.py` linearity test among the known flakes (#192 reopened);
+    - #198 filed for false positives of `block-dangerous-git.py`;
+  - in the user's environment (outside the repo):
+    - the global guard no longer asks before an `rm -r` of literal paths inside a session scratchpad;
+    - a `lane-watch.sh` script alerts the integrator when a lane waits on a permission prompt;
+    - the lane protocol now asks for:
+      - a fresh directory per build instead of a delete;
+      - `verify-commits.sh` and `resolve-living-docs.py` instead of ad-hoc loops and mergers;
+      - the lowest CI version at the HEAD;
+      - each autonomous decision in this file before delivery;
+    - the ready step checks that each acceptance criterion and example is reachable and true, and that a brief names the recorded decision it reverses.
+  - Not done, by choice: an independent security review step for every diff that touches credentials, since it spends the plan's usage.
+- **Rejected:**
+  - one PR per small lane: the batch put six small issues in one review;
+  - merging `main` into the unpublished pr5 branch: a rebase kept every commit verifiable on the new base.
+- **Pending:**
+  - the real headed login of #171 (`docs/MANUAL-CHECKS.md`);
+  - #152, #192, #195 and #198 need triage.
+
 ## 2026-11-25 — Doxygen topic (group) pages are split (#187)
 
 - **Decision:** a Doxygen page whose title has no "Reference" suffix and that documents members in sections is a topic page: a `group` container record named by its title, and one member record per member, with the group as `container`. A member is named as the page writes it, taken from its summary row (the row whose `memitem:` class names its anchor): qualified for a namespace member (`std::copy`), bare for a `\relates` symbol (`make_shared`). A topic page without member sections keeps one record; one whose member anchors do not all start with `g`, or with a section that no summary row names, is unsupported markup. This supersedes the 2026-11-20 rejection of "splitting group pages without a measured rule for their kind" (#168).
