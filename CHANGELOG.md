@@ -404,6 +404,11 @@ stays `0.0.0.dev0`.
   `SOURCE_BROWSER = YES` adds: "Definition at line N of file F." and the
   "References ..." and "Referenced by ..." lists, whose line numbers move with
   every release. ([#189](https://github.com/lorenzoervedosa/dograpper/issues/189))
+- `pack --api-records` splits a Doxygen page where overloads share one anchor
+  (Doxygen 1.9.8 gives overloads that differ only in their template
+  constraints one id, as on libstdc++'s `std::optional` and `std::pair`)
+  instead of keeping it whole: the overloads are one member record under that
+  anchor, in page order. ([#188](https://github.com/lorenzoervedosa/dograpper/issues/188))
 
 ### Removed
 

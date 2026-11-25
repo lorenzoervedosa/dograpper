@@ -16,13 +16,14 @@ A member with only a brief description has no section: its anchor sits in its su
 Summary rows that link to a section are dropped, like the inheritance diagrams, the
 permalink signs, the "generated from" footer and the source browser's "Definition at line ..."
 and "References ..." lines. A file page names its members alone and
-leaves out the ones of the namespaces it lists, which have pages of their own. Index,
+leaves out the ones of the namespaces it lists, which have pages of their own. Overloads
+that Doxygen gives one anchor are one member record holding each of them in page order. Index,
 listing, source and topic (group) pages keep one record; any other markup raises NotSplit.
 """
 
 from typing import Dict, List, Optional, Tuple
 
-from . import ApiRecord, NotSplit, check_anchor, check_symbol, declared
+from . import ApiRecord, NotSplit, check_symbol, declared
 from ._html import Regions, Text, line
 
 GENERATOR = "doxygen"
@@ -356,10 +357,10 @@ def records(html: str, generator: str) -> List[ApiRecord]:
 
     # Namespaces a file page lists have pages of their own, which document their members.
     namespaces = {line(name) for label, name in page.names if cached_line(label) == _NAMESPACES}
-    anchors = set()
+    by_anchor: Dict[str, Optional[ApiRecord]] = {}  # None: a member that gets no record
+    texts: Dict[str, List[str]] = {}  # anchor -> its record's lines
     members: List[ApiRecord] = []
     for member in page.members:
-        check_anchor(member.anchor, anchors, _unsupported, "duplicate member anchor")
         name = line(member.name)
         if not member.summary and name.endswith("()"):
             name = name[:-2]  # "put()" names a function; "operator()()" keeps its own
@@ -367,17 +368,30 @@ def records(html: str, generator: str) -> List[ApiRecord]:
             raise _unsupported("a member without a name")
         body = [ln for text, one_line in member.parts
                 for ln in ([line(text)] if one_line else text.final()) if ln]
-        kind = _member_kind(member, cached_line(member.section))
-        if kind is None:
-            continue  # a friend class: its name stays on the container
+        kind = _member_kind(member, cached_line(member.section))  # None for a friend class
         if symbol_kind == "file" and member.summary and name.rpartition("::")[0] in namespaces:
-            continue  # a namespace member Doxygen also anchors here: documented on the namespace page
+            kind = None  # a namespace member Doxygen also anchors here: documented on the namespace page
         member_symbol = name if symbol_kind == "file" else f"{symbol}::{name}"
+        if member.anchor in by_anchor:
+            # Doxygen 1.9.8 gives overloads that differ only in a template constraint one anchor
+            # (libstdc++'s std::optional): their one record holds them all, in page order.
+            earlier = by_anchor[member.anchor]
+            if kind is None or earlier is None or (earlier.symbol, earlier.symbol_kind) != (member_symbol, kind):
+                raise _unsupported("duplicate member anchor")
+            texts[member.anchor].extend(body)
+            continue
+        if kind is None:
+            by_anchor[member.anchor] = None  # its name stays on the container
+            continue
         check_symbol(member_symbol, _unsupported)
-        members.append(ApiRecord(
-            text="\n".join([member_symbol] + body), symbol=member_symbol, kind="member",
-            symbol_kind=kind, breadcrumb=[symbol, name], generator=GENERATOR, anchor=member.anchor,
-            container=symbol))
+        record = ApiRecord(
+            text="", symbol=member_symbol, kind="member", symbol_kind=kind, breadcrumb=[symbol, name],
+            generator=GENERATOR, anchor=member.anchor, container=symbol)
+        by_anchor[member.anchor] = record
+        texts[member.anchor] = [member_symbol] + body
+        members.append(record)
+    for record in members:
+        record.text = "\n".join(texts[record.anchor])
 
     if symbol_kind == "file" and not members:
         raise NotSplit("Doxygen file page that documents no member")

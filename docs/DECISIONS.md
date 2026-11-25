@@ -22,6 +22,13 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-25 — Doxygen overloads under one anchor are one record (#188)
+
+- **Decision:** a Doxygen member whose anchor repeats one earlier on the page, with the same qualified name and symbol_kind, adds its lines (template headers, signature, documentation) to the earlier member's record, in page order. Any other repeat (another name or kind, or a member that gets no record, such as a friend class) still keeps the page whole. This supersedes the 2026-11-20 rejection of "merging the records of a shared anchor" (#168), as the maintainer decided on #188.
+- **Why:** on libstdc++ 13 the repeats are overloads that differ only in an `enable_if` constraint, all in summary rows; merging them splits `std::optional` and `std::pair` with merged records of 60 to 93 words, under the 550-word p99.
+- **Rejected:** merging any members that share an anchor whatever their names (would mix two symbols in one record); a suffix on the second record's id (the anchor would no longer name the record's place on the page).
+- **Pending:** none.
+
 ## 2026-11-24 — `--browser-login`: F3 and DL-19 reconciled, and the login's edges (#171)
 
 - **Decision:**

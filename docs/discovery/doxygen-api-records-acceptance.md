@@ -193,7 +193,8 @@ ICU headers declare no templates.
 - Doxygen 1.9.8 gives two overloads that differ only in their template
   constraints (`template<typename _Up, _Requires<...>>`) the same anchor.
   A page with a repeated anchor keeps one record, as rustdoc's does, so two
-  records never share an id: here `std::optional` and `std::pair`.
+  records never share an id: here `std::optional` and `std::pair`. (Split
+  since #188, see "Follow-ups".)
 - Topic (group) pages keep one record. In libstdc++ the free functions of a
   group (`std::make_shared`, `std::make_unique`, the iterator adaptors'
   helpers) are documented there, not on a file page.
@@ -230,3 +231,25 @@ keys (`tests/fixtures/doxygen/source-browser/c`), with bodies for
   definition lines): 151 of 1,242 words (42 records).
 - The plain build of the same source gives the same records as before; only
   its source page (`ring_8h_source.html`, kept whole) shows the two bodies.
+
+### Overloads under one anchor (#188, 2026-11-25)
+
+[#188](https://github.com/lorenzoervedosa/dograpper/issues/188) splits a page
+where overloads share one anchor: the overloads are one member record under
+it, in page order. Two members of different names or kinds under one anchor
+still keep the page whole. Measured on the libstdc++ 13 corpus above:
+
+- Both pages with repeated anchors are libstdc++'s `std::optional` and
+  `std::pair`. In both, every shared anchor sits in summary rows (members with
+  no documentation of their own), two rows per anchor: 3 anchors on
+  `std::optional`, 4 on `std::pair`. The fixture also has a pair of
+  documented sections under one anchor (`maybe::Maybe< T >::operator=`).
+- The two pages now give 48 records (2 container, 46 member). The corpus
+  gives 195 pages split into 2,481 records (195 container, 2,286 member) and
+  216 pages kept whole, against 193 / 2,433 / 218 before. All 2,697 ids of
+  the pack are distinct.
+- The 7 merged records have 60 to 93 words (`std::optional< _Tp >::optional`
+  from `const optional< _Up > &`: 93). Member p99 stays 138 and the max 200;
+  the containers are 40 (`std::optional`) and 65 (`std::pair`) words.
+- Lookup 22 (`optional value_or`): `std::optional< _Tp >::value_or` is now
+  1st, its container 3rd. Lookups over both corpora: 22 of 24.

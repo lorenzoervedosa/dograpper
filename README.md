@@ -1287,12 +1287,15 @@ dograpper serve ./pack   # search_chunks now ranks member records
     name is `anonymous enum`, as Doxygen titles it. A file page leaves out the
     members of the namespaces it lists, which each namespace's page
     documents; the members of a namespace without a page (libstdc++'s `std`)
-    are the file page's own, under their qualified names.
+    are the file page's own, under their qualified names. Doxygen 1.9.8
+    gives overloads that differ only in their template constraints one
+    anchor (libstdc++'s `std::optional` and `std::pair`): they are one
+    member record under that anchor, holding each overload's template
+    headers, signature and documentation in page order.
   - Member lists (`*-members.html`), source pages, the class, file and
     symbol indexes, topic (group) pages, related pages, pages from another
     Doxygen version and unmeasured markup keep one record, as does a page
-    where two members share one anchor (Doxygen 1.9.8 gives overloads that
-    differ only in their template constraints the same id).
+    where two members of different names or kinds share one anchor.
 - **Container record** (`id` `NN_path` for the page's main container,
   `NN_path#anchor` for a Sphinx class or exception): qualified name and kind,
   inheritance, implemented interfaces and known subclasses, signature,

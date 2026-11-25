@@ -227,6 +227,9 @@ differently for Doxygen:
 - **Shared anchors.** Doxygen 1.9.8 gives two overloads that differ only in
   their template constraints the same anchor. Such a page keeps one record,
   as decision 5 needs one id per record.
+  (Superseded on 2026-11-25 by
+  [#188](https://github.com/lorenzoervedosa/dograpper/issues/188), see the
+  amendment below.)
 
 The member record p99 bound for Doxygen is 550 words (table above), set by
 the maintainer on 2026-11-20 above the 300 asked for in #168, after the
@@ -252,3 +255,19 @@ libstdc++ 13 (templated C++, 2,240 member records):
 
 Topic (group) pages, related pages and the other Doxygen languages keep one
 record: their markup was not measured.
+
+## Amendment (2026-11-25): Doxygen overloads under one anchor
+
+[#188](https://github.com/lorenzoervedosa/dograpper/issues/188) reverses the
+"Shared anchors" point of the 2026-11-20 amendment. Overloads that Doxygen
+1.9.8 gives one anchor (they differ only in their template constraints) are
+one member record under that anchor, holding each overload's template
+headers, signature and documentation in page order; decision 5 still holds,
+as the page then has one record per anchor. Members of different names or
+kinds under one anchor keep the page whole. The shared duplicate-anchor
+check of the other adapters is unchanged.
+
+On libstdc++ 13 this splits `std::optional` and `std::pair`, the only pages
+the 2026-11-20 run kept whole for this reason: 7 merged records of 60 to 93
+words, two overloads each, and the member p99 stays 138 words
+([acceptance doc, "Follow-ups"](../discovery/doxygen-api-records-acceptance.md)).
