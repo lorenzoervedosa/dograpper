@@ -602,8 +602,8 @@ def test_script_file_links_are_written_relative_to_the_page_that_loaded_it():
 
 
 HOSTILE = {  # (head, piece repeated n times, tail, n): each must cost linear CPU time
-    "unclosed-string": (b"<script>x.src=\"", b"a", b"", 20000),
-    "unclosed-comment": (b"<script>/*", b"x.src='a.gif' ", b"", 20000),
+    "unclosed-string": (b"<script>x.src=\"", b"a", b"", 700_000),
+    "unclosed-comment": (b"<script>/*", b"x.src='a.gif' ", b"", 600_000),
     "unclosed-script": (b"<script>", b'.src="a', b"", 5000),
     "quotes": (b"<script>", b"\"'", b"</script>", 10000),
     "backslashes": (b"<script>\"", b"\\", b"\"</script>", 20000),
