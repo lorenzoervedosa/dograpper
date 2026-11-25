@@ -326,6 +326,7 @@ stays `0.0.0.dev0`.
 
 ### Changed
 
+- `download --downloader httrack --browser-headers` (and `sync`): with a Chrome, Edge or Firefox `--user-agent`, a CORS-mode request (a font, a `crossorigin` or `type=module` script) now carries `Origin`, the origin of the page that started it, in HTTrack's header order: Chrome and Edge always, Firefox only cross-origin. A `--header 'Origin: …'` line replaces it. ([#195])
 - `pack --layout page` (md): a link to a redirect stub that `pack` skipped now points at the packed page its meta refresh names, as links to MediaWiki aliases do, instead of keeping a target the output does not have. Chains of stubs are followed (up to 8 hops); loops, absolute, root-relative, out-of-input, query-carrying and unpacked targets leave the link as written. ([#174])
 - `download --downloader httrack` over a result that looks client-rendered (and `sync`) no longer requests each page a second time for the browser pass: the pages the engine already fetched in the run (up to 128 MiB in memory) are handed to the browser. ([#160])
 - `download --downloader httrack --headless` requests a script or stylesheet that several pages share once per run, instead of once per page (a per-run in-memory cache of at most 64 MiB; nothing is written to disk). ([#167])
@@ -708,3 +709,4 @@ stays `0.0.0.dev0`.
 [#169]: https://github.com/lorenzoervedosa/dograpper/issues/169
 [#170]: https://github.com/lorenzoervedosa/dograpper/issues/170
 [#171]: https://github.com/lorenzoervedosa/dograpper/issues/171
+[#195]: https://github.com/lorenzoervedosa/dograpper/issues/195

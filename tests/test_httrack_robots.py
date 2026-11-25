@@ -107,7 +107,7 @@ def test_many_wildcards_is_linear():
 
     def allowed(path):
         assert r.allowed(path) is True
-    assert_linear(lambda n: "/" + "a" * n, allowed, 100000)
+    assert_linear(lambda n: "/" + "a" * n, allowed, 3_000_000)
 
 
 def test_multi_star_anchored_suffix():

@@ -229,6 +229,76 @@ def test_guard_blocks_an_amend_it_cannot_place(repos):
     assert guard(f"cd {wt}; {AMEND}", main) == 2
 
 
+# #198: text that is data (a quoted heredoc body, a quoted -m value) is not git
+# syntax; whatever the guard cannot read for sure still blocks.
+_HD_PY = "git branch -r --contains HEAD;\npython - <<'EOF'\nprint('git commit --amend')\nEOF"
+_HD_CAT = "cat > f <<'EOF'\nnote: git commit --amend\nEOF\ngh issue create"
+_MSG_HASH = 'git commit --amend -m "fix: handle # and C:\\dir paths"'
+_MSG_SQ = "git commit --amend -m 'fix: $(x) # and `y` \\z'"
+
+
+@pytest.mark.parametrize("command", [
+    _HD_PY,
+    _HD_CAT,
+    _MSG_HASH,
+    _MSG_SQ,
+    "cat > f <<-\"EOF\"\n\tgit commit --amend $(x)\n\tEOF\necho ok",
+])
+def test_guard_reads_quoted_heredocs_and_messages_as_data(command, repos):
+    _, wt = repos
+    assert guard(command, wt) == 0
+
+
+@pytest.mark.parametrize("command", [
+    "git branch -r --contains HEAD;\npython - <<EOF\nprint('git commit --amend $(x)')\nEOF",
+    "cat > f <<EOF\nnote: git commit --amend $(x)\nEOF\ngh issue create",
+    'git commit --amend -m "fix: $(x) # y"',
+    'git commit --amend -m "fix: `x` # y"',
+])
+def test_guard_still_blocks_what_it_cannot_read_for_sure(command, repos):
+    _, wt = repos
+    assert guard(command, wt) == 2
+
+
+@pytest.mark.parametrize("command", [_HD_PY, _HD_CAT, _MSG_HASH, _MSG_SQ])
+def test_guard_still_blocks_a_published_amend_beside_data(command, repos):
+    main, _ = repos
+    # the quoted-data forms above carry the amend in their text, so add a real one
+    real = "git commit --amend --no-edit\n" + command if "\n" in command else command
+    assert guard(real, main) == 2
+
+
+def test_guard_checks_the_line_after_a_quoted_heredoc_marker(tmp_path):
+    assert guard("echo '<<X'\ngit reset --hard HEAD~1", tmp_path) == 2
+    assert guard('echo "<<X"\ngit reset --hard HEAD~1', tmp_path) == 2
+
+
+@pytest.mark.parametrize("command", [
+    # a heredoc marker in a comment opens no heredoc: the next line is a command
+    "echo hi # <<'EOF'\ngit commit --amend --no-edit\nEOF",
+    # a -m inside quotes is not a message flag: it cannot hide the amend after it
+    "echo \"a -m '\" ; git commit --amend --no-edit ; echo \"b'\"",
+])
+def test_guard_data_stripping_never_hides_a_real_amend(command, repos):
+    main, _ = repos
+    assert guard(command, main) == 2
+
+
+@pytest.mark.parametrize("opener", ["echo hi # ", "echo hi;# ", "echo hi&&# ", "(echo hi)# ", "echo hi|# ", "echo hi>#"])
+def test_guard_checks_a_destructive_line_after_a_commented_heredoc_marker(opener, tmp_path):
+    assert guard(opener + "<<'EOF'\ngit reset --hard HEAD~1", tmp_path) == 2
+
+
+def test_guard_reads_a_line_continuation_before_a_hash_as_blank_space(tmp_path):
+    # inside `sh -c '…'` the backslash-newline is still in the text the guard recurses into
+    assert guard("sh -c 'echo hi \\\n# <<EOF\ngit reset --hard HEAD~1\nEOF'", tmp_path) == 2
+
+
+def test_guard_does_not_read_an_escaped_space_hash_as_a_comment(tmp_path):
+    # `\ #` is one word, so the heredoc below is real and its body is data
+    assert guard("cat \\ #x <<'EOF'\ngit reset --hard HEAD~1\nEOF", tmp_path) == 0
+
+
 def test_guard_blocks_a_bare_push_from_a_shared_branch(repos):
     main, wt = repos
     assert guard("git push", main) == 2

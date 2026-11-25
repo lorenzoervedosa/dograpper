@@ -207,10 +207,12 @@ da worktree, gates, hooks, limpeza e documentos vivos estão nas seções acima.
 
   Reexecute o teste isolado 3x antes de concluir que quebrou.
 
+  `assert_linear` agora remede até 3 vezes quando estoura o limite (#192), então a lista é provisória: sai no fechamento da onda 5 se nenhum teste de linearidade falhar nela.
+
 ## Armadilhas do ambiente
 
 - **zsh:** `$T:s…` é modificador (`:s`, `:h`, `:t`…), escreva `${T}:`; glob sem aspas num argumento (`--include=*.py`) que não casa aborta o comando com "no matches found", use aspas.
-- **Amend:** só de HEAD não publicado, numa forma que `block-dangerous-git.py` localiza: `git commit --amend` no cwd, `cd DIR && [git add … &&] git commit --amend` ou `git -C DIR commit --amend`; `;`, `$VAR` ou subshell bloqueiam. HEAD publicado exige consentimento (`DOGRAPPER_USER_APPROVED=1`).
+- **Amend:** só de HEAD não publicado, numa forma que `block-dangerous-git.py` localiza: `git commit --amend` no cwd, `cd DIR && [git add … &&] git commit --amend` ou `git -C DIR commit --amend`; `;`, `$VAR` ou subshell bloqueiam. Corpo de heredoc com delimitador entre aspas (`<<'EOF'`) e valor de `-m` entre aspas simples, ou duplas sem `$` nem crase, são dado e passam (`#` e `\` inclusive); heredoc sem aspas e `$(…)` na mensagem continuam bloqueando. HEAD publicado exige consentimento (`DOGRAPPER_USER_APPROVED=1`).
 - **Publicar:** push de branch nova e abertura de PR exigem ok explícito do usuário a cada vez, mesmo com o lote pronto.
 - **`git cherry` após cherry-pick com conflito:** o patch resolvido ganha outro patch-id e aparece como `+` mesmo já estando na `main`; compare com `git range-diff <base>..<branch> <base>..origin/main` (`<base>` = `git merge-base <branch> origin/main`) antes do `branch -D`.
 - **Worktree que é o cwd:** removê-la quebra o próximo comando do shell; limpe por `git -C <checkout principal> worktree remove …`, como último passo.

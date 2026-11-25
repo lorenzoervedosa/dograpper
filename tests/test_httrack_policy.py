@@ -621,3 +621,79 @@ def test_a_header_line_still_takes_the_place_of_a_browser_tables_own():
     got = _sent(CHROME, PAGE, headers=(("Accept-Language", "pt-BR"), ("sec-ch-ua", '"T";v="1"')))
     assert dict(got)["Accept-Language"] == "pt-BR" and dict(got)["sec-ch-ua"] == '"T";v="1"'
     assert [n for n, _ in got] == C_NAV_ORDER
+
+
+# -- Origin on a CORS-mode request (#195, htslib.c:1323-1340; vectors of HTTrack's tests/603)
+
+PAGE_URL = "http://127.0.0.1:8080/fetchmeta/index.html"
+FONT = FetchMeta("font", "cors", False, None, PAGE_URL)
+
+
+def _font(ua, *, host="127.0.0.1:8080", meta=FONT, scheme="http", **kw):
+    return request_headers(build_policy(user_agent=ua, **kw), host, kind="linked",
+                           referer=PAGE_URL, scheme=scheme, meta=meta)
+
+
+def test_chrome_sends_origin_on_a_same_origin_font_after_connection():
+    got = _font(CHROME)
+    assert [n for n, _ in got] == ["Host", "Connection", "Origin", "Accept-Language",
+                                   "User-Agent", "Accept", "Sec-Fetch-Site", "Sec-Fetch-Mode",
+                                   "Sec-Fetch-Dest", "Referer", "Accept-Encoding"]
+    assert dict(got)["Origin"] == "http://127.0.0.1:8080"
+
+
+def test_chrome_sends_no_origin_on_an_image():
+    assert "Origin" not in dict(_font(CHROME, meta=FetchMeta("image", "no-cors", False, None,
+                                                             PAGE_URL)))
+
+
+def test_firefox_sends_no_origin_on_a_same_origin_font():
+    assert "Origin" not in dict(_font(FIREFOX))
+
+
+def test_firefox_sends_origin_on_a_cross_origin_font_after_accept_encoding():
+    got = _font(FIREFOX, host="localhost:8080")
+    assert [n for n, _ in got] == ["Host", "User-Agent", "Accept", "Accept-Language",
+                                   "Accept-Encoding", "Origin", "Connection", "Referer",
+                                   "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site"]
+    assert dict(got)["Origin"] == "http://127.0.0.1:8080"
+
+
+def test_firefox_judges_a_redirected_request_by_its_target():
+    # the chain's initiator is the same page; only the request URL changes
+    assert "Origin" in dict(_font(FIREFOX, host="127.0.0.1:9090"))
+    assert "Origin" not in dict(_font(FIREFOX, host="127.0.0.1:8080"))
+
+
+@pytest.mark.parametrize("initiator,want", [
+    ("http://127.0.0.1:8080/p", "http://127.0.0.1:8080"),
+    ("http://h.test/p", "http://h.test"), ("http://h.test:80/p", "http://h.test"),
+    ("http://h.test:81/p", "http://h.test:81"),
+    ("https://h.test:443/p", "https://h.test"), ("https://h.test:8443/p", "https://h.test:8443"),
+    ("https://u:pw@h.test/p", "https://h.test"), ("http://[::1]:8080/p", "http://[::1]:8080"),
+    ("http://h.test:99999/p", "http://h.test"),  # a port out of range keeps the default
+    ("http:///p", None), ("", None), ("http://hé.test/p", None),
+])
+def test_origin_value_is_the_initiators_scheme_host_and_non_default_port(initiator, want):
+    meta = FetchMeta("font", "cors", False, None, initiator)
+    got = dict(_font(CHROME, scheme="https", host="h.test", meta=meta)).get("Origin")
+    assert got == want
+
+
+def test_a_user_origin_line_replaces_the_generated_one_and_is_sent_once():
+    got = _font(CHROME, headers=(("origin", "https://mine.test"),))
+    assert [(n, v) for n, v in got if n.lower() == "origin"] == [("origin", "https://mine.test")]
+
+
+@pytest.mark.parametrize("kw", [{"browser_headers": False}, {"ua": "Mozilla/5.0 (X11)"}])
+def test_no_origin_without_a_browser_table(kw):
+    ua = kw.pop("ua", CHROME)
+    assert "Origin" not in dict(_font(ua, **kw))
+
+
+def test_no_origin_without_an_initiator_nor_on_a_navigation_or_robots():
+    assert "Origin" not in dict(_font(CHROME, meta=FetchMeta("font", "cors", False)))
+    assert "Origin" not in dict(_font(CHROME, meta=PAGE._replace(initiator=PAGE_URL)))
+    robots = request_headers(build_policy(user_agent=CHROME), "127.0.0.1:8080", kind="robots",
+                             referer=None, scheme="http", meta=FONT)
+    assert "Origin" not in dict(robots)

@@ -16,7 +16,8 @@ class Browser(NamedTuple):
     """What a browser sends: `accept` by Sec-Fetch-Dest (htsfetch.c:549-578; embed was never
     captured, so it follows object), and its header order for a navigation and for a
     subresource (htslib.c:913-946, without the headers the profile never sends:
-    Content-length, From, Origin)."""
+    Content-length, From). Origin sits where those tables put it; policy.request_headers()
+    sends it on a CORS-mode request only."""
     accept: dict
     navigation: tuple
     subresource: tuple
@@ -28,7 +29,7 @@ _FETCH = ("Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest"
 HTTRACK_ORDER = ("Referer", "Connection", "Host", *CLIENT_HINTS, "Upgrade-Insecure-Requests",
                  "User-Agent", "Accept", *_FETCH, "Accept-Language", "Accept-Encoding")
 _FIREFOX_ORDER = ("Host", "User-Agent", "Accept", "Accept-Language", "Accept-Encoding",
-                  "Connection", "Referer", "Upgrade-Insecure-Requests", "Sec-Fetch-Dest",
+                  "Origin", "Connection", "Referer", "Upgrade-Insecure-Requests", "Sec-Fetch-Dest",
                   "Sec-Fetch-Mode", "Sec-Fetch-Site", "Sec-Fetch-User", *CLIENT_HINTS)
 BROWSERS = {
     "chrome": Browser(
@@ -36,9 +37,10 @@ BROWSERS = {
          "image": "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
          "style": _STYLE, "script": "*/*", "font": "*/*", "audio": "*/*", "video": "*/*",
          "object": _CHROME_NAV, "embed": _CHROME_NAV},
-        ("Host", "Connection", *CLIENT_HINTS, "Accept-Language", "Upgrade-Insecure-Requests",
+        ("Host", "Connection", "Origin", *CLIENT_HINTS, "Accept-Language",
+         "Upgrade-Insecure-Requests",
          "User-Agent", "Accept", *_FETCH, "Referer", "Accept-Encoding"),
-        ("Host", "Connection", "sec-ch-ua-platform", "Accept-Language", "sec-ch-ua",
+        ("Host", "Connection", "Origin", "sec-ch-ua-platform", "Accept-Language", "sec-ch-ua",
          "Upgrade-Insecure-Requests", "User-Agent", "sec-ch-ua-mobile", "Accept", *_FETCH,
          "Referer", "Accept-Encoding")),
     "firefox": Browser(

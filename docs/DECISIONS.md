@@ -22,6 +22,25 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-25 — Wave 4 lane lote: git guard reads data as data (#198), linearity retry (#192)
+
+- **Decision:** #198: the guard drops the body of a quoted-delimiter heredoc and a `-m`/`--message` value that cannot expand before the amend check, and its heredoc stripping is now quote- and comment-aware. #192: `assert_linear` retries only when the bound is exceeded, up to 3 attempts in total, keeping the minimum time per size, and a failure reports every attempt's ratio, n and 4n, the times, the bound, the floor and the load average. Robots parsing and the unclosed-string and unclosed-comment script scans got larger inputs (about 10 ms at n).
+- **Why:**
+  - #192: this retry-on-exceed supersedes the 2026-11-24 "close and monitor" decision for #192, which lives only in a comment on the issue. Wave 3 reopened it with a third failing caller. It does not revisit the two options rejected then: best-of-5 on every run, and a higher bound. A first attempt that passes costs nothing, and the bounds and floors are unchanged.
+  - #198: inside a single-quoted `-m` value `$` is as literal as `#`, so it is data too. A double-quoted value with `$` or a backtick still blocks. A comment starts only where the shell starts one (after blank space or `;&|()<>`, never after an escaped character), because a `<<'EOF'` in a comment otherwise swallows the next line.
+  - The challenge-page linearity test cannot get a larger input: `is_challenge_page` reads only the first 64 KiB, and n=25000 already exceeds it, so t(n) stays flat at about 1.3 ms. The two gzip/zstd member-cap tests are flat by design (the cap rejects early); without the cap they cost hundreds of ms at n=25000, which a quadratic ratio would catch. All three stay as they are.
+- **Rejected:**
+  - Enlarging the challenge-page and member-cap inputs: no effect on t(n).
+  - Raising the `meta-robots` and `srcset` inputs (4.9 and 5.7 ms, just above the 4.4 ms threshold of floor 10 ms and bound 7): within the criterion, left alone.
+- **Pending:** none. The known-flake list in the root `CLAUDE.md` is removed at the close of wave 5 if no linearity test fails in that wave.
+
+## 2026-11-25 — `Origin` on CORS-mode requests: the initiator rides in `FetchMeta` (#195)
+
+- **Decision:** `FetchMeta` gained `initiator`, filled when a link is queued (`mirror.py` `enqueue`): the page for a link in HTML, the file's own initiator for one in a stylesheet or script, kept across redirects. `request_headers()` builds `Origin` from it as HTTrack does (htslib.c:1323-1340, htsfetch.c `hts_fetch_origin`). The redirect hops' `Sec-Fetch-Site` is now judged against the same initiator, so a font in a stylesheet on another origin is measured against the page, not the stylesheet.
+- **Why:** the brief's own design: redirects inherit the initiator through `FetchMeta`, so `fetcher.py` (another lane's) stays untouched. The value never comes from the Referer (the 2026-11-24 decision).
+- **Rejected:** a separate `initiator` argument down `Fetcher.get()` (touches `fetcher.py`); `Origin` only when `mode == "cors"` metas carry the initiator (a second rule for the same data).
+- **Pending:** none.
+
 ## 2026-11-25 — Wave 3 closed: 13 issues in 3 PRs (#194, #196, #197)
 
 - **Decision:** four lanes, each in its own worktree. Landed in this order:
