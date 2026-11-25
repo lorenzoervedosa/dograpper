@@ -207,6 +207,8 @@ da worktree, gates, hooks, limpeza e documentos vivos estão nas seções acima.
 
   Reexecute o teste isolado 3x antes de concluir que quebrou.
 
+  `assert_linear` agora remede até 3 vezes quando estoura o limite (#192), então a lista é provisória: sai no fechamento da onda 5 se nenhum teste de linearidade falhar nela.
+
 ## Armadilhas do ambiente
 
 - **zsh:** `$T:s…` é modificador (`:s`, `:h`, `:t`…), escreva `${T}:`; glob sem aspas num argumento (`--include=*.py`) que não casa aborta o comando com "no matches found", use aspas.
