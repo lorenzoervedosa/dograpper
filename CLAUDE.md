@@ -197,11 +197,15 @@ da worktree, gates, hooks, limpeza e documentos vivos estão nas seções acima.
   #158 foi lote; #161, #164 e #165, próprios).
 - **Registro de decisões:** `docs/DECISIONS.md`, entrada nova no topo; a
   entrada de fechamento da onda segue o mesmo formato.
-- **Flakes conhecidos:** os testes de linearidade por razão de CPU de
-  `tests/test_api_reference.py` (`test_parsing_stays_linear_on_hostile_markup`,
-  `test_sphinx_parsing_stays_linear_on_hostile_markup`) falham sob a carga de
-  várias raias rodando a suíte ao mesmo tempo (onda 2). Reexecute o teste isolado 3x
-  antes de concluir que quebrou.
+- **Flakes conhecidos:** os testes de linearidade por razão de CPU (`assert_linear`
+  de `tests/linearity.py`) falham sob a carga de várias raias rodando a suíte ao
+  mesmo tempo:
+  - `tests/test_api_reference.py::test_parsing_stays_linear_on_hostile_markup` e
+    `::test_sphinx_parsing_stays_linear_on_hostile_markup` (onda 2);
+  - `tests/test_httrack_links.py::test_rewrite_of_scanned_links_is_linear_on_hostile_pages`
+    (onda 3, #192).
+
+  Reexecute o teste isolado 3x antes de concluir que quebrou.
 
 ## Armadilhas do ambiente
 
