@@ -22,6 +22,7 @@ file, and no byte can fail to decode (contract 7).
 
 import http.cookiejar
 import ipaddress
+import itertools
 import logging
 import os
 import re
@@ -190,6 +191,7 @@ class Jar:
         self.host = host
         self._jar = _Store()
         self._lock = threading.Lock()  # the Fetcher's workers share the jar; so does its walk
+        self._clock = itertools.count()  # creation order (RFC 6265 5.4), see _created()
 
     def header(self, url: str) -> str | None:
         """The Cookie header value for a request to `url`, or None when nothing matches:
@@ -201,7 +203,7 @@ class Jar:
         with self._lock:
             sent = [c for c in self._jar if _matches(c, host, path, parts.scheme == "https",
                                                     now)]
-        sent.sort(key=lambda c: -len(c.path))
+        sent.sort(key=lambda c: (-len(c.path), c.created))  # never the stdlib's iteration
         line = "; ".join(f"{c.name}={c.value}" if c.value is not None else c.name
                          for c in sent) or None
         if line is not None:  # the --header guard: ValueError names Cookie, never the value
@@ -234,6 +236,7 @@ class Jar:
                     continue
                 if not secure and (cookie.secure or self._jar.hides_secure(cookie)):
                     continue  # plain http sets, shadows or replaces no Secure cookie
+                self._created(cookie)
                 self._jar.set_cookie_if_ok(cookie, request)
 
     def _binds(self, host: str) -> bool:
@@ -243,8 +246,16 @@ class Jar:
         """Whether a cookie of `domain` is one the start host gets."""
         return self.host is None or _domain_match(self.host, domain)
 
+    def _created(self, cookie: http.cookiejar.Cookie) -> None:
+        """Stamp `cookie`'s creation for the Cookie line's order: the one it replaces keeps
+        its creation (RFC 6265 5.3 step 11.3); any other is created now. Under the lock."""
+        key = (cookie.domain, cookie.path, cookie.name)
+        old = next((c for c in self._jar if (c.domain, c.path, c.name) == key), None)
+        cookie.created = old.created if old is not None else next(self._clock)
+
     def add(self, cookie: http.cookiejar.Cookie) -> None:
         with self._lock:
+            self._created(cookie)
             self._jar.set_cookie(cookie)
 
     def to_browser(self) -> list[dict]:

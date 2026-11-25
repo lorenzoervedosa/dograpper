@@ -480,3 +480,17 @@ def test_an_idn_start_host_binds_the_jar_in_its_wire_form(tmp_path, monkeypatch,
     jar.take("https://xn--bcher-kva.example:8443/docs/", _set_cookies("t=1; Path=/"))
     want = "f=1; l=1; t=1" if login else "f=1; t=1"
     assert jar.header("https://xn--bcher-kva.example:8443/docs/") == want
+
+
+def test_the_cookie_line_follows_rfc_6265_order_on_every_python():
+    """RFC 6265 5.4: longer paths first, then the earlier creation; a cookie that replaces
+    another keeps its creation (5.3 step 11.3), one set again after a deletion is new. Not
+    the stdlib's iteration, which Python 3.10 sorts by name."""
+    from dograpper.lib.httrack.cookies import Jar
+    jar = Jar(None)
+    jar.take("http://h.test/", _set_cookies("z=1; Path=/", "a=1; Path=/", "m=1; Path=/docs"))
+    jar.take("http://h.test/", _set_cookies("z=2; Path=/"))  # replaced: keeps its place
+    assert jar.header("http://h.test/docs/x") == "m=1; z=2; a=1"
+    jar.take("http://h.test/", _set_cookies("z=; Path=/; Max-Age=0"))
+    jar.take("http://h.test/", _set_cookies("z=3; Path=/"))  # set again: created now
+    assert jar.header("http://h.test/docs/x") == "m=1; a=1; z=3"
