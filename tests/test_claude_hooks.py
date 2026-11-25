@@ -289,6 +289,11 @@ def test_guard_checks_a_destructive_line_after_a_commented_heredoc_marker(opener
     assert guard(opener + "<<'EOF'\ngit reset --hard HEAD~1", tmp_path) == 2
 
 
+def test_guard_reads_a_line_continuation_before_a_hash_as_blank_space(tmp_path):
+    # inside `sh -c '…'` the backslash-newline is still in the text the guard recurses into
+    assert guard("sh -c 'echo hi \\\n# <<EOF\ngit reset --hard HEAD~1\nEOF'", tmp_path) == 2
+
+
 def test_guard_does_not_read_an_escaped_space_hash_as_a_comment(tmp_path):
     # `\ #` is one word, so the heredoc below is real and its body is data
     assert guard("cat \\ #x <<'EOF'\ngit reset --hard HEAD~1\nEOF", tmp_path) == 0
