@@ -227,10 +227,12 @@ def _strip_heredocs(raw: str, only_quoted: bool = False) -> str:
     heredoc, so the next line stays a command. With `only_quoted` just the bodies of `<<'EOF'`/`<<"EOF"` go
     (and their opener, so `<<` stops looking like unmodelled syntax); an
     unquoted `<<EOF` body expands, so it stays in the text."""
-    out, pending, quote, i, n = [], [], None, 0, len(raw)
+    out, pending, quote, i, n, escaped_to = [], [], None, 0, len(raw), -1
     while i < n:
         c = raw[i]
-        if not quote and c == "#" and (i == 0 or raw[i - 1].isspace()):
+        # A comment starts a word: after blank space or an operator, never after
+        # an escaped character (`\\ #` is one word) or glued to a word.
+        if not quote and c == "#" and i != escaped_to and (i == 0 or raw[i - 1] in " \t\n;&|()<>"):
             eol = raw.find("\n", i)  # a comment: a `<<` in it opens no heredoc
             eol = n if eol < 0 else eol
             out.append(raw[i:eol])
@@ -252,6 +254,7 @@ def _strip_heredocs(raw: str, only_quoted: bool = False) -> str:
         elif c == "\\" and i + 1 < n:
             out.append(raw[i + 1])
             i += 1
+            escaped_to = i + 1
         elif c in "'\"":
             quote = c
         elif c == "\n" and pending:

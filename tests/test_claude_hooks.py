@@ -284,8 +284,14 @@ def test_guard_data_stripping_never_hides_a_real_amend(command, repos):
     assert guard(command, main) == 2
 
 
-def test_guard_checks_a_destructive_line_after_a_commented_heredoc_marker(tmp_path):
-    assert guard("echo hi # <<'EOF'\ngit reset --hard HEAD~1", tmp_path) == 2
+@pytest.mark.parametrize("opener", ["echo hi # ", "echo hi;# ", "echo hi&&# ", "(echo hi)# ", "echo hi|# ", "echo hi>#"])
+def test_guard_checks_a_destructive_line_after_a_commented_heredoc_marker(opener, tmp_path):
+    assert guard(opener + "<<'EOF'\ngit reset --hard HEAD~1", tmp_path) == 2
+
+
+def test_guard_does_not_read_an_escaped_space_hash_as_a_comment(tmp_path):
+    # `\ #` is one word, so the heredoc below is real and its body is data
+    assert guard("cat \\ #x <<'EOF'\ngit reset --hard HEAD~1\nEOF", tmp_path) == 0
 
 
 def test_guard_blocks_a_bare_push_from_a_shared_branch(repos):
