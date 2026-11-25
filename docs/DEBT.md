@@ -45,6 +45,11 @@ Entry format, grouped under one heading per issue or PR:
   without failing the test, or a switch to CommonMark-correct backtick-run
   matching.**
 
+## Doxygen topic pages and the source browser (#187, #189, 2026-11-25)
+
+- **Under `SOURCE_BROWSER = YES` a topic page whose members have only a brief description is split, though the plain build keeps it whole.** The source browser's "Definition at line ..." gives every member a documentation section (`docs/discovery/doxygen-api-records-acceptance.md`, "Follow-ups"), and a topic page with member sections is split (`_kind` in `src/dograpper/utils/api_reference/doxygen.py`); the line itself is dropped (#189), so the records are right, but the page splits in one build and not in the other. ⏸ **accepted: no measured corpus has the source browser on and a brief-only group; fix when one does, by not counting a section that holds only source-browser lines.**
+- **A topic page whose title ends in "Reference" (`@defgroup core Core API Reference`) is read as a page kind and kept whole as unsupported markup (`page kind API`).** `_kind` tests the " Reference" suffix before it looks for a topic page. ⏸ **accepted: no measured corpus has such a title, and the page is kept whole, not mis-split; fix when one does, by telling a topic page apart by its `g` member anchors before the suffix.**
+
 ## Doxygen API records (#168, 2026-11-20)
 
 - **The pack helpers of the API-reference tests are copied in four files.** `_cwd`, `_pack`, `_corpus` and `_jsonl` in `tests/test_api_reference_doxygen.py` repeat those of `tests/test_api_reference.py`, `tests/test_api_reference_rustdoc.py` and `tests/test_api_reference_typedoc.py`; the Doxygen copy points at the first. ⏸ **accepted: the other three files belonged to other lanes of the wave; fix in one test refactor that moves them to a shared module, or when a fifth adapter would copy them again.**
