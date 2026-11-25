@@ -197,7 +197,8 @@ ICU headers declare no templates.
   since #188, see "Follow-ups".)
 - Topic (group) pages keep one record. In libstdc++ the free functions of a
   group (`std::make_shared`, `std::make_unique`, the iterator adaptors'
-  helpers) are documented there, not on a file page.
+  helpers) are documented there, not on a file page. (Split since #187, see
+  "Follow-ups".)
 - With `SOURCE_BROWSER = YES`, Doxygen adds "Definition at line N of file F"
   and the reference lists to each member; no measured corpus had them, so
   they stay in the member text. (Dropped since #189, see "Follow-ups".)
@@ -253,3 +254,73 @@ still keep the page whole. Measured on the libstdc++ 13 corpus above:
   the containers are 40 (`std::optional`) and 65 (`std::pair`) words.
 - Lookup 22 (`optional value_or`): `std::optional< _Tp >::value_or` is now
   1st, its container 3rd. Lookups over both corpora: 22 of 24.
+
+### Topic (group) pages (#187, 2026-11-25)
+
+[#187](https://github.com/lorenzoervedosa/dograpper/issues/187) splits a topic
+page that documents members in sections: a `group` container record and one
+member record per member, named as the page writes it, with the group as
+`container`.
+
+**Corpus.** The libstdc++ corpus above has 3 group pages. A second build adds
+the headers that define and fill libstdc++'s groups to the same Doxyfile
+(`INPUT` gains `memory`, `utility`, `numeric`, `ratio`,
+`bits/algorithmfwd.h`, `bits/stl_algo.h`, `bits/stl_algobase.h`,
+`bits/stl_heap.h`, `bits/stl_numeric.h`, `bits/stl_function.h`,
+`bits/stl_iterator_base_types.h`, `bits/stl_iterator_base_funcs.h`,
+`bits/memoryfwd.h`, `bits/move.h`): 644 pages, 24 group pages, 11 of them
+with member sections (192 sections). ICU has one group page, `String
+Length`, with no member sections.
+
+**Names.** On all 11 pages the section title drops the namespace (`copy()`).
+The signature and the summary row write a namespace member qualified
+(`std::copy`, `std::ratio< _Num, _Den >::num`) and a `\relates` symbol bare
+(21 of the 192: `make_shared`, `make_unique`, `allocate_shared`,
+`make_pair`); no part of the page writes the scope of those. The records take
+the summary row's name (maintainer, 2026-11-25); the row is the one whose
+`memitem:` class names the member's anchor, since an anonymous enum's row
+links its first enumerator rather than its section.
+
+| Criterion | Bar | libstdc++ with groups | ICU |
+|---|---|---|---|
+| Group members with no record before | report | 353 on 11 pages | 0 (the group page has no sections) |
+| Member records | p99 ≤ 550; max ≤ 3,000 | p99 142, max 200 (group members: p99 163, max 188) | unchanged: p99 506, max 2,359 |
+| Container records | max ≤ 5,000 | max 772 (`std::deque`); groups 9 to 184 | unchanged: max 925 |
+| Lookups in the top 5 | ≥ 80% | 20 of 22 | 11 of 12 |
+| Pack time | ≤ 2× baseline | 10.1 s vs 14.5 s | 3.1 s vs 4.9 s |
+
+- The corpus gives 319 pages split into 3,421 records (319 container, 3,102
+  member) and 325 pages kept whole; all 3,746 ids are distinct. The 353 group
+  members are 304 functions, 29 typedefs, 16 variables and 4 defines. The 13
+  group pages without member sections stay whole; 6 of them list 16
+  brief-only members, which still have no record of their own.
+- On the #168 corpus as it was, the 3 group pages split: 198 pages into 2,640
+  records (2,442 member, 156 of them from the groups), member p99 136.
+- ICU packs as before: 19 pages split into 1,053 records, 43 kept whole.
+- Pack times are the median of 3.
+
+Lookups over both corpora: 31 of 34 (91%). `search_chunks` with `k = 5`
+over the same pack, a hit as in the table above. The 12 libstdc++ queries of #168 on this corpus hit 11 (the
+miss is again `shared_ptr use_count`); `optional value_or` is 1st since
+#188. The group member queries:
+
+| Query | Expected member | Member rank | Group rank |
+|---|---|---|---|
+| `make_shared` | `make_shared` | 4 | 5 |
+| `make_unique create a unique_ptr` | `make_unique` | 2 | - |
+| `make_pair` | `make_pair` | 1 | - |
+| `sort a range` | `std::sort` | 2 | - |
+| `lower_bound` | `std::lower_bound` | - | - |
+| `accumulate sum of a range` | `std::accumulate` | 1 | - |
+| `back_inserter` | `std::back_inserter` | 1 | 2 |
+| `copy_if copy elements that satisfy a predicate` | `std::copy_if` | 1 | - |
+| `set_intersection` | `std::set_intersection` | 5 | 4 |
+| `make_heap` | `std::make_heap` | 1 | 4 |
+
+- `make_shared`: above it are a kept-whole page, the undocumented friend
+  declaration on `std::shared_ptr` (`std::shared_ptr< _Tp >::make_shared`,
+  16 words) and `std::__make_shared`.
+- `lower_bound` misses: the members of `std::set`, `std::map` and
+  `std::multimap` with that name (15 to 17 words) take the top 7. Then come
+  the two undocumented declarations of `algorithmfwd.h` (8 and 9), one of the
+  group's two `std::lower_bound` records (11) and the group (12).

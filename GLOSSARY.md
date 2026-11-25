@@ -92,7 +92,8 @@ _Avoid_: entity, item, element
 
 **Container**:
 A symbol that groups other symbols, such as a package or module, namespace,
-class, interface, enum or trait.
+class, interface, enum or trait; or, when no code symbol declares the members,
+the page that documents them, such as a Doxygen file or topic (group) page.
 _Avoid_: parent, owner (as a noun for the symbol itself), type (when modules are
 included)
 

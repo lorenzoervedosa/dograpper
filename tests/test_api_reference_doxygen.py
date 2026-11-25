@@ -345,6 +345,65 @@ def test_c_struct_fields_are_member_records():
     assert [head.symbol, tail.symbol] == ["ring::head", "ring::tail"]
 
 
+def test_a_group_page_is_a_container_of_the_members_it_documents():
+    # A topic page (\defgroup) has no "... Reference" title. Its members are named as the page
+    # writes them: qualified for a namespace member, bare for a \relates one or an enum with no
+    # name; their anchors start with "g". The classes it lists are names: their pages give records.
+    recs = split_page(_page("cpp/group__counting.html"))
+    assert [(r.symbol, r.kind, r.symbol_kind, r.container, r.anchor) for r in recs] == [
+        ("Counting", "container", "group", "", ""),
+        ("algo::count_if", "member", "function", "Counting", "ga1c70cb50feb9f2fc5abe50c75cab7c88"),
+        # Its summary row links its first enumerator, not its section.
+        ("anonymous enum", "member", "enum", "Counting", "gaee94dea4b6199973136da8b263ecf58c"),
+        ("algo::count", "member", "function", "Counting", "ga1e8d4c18ba0a66f3af0eef845ca8ba21"),
+        ("make_tally", "member", "function", "Counting", "ga663bd8b30bed4a4e1f5bd902148824b7")]
+    counting, count_if, anonymous, count, make_tally = recs
+    assert counting.text == "\n".join([
+        "Counting (group)",
+        "Functions that count the items of a range.",
+        "Functions that count the items of a range.",  # the brief, repeated in the description
+        "Each function walks its range once.",
+        "Classes: algo::Tally",
+        "Enumerations: anonymous enum",
+        "Functions: algo::count, algo::count_if, make_tally"])
+    assert anonymous.text == "\n".join([
+        "anonymous enum", "anonymous enum", "How a count treats items that compare equal.",
+        "Enumerator", "COUNT_ALL", "Every equal item counts.", "COUNT_FIRST", "Only the first equal item counts."])
+    assert count_if.text == "\n".join([
+        "algo::count_if", "template<typename It , typename Pred >", "std::size_t algo::count_if (It first, It last, Pred pred)",
+        "The number of items of a range a predicate accepts."])
+    assert (count.breadcrumb, count.url("cpp/group__counting.html")) == (
+        ["Counting", "algo::count"], "cpp/group__counting.html#ga1e8d4c18ba0a66f3af0eef845ca8ba21")
+    assert count.text == "\n".join([
+        "algo::count", "template<typename It , typename T >", "std::size_t algo::count ( It first, It last, const T & value )",
+        "The number of items of a range equal to a value.", "Parameters", "first", "the start of the range", "last",
+        "the end of the range", "value", "the value to look for", "Returns how many items compare equal to value"])
+    assert make_tally.text == "\n".join([
+        "make_tally", "Tally make_tally ( std::size_t start )", "related", "A tally that starts at a count.",
+        "Parameters", "start", "the first count"])
+
+
+def test_a_group_page_without_member_sections_keeps_one_record():
+    # "Algorithms" lists its subgroup only; a group of brief-only members stays whole too.
+    page = _page("cpp/group__algorithms.html")
+    assert 'class="memtitle"' not in page
+    with pytest.raises(NotSplit, match="^Doxygen index, listing, source or topic page$"):
+        split_page(page)
+
+
+@pytest.mark.parametrize("old, new, problem", [
+    ('id="ga1e8d4c18ba0a66f3af0eef845ca8ba21"', 'id="a1e8d4c18ba0a66f3af0eef845ca8ba21"',
+     "a topic page member anchor without the g prefix"),
+    ('<tr class="memitem:ga1e8d4c18ba0a66f3af0eef845ca8ba21"><td class="memTemplItemLeft"',
+     '<tr class="memitem:gother"><td class="memTemplItemLeft"', "a topic page member without a summary row"),
+])
+def test_a_group_page_with_other_markup_is_not_split(old, new, problem):
+    page = _page("cpp/group__counting.html")
+    assert old in page
+    with pytest.raises(NotSplit, match=f"^unsupported Doxygen markup: {problem}$"):
+        split_page(page.replace(old, new, 1))
+
+
 SOURCE_BROWSER = Path(__file__).parent / "fixtures" / "doxygen" / "source-browser"
 RING_INIT, RING_CLEAR, RING_COUNT = (
     "a75b4c8a8753ae9400ee8f46ea6a091b3", "aa7acb80ec349c5e57aac209e6dbc1409", "ad58c19bce1efa5d66b97448915252c85")
@@ -373,7 +432,8 @@ SYMBOL_PAGES = {
     "cpp/classshapes_1_1Box.html", "cpp/classshapes_1_1Box_1_1View.html", "cpp/classshapes_1_1Shape.html",
     "cpp/classshapes_1_1Square.html", "cpp/structshapes_1_1Point.html", "cpp/unionshapes_1_1Bits.html",
     "cpp/namespaceshapes.html", "cpp/namespaceshapes_1_1detail.html", "cpp/shapes_8hpp.html",
-    "cpp/classmaybe_1_1Maybe.html", "cpp/namespacemaybe.html", "c/ring_8h.html", "c/structring.html",
+    "cpp/classmaybe_1_1Maybe.html", "cpp/namespacemaybe.html", "cpp/classalgo_1_1Tally.html",
+    "cpp/namespacealgo.html", "cpp/group__counting.html", "c/ring_8h.html", "c/structring.html",
 }
 
 
@@ -383,9 +443,11 @@ def test_symbol_pages_are_split_and_the_index_listing_and_source_pages_kept_whol
     assert set(split.records) == SYMBOL_PAGES
     kept = dict(split.kept_whole)
     assert len(kept) == len(paths) - len(SYMBOL_PAGES)
-    # The member lists, sources, class and file lists, symbol indexes, main page and deprecated list.
+    # The member lists, sources, class and file lists, symbol indexes, main page, deprecated list,
+    # topic list and a topic page without member sections.
     assert {"cpp/classshapes_1_1Box-members.html", "cpp/shapes_8hpp_source.html", "cpp/annotated.html",
-            "cpp/functions_func.html", "cpp/index.html", "c/deprecated.html", "c/globals.html"} <= set(kept)
+            "cpp/functions_func.html", "cpp/index.html", "c/deprecated.html", "c/globals.html",
+            "cpp/topics.html", "cpp/group__algorithms.html"} <= set(kept)
     assert set(kept.values()) == {"Doxygen index, listing, source or topic page"}
 
 
@@ -539,7 +601,7 @@ def test_pack_writes_doxygen_records(tmp_path):
     written = [ln for name in os.listdir(out) if name.endswith(".jsonl")
                for ln in (out / name).read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(written) == len(by_id)  # no two records share an id
-    assert "API records:     13 pages split into 63 records (13 container, 50 member), 47 pages kept whole" \
+    assert "API records:     16 pages split into 71 records (16 container, 55 member), 52 pages kept whole" \
         in result.output
 
 
@@ -547,12 +609,13 @@ def test_dedup_never_touches_a_doxygen_page(tmp_path):
     src, out = _corpus(tmp_path), tmp_path / "out"
     result = _pack(src, out, "--dedup", "both")
     assert result.exit_code == 0, result.output
-    assert "Pages exempted:    13 (API reference)" in result.output
+    assert "Pages exempted:    16 (API reference)" in result.output
 
 
 @pytest.mark.parametrize("query, expected", [
     ("ring push byte", "01_c/ring_8h.html#ad65c0edeeb4d8558ed0702e20e8bb269"),
     ("Box map function every item", "01_cpp/classshapes_1_1Box.html#a8d3c008457f75735d700d3ed5e084290"),
+    ("make_tally", "01_cpp/group__counting.html#ga663bd8b30bed4a4e1f5bd902148824b7"),  # documented on its group only
 ])
 def test_serve_finds_the_doxygen_member_record(tmp_path, query, expected):
     src, out = _corpus(tmp_path), tmp_path / "out"

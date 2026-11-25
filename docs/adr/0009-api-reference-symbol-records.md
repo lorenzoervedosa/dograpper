@@ -254,7 +254,9 @@ libstdc++ 13 (templated C++, 2,240 member records):
   `--api-records` (3.2 s vs 5.1 s, 7.4 s vs 9.1 s).
 
 Topic (group) pages, related pages and the other Doxygen languages keep one
-record: their markup was not measured.
+record: their markup was not measured. (For topic pages, superseded on
+2026-11-25 by [#187](https://github.com/lorenzoervedosa/dograpper/issues/187),
+see the amendment below.)
 
 ## Amendment (2026-11-25): Doxygen overloads under one anchor
 
@@ -270,4 +272,28 @@ check of the other adapters is unchanged.
 On libstdc++ 13 this splits `std::optional` and `std::pair`, the only pages
 the 2026-11-20 run kept whole for this reason: 7 merged records of 60 to 93
 words, two overloads each, and the member p99 stays 138 words
+([acceptance doc, "Follow-ups"](../discovery/doxygen-api-records-acceptance.md)).
+
+## Amendment (2026-11-25): Doxygen topic (group) pages
+
+[#187](https://github.com/lorenzoervedosa/dograpper/issues/187) reverses the
+2026-11-20 amendment for topic pages. A Doxygen 1.9.8 page whose title has no
+"Reference" suffix and that documents members in sections is a topic page
+(`\defgroup`): a container record with `symbol_kind` `group` (title,
+description, member names by summary section), and one member record per
+member it documents, with the group's title as `container`. A group is not a
+code symbol, so a container here may be the page that documents members no
+code symbol declares, as a file page already was (glossary: **Container**).
+Members are named as the page writes them; the maintainer chose this on
+2026-11-25 after the run showed that Doxygen writes a namespace member
+qualified (`std::copy`) and a `\relates` symbol bare (`make_shared`), with no
+scope anywhere on the page. The section's title drops the namespace, so the
+name comes from the member's summary row. A topic page
+without member sections keeps one record, and its member anchors must start
+with `g`, as Doxygen writes a group member's.
+
+On libstdc++ 13 regenerated with its groups (644 pages, 24 group pages, 11
+with member sections), the 11 pages give 353 member records that had none
+before; the member p99 is 142 words (≤ 550), the largest container 772 (≤
+5,000), and 31 of 34 lookups over both corpora hit in the top 5
 ([acceptance doc, "Follow-ups"](../discovery/doxygen-api-records-acceptance.md)).

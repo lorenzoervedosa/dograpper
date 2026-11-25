@@ -408,7 +408,16 @@ stays `0.0.0.dev0`.
   (Doxygen 1.9.8 gives overloads that differ only in their template
   constraints one id, as on libstdc++'s `std::optional` and `std::pair`)
   instead of keeping it whole: the overloads are one member record under that
-  anchor, in page order. ([#188](https://github.com/lorenzoervedosa/dograpper/issues/188))
+  anchor, in page order. ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
+  [#188](https://github.com/lorenzoervedosa/dograpper/issues/188))
+- `pack --api-records` splits a Doxygen topic (group) page that documents
+  members in sections instead of keeping it whole: a container record with
+  the new `symbol_kind` `group` (title, description, member names by summary
+  section) and one member record per member it documents, with the group as
+  `container` and the name the page writes (`std::copy`; `make_shared` for a
+  `\relates` symbol). A group page without member sections keeps one record.
+  ([ADR-0009](https://github.com/lorenzoervedosa/dograpper/blob/main/docs/adr/0009-api-reference-symbol-records.md),
+  [#187](https://github.com/lorenzoervedosa/dograpper/issues/187))
 
 ### Removed
 
