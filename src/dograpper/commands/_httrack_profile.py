@@ -26,6 +26,7 @@ from ..utils.atomic_write import atomic_write_bytes
 from ..utils.portable_names import resolve_under
 from ..utils.redact import redact_url
 from ._profile_headers import checked_user_agent, single_user_agent, user_headers
+from ._run_jar import RunJar
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,10 @@ PROFILE_OPTIONS = ('user_agent', 'header', 'no_robots', 'connections', 'max_conn
                    'max_bandwidth', 'timeout', 'retries', 'max_links', 'max_retry_after',
                    'disable_security_limits', 'no_parse_scripts', 'no_extended_parsing',
                    'cache', 'updatehack', 'do_not_recatch', 'changes')
+# The [httrack] options of `download`, which fire-engine lacks (#152); sync forwards them too.
+HTTRACK_OPTIONS = ('cookies', 'browser_headers', 'browser_login')
+# Of them, the ones the profile runner takes (run_httrack keyword arguments), not the policy
+_RUN_OPTIONS = ('cookies', 'browser_login')
 # --no-X flags: the policy holds the positive switch
 _NEGATED = {'no_robots': 'obey_robots', 'no_parse_scripts': 'parse_scripts',
             'no_extended_parsing': 'extended_parsing'}
@@ -52,12 +57,14 @@ def config_note(from_config: bool) -> str:
 
 
 def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
-    """Return (policy_kw, from_config) for the profile options. A value not set on the
-    command line goes through its option's click type (ranges, booleans), so config
-    gets the CLI's checks and messages; under wget a profile option given on the
-    command line, or set away from its default in config, is a usage error."""
-    params = [p for p in ctx.command.params if p.name in PROFILE_OPTIONS]
-    from_config = frozenset(k for k in (*PROFILE_OPTIONS, 'delay') if not is_explicit(ctx, k))
+    """Return (policy_kw, from_config, run_kw) for the profile options, `run_kw` the
+    _RUN_OPTIONS for run_httrack. A value not set on the command line goes through its
+    option's click type (ranges, booleans), so config gets the CLI's checks and messages;
+    under wget a profile option, and under any downloader but httrack an [httrack] one,
+    given on the command line or set away from its default in config, is a usage error."""
+    names = (*PROFILE_OPTIONS, *HTTRACK_OPTIONS)
+    params = [p for p in ctx.command.params if p.name in names]
+    from_config = frozenset(k for k in (*names, 'delay') if not is_explicit(ctx, k))
     values = {}
     for param in params:
         value = merged_params[param.name]
@@ -76,18 +83,25 @@ def resolve_profile(ctx: click.Context, merged_params: dict, downloader: str):
                     e.message, ctx,
                     param_hint=f"'{_flag(param.name)}'{FROM_CONFIG}") from None
         values[param.name] = value
-    if downloader == 'wget':
-        for param in params:
-            if param.name not in from_config or values[param.name] != param.default:
-                raise click.UsageError(f"{_flag(param.name)} requires --downloader httrack or fire-engine")
+    for param in params:
+        only_httrack = param.name in HTTRACK_OPTIONS
+        allowed = downloader == 'httrack' if only_httrack else downloader != 'wget'
+        if not allowed and (param.name not in from_config or values[param.name] != param.default):
+            needs = "httrack" if only_httrack else "httrack or fire-engine"
+            flags = "/".join((*param.opts, *param.secondary_opts))  # --x/--no-x: both
+            raise click.UsageError(f"{flags} requires --downloader {needs}")
+    run_kw = {k: values.pop(k) for k in _RUN_OPTIONS}
     header_ua, headers = user_headers(values.pop('header'), config_note('header' in from_config))
     user_agent = checked_user_agent(values['user_agent'],
                                     config_note('user_agent' in from_config))
-    values['user_agent'] = single_user_agent({"--user-agent": user_agent,
-                                              "--header 'User-Agent: …'": header_ua})
+    login = run_kw["browser_login"]  # its User-Agent is the browser's, known after the login
+    agent = single_user_agent({"--user-agent": user_agent,
+                               "--header 'User-Agent: …'": header_ua,
+                               "--browser-login": "" if login else None})
+    values['user_agent'] = None if login else agent
     policy_kw = {_NEGATED.get(k, k): (not v if k in _NEGATED else v) for k, v in values.items()}
     policy_kw['headers'] = headers
-    return policy_kw, from_config
+    return policy_kw, from_config, run_kw
 
 
 def _build_policy(delay, policy_kw, from_config):
@@ -205,6 +219,7 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
             raise click.UsageError(f"{', '.join(flags)}: no page is revalidated under "
                                    "--headless (the browser fetches each one in full)")
     fetcher = make_fetcher(policy)
+    policy = fetcher.policy  # the transport's, e.g. with --browser-login's User-Agent
     parts = urlsplit(url)
     sitemap_hints = fetcher.robots_for(f"{parts.scheme}://{parts.netloc}").sitemaps
     discovered, winning_layer = discover(url, depth, discovery_fetch(fetcher), sitemap_hints,
@@ -291,11 +306,13 @@ def run_profile(name, make_fetcher, url, output, depth, delay, include_extension
 
 def _front_failed(discovered: bool, challenged: bool) -> str:
     if discovered:
-        cause = ("the site refused or challenged every seed URL (likely bot protection)"
+        cause = ("the site refused or challenged every seed URL (likely bot protection; "
+                 "--browser-login lets you pass the challenge in a browser window)"
                  if challenged else
                  "every seed URL was blocked by robots.txt or failed (see the report above)")
     else:
-        cause = ("the site challenged the start URL (likely bot protection)"
+        cause = ("the site challenged the start URL (likely bot protection; "
+                 "--browser-login lets you pass the challenge in a browser window)"
                  if challenged else
                  "the start URL was blocked by robots.txt, redirected out of scope or "
                  "failed (see the report above)")
@@ -303,11 +320,22 @@ def _front_failed(discovered: bool, challenged: bool) -> str:
 
 
 def run_httrack(url, output, depth, delay, include_extensions, headless, verbose,
-                policy_kw, from_config, discover, filters, previous: Manifest | None = None
+                policy_kw, from_config, discover, filters, previous: Manifest | None = None,
+                *, cookies: str | None = None, browser_login: bool = False
                 ) -> Tuple[int, int, List[str], Dict[str, str], Dict[str, dict]]:
     """The httrack profile: run_profile over the stdlib Fetcher, HTTrack's identity, with
-    the Playwright crawl under its policy for --headless and client-rendered sites."""
+    the Playwright crawl under its policy for --headless and client-rendered sites.
+    `cookies` (--cookies FILE) is the jar the Fetcher sends and fills, written back to
+    FILE when the run ends, a failed one included (HTTrack -%K). `browser_login` (#171)
+    opens a headed Chromium on `url` before the first request: its cookies go into the jar
+    and its User-Agent is the run's."""
     warn_if_old_openssl()
-    return run_profile("httrack", Fetcher, url, output, depth, delay, include_extensions,
-                       verbose, policy_kw, from_config, discover, filters, previous,
-                       front_failed=_front_failed, fallback=None, headless=headless)
+    with RunJar(url, cookies, config_note('cookies' in from_config), browser_login) as run:
+        def make_fetcher(policy):  # past run_profile's usage checks: a refused run reads no jar
+            policy, jar = run.open(policy)
+            return Fetcher(policy, cookies=jar)
+
+        return run_profile("httrack", make_fetcher, url, output, depth, delay,
+                           include_extensions, verbose, policy_kw, from_config, discover,
+                           filters, previous, front_failed=_front_failed, fallback=None,
+                           headless=headless)

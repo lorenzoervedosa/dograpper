@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from dograpper.lib.httrack import policy
+from dograpper.lib.httrack import browsers, policy
 from dograpper.lib.httrack.policy import (
     FetchMeta,
     build_policy,
@@ -444,3 +444,180 @@ def test_update_hacks_are_off_by_default_as_in_httrack():
     5429, 5441)."""
     p = build_policy()
     assert (p.updatehack, p.do_not_recatch, p.changes) == (False, False, False)
+
+
+# -- --browser-headers (#170, HTTrack -%Q): the headers of the browser --user-agent names.
+# Expected values: HTTrack's own test vectors at the pinned commit (tests/597, 602, 603).
+
+CHROME = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+          "Chrome/141.0.0.0 Safari/537.36")
+EDGE = CHROME + " Edg/141.0.0.0"
+FIREFOX = "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0"
+C_NAV = ("text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,"
+         "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+C_IMG = "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+F_NAV = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+F_IMG = "image/avif,image/jxl,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
+CSS = "text/css,*/*;q=0.1"
+
+
+@pytest.mark.parametrize("ua,want", [
+    (CHROME.replace("141.0.0.0", "108.0.0.0"),
+     ('"Not?A_Brand";v="8", "Chromium";v="108", "Google Chrome";v="108"', False, '"Windows"')),
+    (CHROME.replace("141.0.0.0", "138.0.0.0"),
+     ('"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"', False, '"Windows"')),
+    ("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
+     "Chrome/140.0.0.0 Mobile Safari/537.36",
+     ('"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"', True, '"Android"')),
+    (CHROME, ('"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"', False,
+              '"Windows"')),
+    (EDGE, ('"Microsoft Edge";v="141", "Not?A_Brand";v="8", "Chromium";v="141"', False,
+            '"Windows"')),
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+     "Chrome/139.0.0.0 Safari/537.36",
+     ('"Not;A=Brand";v="99", "Google Chrome";v="139", "Chromium";v="139"', False, '"macOS"')),
+    ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+     "Chrome/142.0.0.0 Safari/537.36",
+     ('"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"', False, '"Linux"')),
+    ("Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) "
+     "Chrome/143.0.0.0 Safari/537.36",
+     ('"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"', False,
+      '"Chrome OS"')),
+    (CHROME.replace("Windows NT 10.0; Win64; x64", "Windows"),
+     ('"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"', False, '"Windows"')),
+])
+def test_client_hints_are_chromiums_for_the_user_agent(ua, want):
+    """htslib.c:728-811 hts_client_hints_of: Chromium's GREASE brand, seeded by the major."""
+    assert browsers.client_hints(ua) == want
+
+
+@pytest.mark.parametrize("ua", [
+    FIREFOX,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    "Version/18.0 Safari/605.1.15",
+    "Mozilla/5.0 (compatible; HTTrack/3.x; +https://www.httrack.com/)",
+    CHROME + " OPR/125.0.0.0", CHROME.replace("Chrome", "HeadlessChrome"),
+    CHROME.replace("141.0.0.0", "107.0.0.0"), CHROME.replace("141.0.0.0", "50.0.0.0"),
+    CHROME.replace("141.0.0.0", ""), CHROME.replace("141.0.0.0", "141abc"),
+    CHROME.replace("141.0.0.0", "0141.0.0.0"), CHROME + " Edg/", CHROME + " Edg/140.0.0.0",
+    CHROME.replace("141.0.0.0", "1410000000"),
+    CHROME.replace("Windows NT 10.0; Win64; x64", "Plan9"),
+    CHROME[len("Mozilla/5.0 "):],
+    CHROME.replace("Windows NT 10.0; Win64; x64", "X11; FreeBSD amd64"),
+    CHROME[:CHROME.rindex(")")], "", "Mozilla/5.0 (X11)\tChrome/141.0.0.0",
+])
+def test_no_client_hints_for_any_other_user_agent(ua):
+    assert browsers.client_hints(ua) is None
+
+
+@pytest.mark.parametrize("ua,family", [
+    (CHROME, "chrome"), (EDGE, "chrome"), (FIREFOX, "firefox"),
+    ("Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0", "firefox"),
+    (FIREFOX.replace("158.0", "89.0"), None), (FIREFOX.replace("158.0", "90.0"), "firefox"),
+    (FIREFOX[len("Mozilla/5.0 "):], None), (FIREFOX.replace(" Gecko/20100101", ""), None),
+    ("Mozilla/5.0 Gecko/20100101 Firefox/158.0 (X11", None),
+    (FIREFOX + " SeaMonkey/2.53.20", None),
+    ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+     "(KHTML, like Gecko) FxiOS/131.0 Mobile/15E148 Safari/605.1.15", None),
+    (CHROME + " OPR/125.0.0.0", None),
+    ("Mozilla/5.0 (compatible; HTTrack/3.x; +https://www.httrack.com/)", None),
+])
+def test_browser_family_is_httracks(ua, family):
+    """htslib.c:820-866 hts_browser_family_of (tests/602)."""
+    assert browsers.browser_family(ua) == family
+
+
+PAGE = FetchMeta("document", "navigate", True)
+STYLE, SCRIPT, IMAGE = (FetchMeta(d, "no-cors", False) for d in ("style", "script", "image"))
+HINTS = [("sec-ch-ua", '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"'),
+         ("sec-ch-ua-mobile", "?0"), ("sec-ch-ua-platform", '"Windows"')]
+
+
+def _sent(ua, meta, **kw):
+    return request_headers(build_policy(user_agent=ua, **kw), "h.test", kind="linked",
+                           referer="https://h.test/", scheme="https", meta=meta)
+
+
+def _browser(ua, accept, *, user=False, hints=(), uir=False, dest):
+    """The header values a browser sends for a same-origin https link from /."""
+    h = dict(hints)
+    h.update({"Host": "h.test", "Connection": "keep-alive", "User-Agent": ua, "Accept": accept,
+              "Accept-Language": "en-US,en;q=0.9", "Sec-Fetch-Site": "same-origin",
+              "Sec-Fetch-Mode": "navigate" if uir else "no-cors", "Sec-Fetch-Dest": dest,
+              "Referer": "https://h.test/", "Accept-Encoding": policy.accept_encoding()})
+    if uir:
+        h["Upgrade-Insecure-Requests"] = "1"
+    if user:
+        h["Sec-Fetch-User"] = "?1"
+    return h
+
+
+# tests/602 order_c_nav, order_c_sub and order_f, without the headers no request here sends
+C_NAV_ORDER = ["Host", "Connection", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+               "Accept-Language", "Upgrade-Insecure-Requests", "User-Agent", "Accept",
+               "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest", "Referer",
+               "Accept-Encoding"]
+C_SUB_ORDER = ["Host", "Connection", "sec-ch-ua-platform", "Accept-Language", "sec-ch-ua",
+               "User-Agent", "sec-ch-ua-mobile", "Accept", "Sec-Fetch-Site", "Sec-Fetch-Mode",
+               "Sec-Fetch-Dest", "Referer", "Accept-Encoding"]
+F_PAGE_ORDER = ["Host", "User-Agent", "Accept", "Accept-Language", "Accept-Encoding",
+                "Connection", "Referer", "Upgrade-Insecure-Requests", "Sec-Fetch-Dest",
+                "Sec-Fetch-Mode", "Sec-Fetch-Site", "Sec-Fetch-User"]
+F_SUB_ORDER = [n for n in F_PAGE_ORDER if n not in ("Upgrade-Insecure-Requests",
+                                                    "Sec-Fetch-User")]
+EDGE_HINTS = [("sec-ch-ua", '"Microsoft Edge";v="141", "Not?A_Brand";v="8", "Chromium";v="141"'),
+              *HINTS[1:]]
+
+
+@pytest.mark.parametrize("ua,meta,order,want", [
+    (CHROME, PAGE, C_NAV_ORDER,
+     _browser(CHROME, C_NAV, user=True, hints=HINTS, uir=True, dest="document")),
+    (CHROME, STYLE, C_SUB_ORDER, _browser(CHROME, CSS, hints=HINTS, dest="style")),
+    (CHROME, SCRIPT, C_SUB_ORDER, _browser(CHROME, "*/*", hints=HINTS, dest="script")),
+    (CHROME, IMAGE, C_SUB_ORDER, _browser(CHROME, C_IMG, hints=HINTS, dest="image")),
+    (EDGE, PAGE, C_NAV_ORDER,
+     _browser(EDGE, C_NAV, user=True, hints=EDGE_HINTS, uir=True, dest="document")),
+    (EDGE, STYLE, C_SUB_ORDER, _browser(EDGE, CSS, hints=EDGE_HINTS, dest="style")),
+    (EDGE, SCRIPT, C_SUB_ORDER, _browser(EDGE, "*/*", hints=EDGE_HINTS, dest="script")),
+    (EDGE, IMAGE, C_SUB_ORDER, _browser(EDGE, C_IMG, hints=EDGE_HINTS, dest="image")),
+    (FIREFOX, PAGE, F_PAGE_ORDER,
+     _browser(FIREFOX, F_NAV, user=True, uir=True, dest="document")),
+    (FIREFOX, STYLE, F_SUB_ORDER, _browser(FIREFOX, CSS, dest="style")),
+    (FIREFOX, SCRIPT, F_SUB_ORDER, _browser(FIREFOX, "*/*", dest="script")),
+    (FIREFOX, IMAGE, F_SUB_ORDER, _browser(FIREFOX, F_IMG, dest="image")),
+])
+def test_a_browser_user_agent_sends_that_browsers_headers(ua, meta, order, want):
+    """#170: the browser tables of HTTrack -%Q (htsfetch.c:549-578 Accept, htsfetch.h:135
+    Accept-Language, htslib.c:913-946 order) for a page, a stylesheet, a script, an image."""
+    got = _sent(ua, meta)
+    assert [name for name, _ in got] == order
+    assert dict(got) == want
+
+
+def test_a_browser_table_never_reaches_plain_http_hints_nor_an_unclassified_link():
+    """Client hints over https only (htslib.c:1213-1216); a link with no fetch metadata
+    gets no browser table: HTTrack's own Accept and order (tests/603, -%Q0 row)."""
+    got = request_headers(build_policy(user_agent=CHROME), "127.0.0.1:8080", kind="linked",
+                          referer="http://127.0.0.1:8080/", scheme="http", meta=IMAGE)
+    assert [n for n, _ in got if n.startswith("sec-ch-ua")] == []
+    assert [n for n, _ in got][:2] == ["Host", "Connection"]  # loopback: still Chrome's order
+    got = _sent(CHROME, FetchMeta("", "no-cors", False))
+    assert [n for n, _ in got] == ["Referer", "Connection", "Host", *[n for n, _ in HINTS],
+                                   "User-Agent", "Accept", "Accept-Language", "Accept-Encoding"]
+    assert dict(got)["Accept"] == policy.ACCEPT and dict(got)["Accept-Language"] == "en, *"
+
+
+@pytest.mark.parametrize("ua", [CHROME, FIREFOX, None])
+def test_no_browser_headers_sends_httracks_own_set(ua):
+    """--no-browser-headers (HTTrack -%Q0): no Sec-Fetch-*, no Upgrade-Insecure-Requests,
+    no client hints, and HTTrack's own Accept, Accept-Language and order (tests/603)."""
+    got = _sent(ua, PAGE, browser_headers=False)
+    assert [n for n, _ in got] == ["Referer", "Connection", "Host", "User-Agent", "Accept",
+                                   "Accept-Language", "Accept-Encoding"]
+    assert dict(got)["Accept"] == policy.ACCEPT and dict(got)["Accept-Language"] == "en, *"
+
+
+def test_a_header_line_still_takes_the_place_of_a_browser_tables_own():
+    got = _sent(CHROME, PAGE, headers=(("Accept-Language", "pt-BR"), ("sec-ch-ua", '"T";v="1"')))
+    assert dict(got)["Accept-Language"] == "pt-BR" and dict(got)["sec-ch-ua"] == '"T";v="1"'
+    assert [n for n, _ in got] == C_NAV_ORDER

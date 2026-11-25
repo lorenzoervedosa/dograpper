@@ -307,6 +307,26 @@ def _run_download_cascade(
                    "added; robots.txt requests carry them too. 'User-Agent: X' acts exactly "
                    "as --user-agent X. Host, Content-Length, Transfer-Encoding and Connection "
                    "are refused, as are values with CR, LF or NUL.")
+@click.option('--cookies', type=click.Path(dir_okay=False, writable=True), default=None,
+              metavar='FILE',
+              help="[httrack] Netscape cookies.txt jar, as HTTrack -%K: its matching cookies "
+                   "are sent (#HttpOnly_ lines included), every Set-Cookie of the run is taken "
+                   "in, and the jar is written back to FILE at the end, created owner-only "
+                   "(0600) when missing. A --header 'Cookie: …' line wins over it. Default: no "
+                   "cookie is sent or kept.")
+@click.option('--browser-headers/--no-browser-headers', default=True,
+              help="[httrack] Send the headers a browser sends, as HTTrack -%Q: Sec-Fetch-* and "
+                   "Upgrade-Insecure-Requests to an https or loopback URL, and, when "
+                   "--user-agent names Chrome or Edge 108+ or Firefox 90+, that browser's "
+                   "Accept values, Accept-Language, header order and (Chrome, Edge, over "
+                   "https) client hints. Default: on; --no-browser-headers sends HTTrack's "
+                   "plain header set.")
+@click.option('--browser-login', is_flag=True, default=False,
+              help="[httrack] Before the run, open a Chromium window on the start URL: log in, "
+                   "or pass a challenge, as a person, then press Enter in the terminal. The "
+                   "run then uses that browser's cookies and its own User-Agent (so "
+                   "--user-agent is refused); with --cookies FILE the cookies are saved for "
+                   "reuse. Needs Playwright and a display. Default: off.")
 @click.option('--no-robots', is_flag=True, default=False,
               help="[httrack, fire-engine] Ignore robots.txt")
 @click.option('--connections', type=click.IntRange(min=1), default=4, show_default=True,
@@ -353,7 +373,7 @@ def _run_download_cascade(
                    "reported (HTTrack -%n). Default: off, fetched again in full, as in "
                    "HTTrack")
 @click.pass_context
-def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, header: Tuple[str, ...], no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool, changes: bool):
+def download(ctx: click.Context, url: str, output: str, depth: int, headless: bool, delay: int, include_extensions: str, manifest: str, filter: Tuple[str, ...], downloader: str, proxy, impersonate: str, user_agent, header: Tuple[str, ...], cookies, browser_headers: bool, browser_login: bool, no_robots: bool, connections: int, max_conn_rate: float, max_bandwidth: int, timeout: float, retries: int, max_links: int, max_retry_after: int, disable_security_limits: bool, no_parse_scripts: bool, no_extended_parsing: bool, cache, updatehack: bool, do_not_recatch: bool, changes: bool):
     """Mirror a documentation site locally for offline processing.
 
     Discovers URLs via a 4-layer cascade: llms.txt → sitemap.xml → wget --mirror →
@@ -379,6 +399,9 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         'impersonate': impersonate,
         'user_agent': user_agent,
         'header': header,
+        'cookies': cookies,
+        'browser_headers': browser_headers,
+        'browser_login': browser_login,
         'no_robots': no_robots,
         'connections': connections,
         'max_conn_rate': max_conn_rate,
@@ -419,7 +442,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
             raise click.UsageError("--proxy requires --downloader fire-engine")
         if impersonate != 'chrome':
             raise click.UsageError("--impersonate requires --downloader fire-engine")
-    policy_kw, from_config = resolve_profile(ctx, merged_params, downloader)
+    policy_kw, from_config, run_kw = resolve_profile(ctx, merged_params, downloader)
     filters = _url_filters(ctx, merged_params['filter'])
     if downloader == 'wget':
         try:  # wget --mirror's regexes cannot say every rule order: refuse before any fetch
@@ -441,7 +464,7 @@ def download(ctx: click.Context, url: str, output: str, depth: int, headless: bo
         files_downloaded, files_skipped, report_lines, fetched, records = run_httrack(
             url, output, depth, delay, include_extensions, headless,
             bool(ctx.obj.get('VERBOSE')), policy_kw, from_config, _discover_urls, filters,
-            previous=manifest_data,
+            previous=manifest_data, **run_kw,
         )
     elif downloader == 'fire-engine':
         files_downloaded, files_skipped, report_lines, fetched, records = run_fire_engine(

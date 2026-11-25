@@ -4,6 +4,7 @@ from dograpper.utils import dep_resolver  # noqa: F401 — triggers ensure_playw
 
 import os
 import logging
+import sys
 import time
 from html.parser import HTMLParser
 from urllib.parse import urlparse, urljoin
@@ -12,6 +13,8 @@ from typing import Any, Dict, List
 
 from dograpper.lib.url_filter import UrlFilters
 from dograpper.utils.progress import ProgressReporter
+from dograpper.utils.http_headers import check_value
+from dograpper.utils.redact import first_line, redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,63 @@ class _Hrefs(HTMLParser):
         href = dict(attrs).get("href") if tag == "a" else None
         if href:
             self.hrefs.append(href)
+
+
+def _launch(p, *, headless: bool):
+    """Chromium from Playwright `p`; a launch failure is a one-line RuntimeError, with the
+    fix when Chromium is not installed."""
+    try:
+        return p.chromium.launch(headless=headless)
+    except Exception as e:
+        first = first_line(e)
+        if "Executable doesn't exist" in first:
+            raise RuntimeError(
+                "Chromium is not installed for Playwright. "
+                "Run: dograpper doctor --install") from None
+        raise RuntimeError(first) from None
+
+
+_NO_DISPLAY = ("--browser-login opens a browser window, and there is no display (DISPLAY "
+               "and WAYLAND_DISPLAY are unset). Run it where a screen is, with --cookies "
+               "FILE, then run here with --cookies FILE alone.")
+
+
+def run_browser_login(url: str, wait) -> tuple[list[dict], str]:
+    """--browser-login (#171): a headed Chromium on `url`, where a person logs in or passes a
+    challenge; `wait()` returns once they are done (the command's terminal dialog). Returns
+    (the context's cookies, the browser's own navigator.userAgent). RuntimeError, with the
+    fix, when Playwright or a display is missing."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError("--browser-login needs Playwright. Install it with: uv sync "
+                           "--extra headless, then dograpper doctor --install") from None
+    if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY")
+                                                 or os.environ.get("WAYLAND_DISPLAY")):
+        raise RuntimeError(_NO_DISPLAY)
+    with sync_playwright() as p:
+        browser = _launch(p, headless=False)
+        try:
+            try:
+                context = browser.new_context()
+                context.new_page().goto(url, wait_until="commit")  # the person waits for the rest
+            except Exception as e:
+                raise _login_error(url, e) from None
+            wait()  # the caller's terminal dialog: its errors are its own
+            try:  # on a blank page: a script of the site can redefine navigator.userAgent
+                agent = context.new_page().evaluate("navigator.userAgent")
+                cookies = context.cookies()
+            except Exception as e:  # the window was closed meanwhile
+                raise _login_error(url, e) from None
+            check_value("User-Agent", agent)  # the wire guard of --user-agent and --header
+            return cookies, agent
+        finally:
+            browser.close()
+
+
+def _login_error(url: str, e: Exception) -> RuntimeError:
+    """A Playwright error of the login as one line, the start URL's credentials hidden."""
+    return RuntimeError("--browser-login: " + first_line(e).replace(url, redact_url(url)))
 
 
 def run_playwright_crawl(
@@ -111,15 +171,7 @@ def run_playwright_crawl(
                     to_visit.append((absolute_link, current_depth + 1))
     
     with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch(headless=True)
-        except Exception as e:
-            first = (str(e).splitlines() or [type(e).__name__])[0]
-            if "Executable doesn't exist" in first:
-                raise RuntimeError(
-                    "Chromium is not installed for Playwright. "
-                    "Run: dograpper doctor --install") from None
-            raise RuntimeError(first) from None
+        browser = _launch(p, headless=True)
         context = browser.new_context(**(navigator.context_options() if navigator else {}))
         page = context.new_page()
         if navigator is not None:
@@ -244,6 +296,8 @@ def run_playwright_crawl(
                     navigator.error(current_url, e)
             progress.update(done=len(files_downloaded), queued=len(to_visit), last_url=current_url)
                 
+        if navigator is not None:  # the context's cookies are gone once the browser closes
+            navigator.detach(context)
         browser.close()
     progress.finish()
     if navigator is not None:

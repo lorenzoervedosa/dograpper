@@ -4,7 +4,10 @@
     "depth": 3,
     "include-extensions": "html,md",
     "manifest": ".dograpper-manifest.json",
-    "header": []
+    "header": [],
+    "cookies": null,
+    "browser-headers": true,
+    "browser-login": false
   },
   "pack": {
     "max-words-per-chunk": 400000,

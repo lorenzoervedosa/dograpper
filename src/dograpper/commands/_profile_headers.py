@@ -40,7 +40,7 @@ def checked_user_agent(value: str | None, src: str) -> str | None:
 def single_user_agent(sources: Dict[str, str | None]) -> str | None:
     """The one User-Agent among `sources` (flag text -> value, or None when not given).
     Given two ways it is a usage error (exit 2) naming the flags, never the values (#136;
-    #171 adds --browser-login as a source)."""
+    --browser-login is a source too, #171)."""
     given = [flag for flag, value in sources.items() if value is not None]
     if len(given) > 1:
         raise click.UsageError(f"{' and '.join(given)} both set the User-Agent; give one")

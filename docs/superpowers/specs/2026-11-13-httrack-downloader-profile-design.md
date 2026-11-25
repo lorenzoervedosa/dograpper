@@ -535,34 +535,81 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 
 ### 5.7 Opt-in session features (DL-19 and HTTrack §2.10)
 
-- **`--cookies FILE`:**
-  - loads a Netscape cookies.txt, including `#HttpOnly_` lines, and sends
-    matching cookies;
-  - at the end of the run the jar is written back to the same file, as
-    HTTrack `-%K` does;
-  - cookie values are never logged.
+- **`--cookies FILE`** (`lib/httrack/cookies.py`; implemented, #169):
+  - loads a Netscape cookies.txt, including `#HttpOnly_` lines (expiry `0` is
+    a session cookie), and sends matching cookies in one `Cookie` header, the
+    last of the request, after the `--header` lines (`http_sendhead`,
+    htslib.c:1401-1412); a `--header 'Cookie: …'` line wins, and the jar is not
+    sent on that request (htslib.c:1403);
+  - takes in every `Set-Cookie` of the start host (the stdlib's
+    `http.cookiejar` reads it; matching is RFC 6265's, host-only cookies kept
+    to their host);
+  - the jar's cookies go on requests to the crawl's start host alone, and a
+    `Set-Cookie` from another host never enters it: discovery can fetch a
+    sub-sitemap on another host (user decision after the security review,
+    2026-11-24);
+  - at the end of the run, a failed one included, the jar is written back to
+    the same file, as HTTrack `-%K` does: `#HttpOnly_` lines and session
+    cookies kept, expired ones dropped; a file dograpper creates is mode
+    `0600`, as HTTrack writes its jar (`hts_fopen_private_new`), and an
+    existing one keeps its mode (user decision, 2026-11-24);
+  - under the browser pass the fetcher's jar is the source of truth: pushed
+    into the context before the crawl (`context.add_cookies()`), and
+    `context.cookies()` merged back before the browser closes;
+  - cookie values are never logged, nor in the report or the manifest; a
+    malformed line is a usage error naming its number, never its content
+    (HTTrack instead skips it and leaves the file unchanged at the end).
 - **`--browser-headers` / `--no-browser-headers`** (HTTrack `-%Q`, on by
-  default). With the default UA it amounts to the `Sec-Fetch-*` behavior of
-  §5.1. When `--user-agent` names Chrome/Edge ≥ 108 or Firefox, the profile
-  also sends what that browser sends, ported from HTTrack's tables:
-  - per-kind `Accept`;
-  - `Accept-Language: en-US,en;q=0.9`;
-  - client hints with Chromium's GREASE brand list, for Chrome/Edge;
-  - the recorded header order.
-- **`--browser-login`:**
-  1. Opens headed Chromium on the start URL.
+  default; `lib/httrack/policy.py`, implemented, #170). With the default UA it
+  amounts to the `Sec-Fetch-*` behavior of §5.1. When `--user-agent` names
+  Chrome/Edge ≥ 108 or Firefox ≥ 90 (`browser_family`, htslib.c:820-866: every
+  product token must be one that browser sends), the profile also sends what
+  that browser sends, ported from HTTrack's tables:
+  - per-kind `Accept` (htsfetch.c:549-578, looked up by `Sec-Fetch-Dest` as
+    htsfetch.c:629-648 does);
+  - `Accept-Language: en-US,en;q=0.9` (htsfetch.h:135);
+  - client hints with Chromium's GREASE brand list, for Chrome/Edge, over
+    https only (`client_hints`, htslib.c:728-811, sent at htslib.c:1213-1235);
+  - the recorded header order (htslib.c:913-946: Chrome's navigation and
+    subresource orders, Firefox's).
+  - The tables go with the fetch metadata: a link with none (robots.txt, an
+    unclassified link) gets HTTrack's own `Accept`, `Accept-Language` and
+    order (htslib.c:1002-1004); a `--header` line still takes the place of the
+    header of the same name (#136).
+  - `--no-browser-headers` (HTTrack `-%Q0`) drops `Sec-Fetch-*`,
+    `Upgrade-Insecure-Requests` and the client hints.
+  - Not ported: `Origin` on a CORS request (htslib.c:1323-1340), which needs
+    the request's initiator; a known gap, below.
+- **`--browser-login`** (`run_browser_login` in `lib/playwright_crawl.py`, run
+  by `run_httrack` before the Fetcher is built; implemented, #171):
+  1. Opens headed Chromium on the start URL, after the run's usage checks and
+     the `--cookies` file's load, before any discovery or crawl request.
   2. The user logs in or passes the challenge, then presses Enter in the
      terminal.
-  3. dograpper takes `context.cookies()` and the page's real
-     `navigator.userAgent`, and uses both for the crawl.
-  4. With `--cookies FILE`, the jar is also saved there for reuse.
+  3. dograpper takes `context.cookies()` and the browser's real
+     `navigator.userAgent` (read on a blank page of the same context, where no
+     script of the site can redefine it), and uses both for the crawl: the
+     cookies go into the jar over the file's, the User-Agent becomes the
+     policy's.
+  4. With `--cookies FILE`, the jar is also saved there for reuse; without it,
+     the jar lives for the run alone.
+  - `--user-agent` (even empty) or `--header 'User-Agent: …'` beside it is a
+    usage error: the cookies are tied to the browser's User-Agent
+    (`single_user_agent()` counts `--browser-login` as a source).
+  - A challenged start URL, or every seed challenged, names `--browser-login`
+    in its exit-1 message (§5.4).
+  - Nothing solves a challenge automatically, and no CAPTCHA-solving service
+    is used: a person completes it in the window.
 - **Fail loud:**
-  - any `httrack`-only flag (`--user-agent`, `--no-robots`, `--cookies`,
-    `--browser-headers`, `--browser-login` and every tunable in §5.3) combined
-    with `--downloader wget` is a usage error (exit 2, click's convention).
-    `--filter` left this list with #96, which made it shared;
-  - `--browser-login` without Playwright or without a display exits 1 with the
-    fix in the message.
+  - a profile flag (`--user-agent`, `--no-robots` and every tunable in §5.3,
+    shared with `fire-engine`) combined with `--downloader wget` is a usage
+    error (exit 2, click's convention); a session flag (`--cookies`,
+    `--browser-headers`, `--browser-login`, `httrack` only) is one under `wget`
+    and under `fire-engine` (#169). `--filter` left these lists with #96,
+    which made it shared;
+  - `--browser-login` without Playwright, without a display (Linux: neither
+    `DISPLAY` nor `WAYLAND_DISPLAY`) or without a terminal to press Enter in
+    exits 1 with the fix in the message, before any request.
 
 ### 5.8 Report and exit codes (DL-18)
 
@@ -582,19 +629,32 @@ Defaults mirror HTTrack 3.51 unless the line says **deviation**.
 These are not deviations. Each is an HTTrack behavior the profile does not have
 yet and will get; none is approved as a difference from HTTrack.
 
+- **`Origin` on CORS requests under `--browser-headers`** (htslib.c:1323-1340):
+  Chrome sends it on every `cors` request, Firefox on a cross-origin one. The
+  profile's `FetchMeta` carries no initiator to take it from (#170).
 
-## 6. Code layout (proposal; the plan may refine)
 
-| File | Change |
+## 6. Code layout
+
+As built (the 2026-11-13 proposal named modules that never existed:
+`scope.py`, `challenge.py`).
+
+| File | Role |
 |---|---|
-| `src/dograpper/lib/httrack/` (package) | New engine. Each module is small and stdlib-only: `robots.py`, `policy.py` (UA, headers, limits, clamps), `fetcher.py` (connections, retries, Retry-After gate, bandwidth), `links.py`, `scope.py` (scope + HTTrack filters), `naming.py`, `crawl.py` (seeded list + recursive crawl, `CrawlResult`-compatible return), `challenge.py`, `cookies.py`. |
-| `src/dograpper/commands/download.py` | `--downloader` and profile-only flags. The cascade picks the layer-3 engine per profile and passes the profile policy to layers 1, 2 and 4. |
-| `src/dograpper/commands/sync.py` | New keys in `_DOWNLOAD_PASSTHROUGH` and options. |
-| `src/dograpper/lib/llms_txt_parser.py`, `sitemap_parser.py` | Accept an optional policy (UA, robots, `Sitemap:` hints). When it is absent, behavior is exactly today's. |
-| `src/dograpper/lib/playwright_crawl.py` | Optional policy: UA, robots check, skip non-2xx, challenge check, query-hash naming. When it is absent, behavior is today's. |
-| `src/dograpper/lib/manifest.py` | Backward-compatible new fields, and build from engine records. |
-| `README.md`, `CHANGELOG.md`, `.dograpper.json.example`, `CLAUDE.md` (tree + test table) | Docs for every observable change. |
-| `tests/test_httrack_*.py` | Unit tests per module, plus cascade tests against a local `http.server` fixture. No external network. |
+| `src/dograpper/lib/httrack/` (package) | The engine, stdlib-only: `policy.py` (UA, headers, limits, clamps, TLS context), `fetcher.py` (connections, pacing, retries, Retry-After gate, bandwidth, decoding, the `--cookies` jar on the wire), `robots.py`, `escape.py` (HTTrack's percent-escape), `links.py` and `jsscan.py` (link extraction, `-j`/`-%P`, `-K0` rewriting), `mirror.py` (crawl scope, `--filter`, the recursive crawl), `crawl.py` (`fetch_page`, the seeded list, updates, file times, `RunResponses`), `naming.py`, `report.py`, `changes.py` (`--changes`, `hts-changes.json`), `browser.py` (the `Navigator` of the browser pass, §7 PR 4), `cookies.py` (the `--cookies` jar, §5.7). |
+| `src/dograpper/utils/challenge.py` | Challenge detection (headers and markup), shared with `pack`. |
+| `src/dograpper/lib/url_filter.py` | `--filter` rules (HTTrack syntax), shared with `wget` and Playwright. |
+| `src/dograpper/lib/fire_engine/fetcher.py` | The `fire-engine` profile's transport: a `Fetcher` over `curl_cffi` ([ADR-0011](../../adr/0011-fire-engine-downloader.md)). |
+| `src/dograpper/commands/_httrack_profile.py` | The profile's options (`PROFILE_OPTIONS`, `HTTRACK_OPTIONS`), their guards and the cascade both engine profiles share (`run_profile`), with `run_httrack`. |
+| `src/dograpper/commands/_fire_engine_profile.py`, `_profile_headers.py` | `run_fire_engine`; `--header` and the User-Agent sources. |
+| `src/dograpper/utils/http_headers.py`, `utils/atomic_write.py` | The header guard and in-place merge; atomic writes (`private=` for the cookie jar). |
+| `src/dograpper/commands/download.py` | `--downloader` and the profile flags; layers 1 and 2 get the profile's `fetch`. |
+| `src/dograpper/commands/sync.py` | Forwards `--downloader`, `--filter`, `PROFILE_OPTIONS`, `HTTRACK_OPTIONS` and the fire-engine flags. |
+| `src/dograpper/lib/llms_txt_parser.py`, `sitemap_parser.py` | Accept an optional `fetch` (and `Sitemap:` hints); without it, behavior is the `wget` cascade's. |
+| `src/dograpper/lib/playwright_crawl.py` | Optional `navigator=` (the browser pass under the profile); without it, the `wget` cascade's crawl. |
+| `src/dograpper/lib/manifest.py` | The engine's records (`RECORD_FIELDS`), backward compatible. |
+| `README.md`, `CHANGELOG.md`, `.dograpper.json.example`, the `CLAUDE.md` trees | Docs for every observable change. |
+| `tests/test_httrack_*.py`, `test_download_httrack_profile.py`, `test_fire_engine.py` | Per module, plus cascade tests against the local `http.server` and raw-socket fixtures. No external network. |
 
 ## 7. Delivery
 
@@ -666,7 +726,12 @@ README and CHANGELOG.
      `lib/playwright_crawl.py`; `fire-engine` keeps failing loud on
      `--headless` and on a client-rendered result.
 5. **Opt-in session features.** `--cookies`, `--browser-headers` and
-   `--browser-login`.
+   `--browser-login`, the profile's first `httrack`-only flags
+   (`HTTRACK_OPTIONS`: exit 2 under `wget` and under `fire-engine`).
+   - **`--cookies`: implemented (#169),** §5.7.
+   - **`--browser-headers`: implemented (#170),** §5.7.
+   - **`--browser-login`: implemented (#171),** §5.7; the real headed login is
+     a manual check (`docs/MANUAL-CHECKS.md`).
 
 **Before PRs 2 and 4 land** (*call*, no silent fallback): when
 `--downloader httrack` needs a path that does not exist yet (recursive crawl,

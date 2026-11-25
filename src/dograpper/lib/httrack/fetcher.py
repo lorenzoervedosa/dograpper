@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlsplit
 
 from ...utils.challenge import is_challenge
 from ...utils.redact import drop_userinfo, redact_url
+from .cookies import Jar
 from .escape import request_target
 from .policy import (NAVIGATION, ZSTD_MAX_WINDOW, FetchMeta, HttrackPolicy, decoder_module,
                      make_ssl_context, request_headers)
@@ -166,9 +167,17 @@ def wire_host(parts) -> str:
     return name.encode("idna").decode("ascii") + sep + port
 
 
+def _jar_url(parts, target: str) -> str:
+    """The URL the --cookies jar matches a request by: the host on the wire, the escaped
+    path and query (the user:password of the URL is no part of it)."""
+    return f"{parts.scheme}://{wire_host(parts)}{target}"
+
+
 class Fetcher:
-    def __init__(self, policy: HttrackPolicy, *, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, policy: HttrackPolicy, *, clock=time.monotonic, sleep=time.sleep,
+                 cookies: Jar | None = None):
         self.policy = policy
+        self.cookies = cookies  # --cookies (lib/httrack/cookies.py): sent, and fed back
         self._clock, self._sleep = clock, sleep
         self._ssl = make_ssl_context()
         self._local = threading.local()
@@ -244,6 +253,8 @@ class Fetcher:
                     conn.putheader(k, v)
                 conn.endheaders()
                 resp = conn.getresponse()
+                if self.cookies is not None:  # every answer's Set-Cookie, even a retried one
+                    self.cookies.take(_jar_url(parts, target), resp.headers)
                 if stop is not None:
                     hdrs = {k.lower(): v for k, v in resp.getheaders()}
                     if stop(resp.status, hdrs):  # HTTrack drops the connection (deletehttp)
@@ -293,11 +304,21 @@ class Fetcher:
             return res
         headers = request_headers(self.policy, host, kind=kind, referer=referer, scheme=key[0],
                                   meta=meta, validators=validators)
+        # a --header Cookie line wins for its request: the jar is not sent (htslib.c:1403)
+        jar = self.cookies if not any(n.lower() == "cookie" for n, _ in headers) else None
         for attempt in range(1, self.policy.retries + 2):
             res.attempts = attempt
             self._acquire(key)
+            # last, after the --header lines, as http_sendhead writes it (htslib.c:1401-1412);
+            # asked per attempt, so a retry carries what the last answer set
             try:
-                status, hdrs, raw = self._request(key, parts, target, headers,
+                cookie = jar.header(_jar_url(parts, target)) if jar is not None else None
+            except ValueError as exc:  # check_value: a line no header can carry, unquoted
+                res.error = str(exc)
+                return res
+            sent = headers + [("Cookie", cookie)] if cookie else headers
+            try:
+                status, hdrs, raw = self._request(key, parts, target, sent,
                                                   **({"stop": stop} if stop else {}))
             # timeouts, ssl.SSLError, RemoteDisconnected; short bodies (htsback.c: recatch)
             except (OSError, http.client.IncompleteRead) as exc:

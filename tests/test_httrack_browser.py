@@ -256,6 +256,14 @@ def test_browser_context_carries_the_profile_identity(server, tmp_path):
     assert nav.context_options() == {"user_agent": "Probe/1.0", "service_workers": "block"}
 
 
+def test_an_empty_user_agent_leaves_chromium_its_own(server, tmp_path):
+    """#183: the profile's navigations then carry no User-Agent; Chromium's own requests
+    always send one (out of the issue's scope), so the context sets no override."""
+    base, _, _ = server
+    nav, _, _ = navigator(base, tmp_path, user_agent="")
+    assert nav.context_options() == {"service_workers": "block"}
+
+
 def test_max_links_ends_the_browser_crawl_as_partial(server, tmp_path):
     base, script, seen = server
     script["/robots.txt"] = (404, {}, b"")
@@ -710,3 +718,64 @@ def test_header_reaches_every_navigation_of_the_headless_browser_pass(
         "--downloader", "httrack", "--headless", "--header", "X-Test: 1"])
     assert res.exit_code == 0, res.output
     assert got == {"/docs/": "1", "/docs/a": "1"}
+# -- --cookies under the browser pass (#169): the fetcher's jar is the source of truth --
+
+def test_the_jar_reaches_the_browser_context_and_comes_back_merged(server, tmp_path, browser):
+    """Pushed into the context before the first page opens (context.add_cookies), and what
+    the context holds merged back before the browser closes (context.cookies())."""
+    from dograpper.lib.httrack.cookies import load_jar
+    base, script, _ = server
+    b, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"<p>home</p>")
+    jar = load_jar(str(tmp_path / "missing.txt"))
+    jar.merge([{"name": "sid", "value": "S1", "domain": "127.0.0.1", "path": "/",
+                "expires": -1, "httpOnly": True, "secure": False}])
+    ctx.cookies.return_value = [{"name": "js", "value": "J1", "domain": "127.0.0.1",
+                                 "path": "/docs", "expires": 4102444800.5, "httpOnly": False,
+                                 "secure": False, "sameSite": "Lax"}]
+    ft = FakeTime()
+    nav = Navigator(Fetcher(build_policy(retries=0), clock=ft.clock, sleep=ft.sleep,
+                            cookies=jar), str(tmp_path / "out"), base + "/docs/", "html")
+
+    run_playwright_crawl(base + "/docs/", str(tmp_path / "out"), navigator=nav)
+
+    ctx.add_cookies.assert_called_once_with([{"name": "sid", "value": "S1",
+                                              "domain": "127.0.0.1", "path": "/",
+                                              "httpOnly": True, "secure": False}])
+    calls = [c[0] for c in b.mock_calls]
+    assert calls.index("new_context().add_cookies") < calls.index("new_context().new_page().goto")
+    assert calls.index("new_context().cookies") < calls.index("close")
+    assert sorted(jar.header(base + "/docs/a").split("; ")) == ["js=J1", "sid=S1"]
+
+
+def test_no_jar_leaves_the_browser_context_alone(server, tmp_path, browser):
+    base, script, _ = server
+    b, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"<p>home</p>")
+    crawl_with(base, tmp_path)
+    ctx.add_cookies.assert_not_called()
+    ctx.cookies.assert_not_called()
+
+
+def test_a_cookie_header_line_keeps_the_jar_out_of_the_browser_context(server, tmp_path,
+                                                                       browser):
+    """#169 security review: a --header 'Cookie: …' line replaces the jar in the browser
+    context too, as it does on the profile's own requests."""
+    from dograpper.lib.httrack.cookies import load_jar
+    base, script, _ = server
+    b, ctx, page = browser
+    script["/robots.txt"] = (404, {}, b"")
+    script["/docs/"] = (200, HTML, b"<p>home</p>")
+    jar = load_jar(str(tmp_path / "missing.txt"))
+    jar.merge([{"name": "sid", "value": "S1", "domain": "127.0.0.1", "path": "/",
+                "expires": -1, "httpOnly": False, "secure": False}])
+    ft = FakeTime()
+    policy = build_policy(retries=0, headers=(("Cookie", "x=1"),))
+    nav = Navigator(Fetcher(policy, clock=ft.clock, sleep=ft.sleep, cookies=jar),
+                    str(tmp_path / "out"), base + "/docs/", "html")
+
+    run_playwright_crawl(base + "/docs/", str(tmp_path / "out"), navigator=nav)
+
+    ctx.add_cookies.assert_not_called()

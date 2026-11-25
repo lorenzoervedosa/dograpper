@@ -11,6 +11,8 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from urllib.parse import urlsplit
 
 from ...utils.http_headers import merge_headers
+from .browsers import ACCEPT_LANGUAGE as BROWSER_ACCEPT_LANGUAGE
+from .browsers import BROWSERS, CLIENT_HINTS, HTTRACK_ORDER, browser_family, client_hints
 from ...utils.redact import drop_userinfo
 from .escape import escape_unsafe, request_target
 
@@ -74,6 +76,7 @@ class HttrackPolicy:
     changes: bool = False  # HTTrack -%d: write hts-changes.json (lib/httrack/changes.py)
     # --header pairs, checked by utils/http_headers.py; request_headers() merges them in place
     headers: tuple[tuple[str, str], ...] = ()
+    browser_headers: bool = True  # HTTrack -%Q: Sec-Fetch-*, the browser tables, client hints
 
 
 def _clamp(name, value, cap, disabled):
@@ -92,7 +95,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
                  extended_parsing: bool = True, cache: int | None = None,
                  updatehack: bool = False, do_not_recatch: bool = False,
                  changes: bool = False,
-                 headers: tuple[tuple[str, str], ...] = ()) -> HttrackPolicy:
+                 headers: tuple[tuple[str, str], ...] = (),
+                 browser_headers: bool = True) -> HttrackPolicy:
     # Fail at build time: 0 rates divide by zero mid-run, negative retries skip every attempt.
     for name, value in (("connections", connections), ("max_conn_rate", max_conn_rate),
                         ("max_bandwidth", max_bandwidth), ("timeout", timeout),
@@ -111,7 +115,8 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         max_retry_after = MAX_RETRY_AFTER_CAP
     off = disable_security_limits
     return HttrackPolicy(
-        user_agent=user_agent or DEFAULT_USER_AGENT,
+        # "" sends no User-Agent, as HTTrack -F "" (htslib.c:1249-1252); None is the default
+        user_agent=DEFAULT_USER_AGENT if user_agent is None else user_agent,
         connections=_clamp("connections", connections, MAX_CONNECTIONS, off),
         max_conn_rate=_clamp("max_conn_rate", max_conn_rate, MAX_CONN_RATE, off),
         max_bandwidth=_clamp("max_bandwidth", max_bandwidth, MAX_BANDWIDTH, off),
@@ -128,6 +133,7 @@ def build_policy(*, user_agent: str | None = None, connections: int = 4,
         do_not_recatch=do_not_recatch,
         changes=changes,
         headers=tuple(headers),
+        browser_headers=browser_headers,
     )
 
 
@@ -273,27 +279,39 @@ def request_headers(policy: HttrackPolicy, host: str, *, kind: str, referer: str
     (conditional_headers) go first, where http_sendhead writes its xsend lines."""
     if kind not in ("robots", "navigate", "linked"):
         raise ValueError(f"unknown request kind: {kind!r}")
-    secure = scheme == "https"
-    # htslib.c fetch_meta_sent: a classified link, to a trustworthy origin, with a browser UA
-    sent = (kind != "robots" and bool(meta.dest) and _trustworthy(scheme, host)
-            and policy.user_agent.startswith("Mozilla/5.0 "))
+    secure, agent = scheme == "https", policy.user_agent
+    # htslib.c fetch_meta_sent: -%Q on, a classified link, to a trustworthy origin, with a
+    # browser UA; the browser tables go with it (htslib.c:1002-1004)
+    sent = (policy.browser_headers and kind != "robots" and bool(meta.dest)
+            and _trustworthy(scheme, host) and agent.startswith("Mozilla/5.0 "))
+    browser = BROWSERS.get(browser_family(agent)) if sent else None
     referer = _referer_value(referer)
-    h: list[tuple[str, str]] = list(validators)
+    h: dict[str, str] = {}
     if kind != "robots" and referer and (secure or urlsplit(referer).scheme != "https"):
-        h.append(("Referer", referer))  # never an https referer to an http URL
-    h += [("Connection", "keep-alive"), ("Host", host)]
+        h["Referer"] = referer  # never an https referer to an http URL
+    h.update({"Connection": "keep-alive", "Host": host})
+    # client hints: over https only, beside the User-Agent they describe (htslib.c:1213-1235)
+    hints = client_hints(agent) if policy.browser_headers and secure else None
+    if hints is not None:
+        h.update(zip(CLIENT_HINTS, (hints[0], "?1" if hints[1] else "?0", hints[2])))
     if sent and secure and meta.mode == "navigate":  # hts_fetch_is_navigation
-        h.append(("Upgrade-Insecure-Requests", "1"))
-    h += [("User-Agent", policy.user_agent), ("Accept", ACCEPT)]
+        h["Upgrade-Insecure-Requests"] = "1"
+    if agent:
+        h["User-Agent"] = agent
+    h["Accept"] = browser.accept.get(meta.dest, ACCEPT) if browser else ACCEPT
     if sent:
-        h += [("Sec-Fetch-Site", meta.site or _fetch_site(referer, scheme, host)),
-              ("Sec-Fetch-Mode", meta.mode)]
+        h.update({"Sec-Fetch-Site": meta.site or _fetch_site(referer, scheme, host),
+                  "Sec-Fetch-Mode": meta.mode})
         if meta.user:
-            h.append(("Sec-Fetch-User", "?1"))
-        h.append(("Sec-Fetch-Dest", meta.dest))
-    h += [("Accept-Language", ACCEPT_LANGUAGE), ("Accept-Encoding", accept_encoding(secure))]
+            h["Sec-Fetch-User"] = "?1"
+        h["Sec-Fetch-Dest"] = meta.dest
+    h["Accept-Language"] = BROWSER_ACCEPT_LANGUAGE if browser else ACCEPT_LANGUAGE
+    h["Accept-Encoding"] = accept_encoding(secure)
+    order = (HTTRACK_ORDER if browser is None
+             else browser.navigation if meta.mode == "navigate" else browser.subresource)
     # HTTrack -%X: a user line replaces the engine's own of the same name, robots.txt included
-    return merge_headers(h, policy.headers)
+    return merge_headers([*validators, *((name, h[name]) for name in order if name in h)],
+                         policy.headers)
 
 
 def make_ssl_context() -> ssl.SSLContext:

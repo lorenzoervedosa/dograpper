@@ -23,6 +23,7 @@ from dograpper.lib.fire_engine.fetcher import (CurlCffiFetcher, _MISSING,
                                                _default_session_factory, split_proxy)
 from dograpper.lib.httrack import fetcher as httrack_fetcher
 from dograpper.lib.httrack.policy import build_policy, decoder_module
+from tests.test_httrack_fetcher import EMPTY_USER_AGENT, SITE_REPLY
 
 
 LM = "Mon, 01 Jan 2024 00:00:00 GMT"
@@ -512,6 +513,32 @@ def test_real_download_sends_the_user_agent_given_on_the_command_line(
     assert not [n for h in log for n in CLIENT_HINTS if n in h]
     warned = [r.getMessage() for r in caplog.records if "TLS fingerprint" in r.getMessage()]
     assert len(warned) == 1 and "chrome" in warned[0]
+
+
+@pytest.mark.parametrize("source", EMPTY_USER_AGENT)
+def test_real_empty_user_agent_sends_no_user_agent_and_no_client_hint(
+        raw_server, tmp_path, caplog, source):
+    """#183: an empty User-Agent, from either flag or the config, is an explicit one that
+    sends none (curl -H 'User-Agent:'): no profile UA, no sec-ch-ua*, the warning once."""
+    pytest.importorskip("curl_cffi")
+    args, config = EMPTY_USER_AGENT[source]
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"download": config}))
+    base, heads = raw_server(SITE_REPLY)
+
+    with caplog.at_level(logging.WARNING):
+        result = CliRunner().invoke(
+            cli, ["--config", str(cfg), "download", f"{base}/docs/", "-o",
+                  str(tmp_path / "m"), "--downloader", "fire-engine", *FAST, *args])
+
+    assert result.exit_code == 0, result.output
+    assert "Files downloaded: 2" in result.output
+    assert len(heads) >= 4  # robots.txt, discovery and both pages
+    for head in heads:
+        assert not [line for line in wire_lines(head)
+                    if line.lower().startswith(("user-agent:", "sec-ch-ua"))]
+    warned = [r.getMessage() for r in caplog.records if "TLS fingerprint" in r.getMessage()]
+    assert len(warned) == 1
 
 
 def test_real_second_download_revalidates_and_leaves_the_mirror_as_it_was(server, tmp_path):

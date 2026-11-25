@@ -47,4 +47,6 @@ src/dograpper/
 | `tests/test_boundary_chunking.py` | Antes de alterar `_split_text_by_words` ou `utils/code_fence.py` |
 | `docs/schema-v1.md` | Referência do schema `dograpper-context-v1` — manter sincronizado com `heading_extractor.py` e `chunker.py` |
 | `tests/test_cli_help_coverage.py` | Antes de adicionar comando ou opção: ambos precisam de descrição/help escrito, dizendo o que fazem e o efeito do default |
+| `tests/test_httrack_cookies.py` | Antes de alterar `lib/httrack/cookies.py`, o jar no `Fetcher` (`cookies=`) ou no `Navigator` (`attach`/`detach`), ou `commands/_run_jar.py` (`--cookies`: casamento, Set-Cookie, write-back, modo do arquivo, nenhum valor exposto) |
+| `tests/test_browser_login.py` | Antes de alterar `run_browser_login()` de `lib/playwright_crawl.py` ou o login de `commands/_run_jar.py` (`--browser-login`: ordem antes do 1º pedido, exit 1 com a correção, exit 2 com outro User-Agent) |
 | `tests/test_cli_regression.py` | Antes de adicionar/renomear subcomando ou flag no help top-level — o baseline `tests/fixtures/help_baseline.txt` precisa ser regenerado |

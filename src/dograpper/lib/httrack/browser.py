@@ -17,7 +17,7 @@ import threading
 from urllib.parse import urlsplit
 
 from dograpper.lib.url_filter import UrlFilters
-from dograpper.utils.redact import redact_url
+from dograpper.utils.redact import first_line, redact_url
 
 from .crawl import (RunResponses, extension_set, fetch_page, record_of, relink, save_file, seed_redirect_ok,
                     stamp)
@@ -75,14 +75,27 @@ class Navigator:
 
     def context_options(self) -> dict:
         """browser.new_context() options: the profile's User-Agent on every request, and no
-        service worker, which would answer navigations past the route."""
-        return {"user_agent": self.fetcher.policy.user_agent, "service_workers": "block"}
+        service worker, which would answer navigations past the route. An empty one (#183)
+        sets no override: Chromium's own requests keep its UA."""
+        agent = self.fetcher.policy.user_agent
+        return {**({"user_agent": agent} if agent else {}), "service_workers": "block"}
 
     def attach(self, context, page) -> None:
-        """Route every request of `context`; `page` is the one the crawl saves."""
+        """Route every request of `context`; `page` is the one the crawl saves. The
+        --cookies jar, the source of truth (#169), goes into the context first, unless a
+        --header 'Cookie: …' line replaces it, as on the profile's own requests."""
         self._frame = page.main_frame
+        replaced = any(name.lower() == "cookie" for name, _ in self.fetcher.policy.headers)
+        if self.fetcher.cookies is not None and not replaced:
+            context.add_cookies(self.fetcher.cookies.to_browser())
         context.route("**/*", self._route)
         context.on("response", self._response)
+
+    def detach(self, context) -> None:
+        """Before the browser closes: what the context holds (a fulfilled answer's or a
+        script's cookies) is merged back into the --cookies jar."""
+        if self.fetcher.cookies is not None:
+            self.fetcher.cookies.merge(context.cookies())
 
     def follows(self, url: str, page: str) -> bool:
         """Whether the crawl follows `url`, a link of `page`, as mirror_site queues one: in
@@ -181,8 +194,7 @@ class Navigator:
     def error(self, url: str, exc: Exception) -> None:
         """A page the browser failed to open or read (timeout, crash): an error of the report,
         without the Playwright call log that follows the first line."""
-        first = (str(exc).splitlines() or [repr(exc)])[0]
-        self.report.errors.append((redact_url(url), f"browser: {first}", None))
+        self.report.errors.append((redact_url(url), f"browser: {first_line(exc)}", None))
 
     def finish(self) -> None:
         """Rewrite the links between the saved pages (-K0) and set their file times, as the

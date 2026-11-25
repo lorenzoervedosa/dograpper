@@ -39,7 +39,8 @@ def run_fire_engine(url, output, depth, delay, include_extensions, headless, ver
         raise click.ClickException(
             "fire-engine: --headless is not supported (it runs its own "
             "browser-fingerprint transport). Omit --headless.")
-    if policy_kw.get('user_agent'):  # once per run: the handshake still names the profile
+    # once per run, an empty one too (#183): the handshake still names the profile
+    if policy_kw.get('user_agent') is not None:
         logger.warning("fire-engine: the User-Agent you gave replaces the %s profile's and "
                        "drops its sec-ch-ua client hints; the TLS fingerprint stays %s's.",
                        impersonate, impersonate)

@@ -292,6 +292,36 @@ stays `0.0.0.dev0`.
   one name on two lines, a malformed header, a CR, LF or NUL in a value, `Host`, `Content-Length`,
   `Transfer-Encoding` or `Connection`, and `--header` under `wget` are usage
   errors (exit 2) whose message never quotes the value. ([#136])
+- `download --downloader httrack --cookies FILE` (and `sync`, and `"cookies"` in
+  `.dograpper.json`): a Netscape cookies.txt jar, as HTTrack `-%K`. The cookies
+  that match a request to the start URL's host go in its last header (no other
+  host gets any), its `Set-Cookie` is taken in, and the jar is written back to
+  `FILE` at the end of the run,
+  `#HttpOnly_` lines and session cookies kept; a file dograpper creates is
+  owner-only (`0600`), an existing one keeps its mode. A `--header 'Cookie: …'`
+  line wins over the jar; under the browser pass the jar goes into the browser
+  and comes back merged. Cookie values never reach the logs, the report or the
+  manifest. `--cookies` under `--downloader wget` or `fire-engine` exits 2, as
+  does a malformed line in the file. ([#169])
+- `download --downloader httrack --browser-headers` / `--no-browser-headers`
+  (and `sync`, and `"browser-headers"` in `.dograpper.json`), as HTTrack
+  `-%Q`, on by default. With a `--user-agent` naming Chrome or Edge 108+ or
+  Firefox 90+, the profile sends that browser's `Accept` per kind of request,
+  `Accept-Language: en-US,en;q=0.9`, its header order and, for Chrome and Edge
+  over https, its `sec-ch-ua*` client hints, from HTTrack's tables; the default
+  User-Agent's headers are unchanged. `--no-browser-headers` drops
+  `Sec-Fetch-*`, `Upgrade-Insecure-Requests` and the client hints. The flag
+  under `--downloader wget` or `fire-engine` exits 2. ([#170])
+- `download --downloader httrack --browser-login` (and `sync`, and
+  `"browser-login"` in `.dograpper.json`): before the first request, a Chromium
+  window opens on the start URL; a person logs in or passes the challenge, then
+  presses Enter, and the run uses that browser's cookies and its own User-Agent
+  (with `--cookies FILE`, the cookies are saved there for reuse). No
+  CAPTCHA-solving service is involved. Without Playwright, a display or a
+  terminal to press Enter in, the run exits 1 naming the fix; beside
+  `--user-agent` or `--header 'User-Agent: …'`, or under `--downloader wget` or
+  `fire-engine`, it exits 2. A challenged start URL's error now suggests the
+  flag. ([#171])
 
 ### Changed
 
@@ -584,6 +614,12 @@ stays `0.0.0.dev0`.
 - `download --downloader fire-engine --impersonate chrome_android` sends
   `sec-ch-ua-mobile: ?1` instead of the `?0` that `curl_cffi`'s target puts
   beside its Android User-Agent; the header keeps its position. ([#157])
+- `download --downloader httrack|fire-engine` with an empty User-Agent
+  (`--user-agent ''`, `--header 'User-Agent:'` or `"user-agent": ""` in
+  `.dograpper.json`) sends no `User-Agent` header, as HTTrack `-F ""` and
+  `curl -H 'User-Agent:'` do, instead of falling back silently to the
+  profile's; under fire-engine the profile's `sec-ch-ua*` hints go too and the
+  TLS warning is printed. ([#183])
 
 ### Security
 
@@ -649,3 +685,7 @@ stays `0.0.0.dev0`.
 [#163]: https://github.com/lorenzoervedosa/dograpper/issues/163
 [#180]: https://github.com/lorenzoervedosa/dograpper/issues/180
 [#174]: https://github.com/lorenzoervedosa/dograpper/issues/174
+[#183]: https://github.com/lorenzoervedosa/dograpper/issues/183
+[#169]: https://github.com/lorenzoervedosa/dograpper/issues/169
+[#170]: https://github.com/lorenzoervedosa/dograpper/issues/170
+[#171]: https://github.com/lorenzoervedosa/dograpper/issues/171

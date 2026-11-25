@@ -152,6 +152,11 @@ Evidência: `docs/discovery/firecrawl-header-behavior.md`.
   - com um User-Agent que nomeia o Firefox, o próprio `curl_cffi` acrescenta a
     linha `priority: u=0, i` do Firefox (medido no 0.17.0), o que o dograpper
     não controla.
+  - um User-Agent vazio (`--user-agent ''`, `--header 'User-Agent:'` ou
+    `"user-agent": ""` no config; #183, decisão do mantenedor de 2026-11-20) é
+    um User-Agent explícito: não vai linha `User-Agent` nenhuma, como no
+    `curl -H 'User-Agent:'` e no `-F ""` do HTTrack, os hints caem e o aviso
+    sai uma vez; nunca volta em silêncio ao do perfil.
 - **`--header` repetível (#136, decisão do mantenedor de 2026-11-19).** O
   equivalente ao mapa `headers` do Firecrawl e ao `-%X` do HTTrack, nos dois
   perfis. As linhas vão em todo pedido do escopo, inclusive um `http://` do

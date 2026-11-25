@@ -77,3 +77,11 @@ def test_recordable_url_allows_navigation_queries_only(url, want):
                                   "jwt"])
 def test_redact_url_masks_credential_like_params_in_logs(name):
     assert redact_url(f"https://u:p@h/?title=T&{name}=pw") == f"https://h/?title=T&{name}=REDACTED"
+
+
+def test_first_line_keeps_an_errors_first_line_or_names_its_type():
+    """Playwright appends a call log to its errors: only the first line is shown."""
+    from dograpper.utils.redact import first_line
+    assert first_line(Exception("Timeout 10000ms exceeded.\n=== logs ===\n  navigating")) == \
+        "Timeout 10000ms exceeded."
+    assert first_line(TimeoutError()) == "TimeoutError"

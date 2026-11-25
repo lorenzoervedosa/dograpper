@@ -337,14 +337,17 @@ pages carry Cloudflare's injected `jsd` beacon. Use only `cf-mitigated` and the
 
 - **F1: browser-header mimicry (`-%Q/--browser-headers`).** On by default, with full effect once `-F` names a browser:
   - Chrome/Edge client hints, with brand lists built by Chromium's GREASE algorithm (`src/htslib.c:728-811`);
-  - the browser's own `Accept` tables per link kind (`src/htsfetch.c:629-648`) and `Accept-Language: en-US,en;q=0.9` (`src/htsfetch.h:135`);
+  - the browser's own `Accept` tables per link kind (`src/htsfetch.c:549-578`, looked up at `src/htsfetch.c:629-648`) and `Accept-Language: en-US,en;q=0.9` (`src/htsfetch.h:135`);
   - `Origin` on CORS requests;
   - the header order recorded from Chrome 155 and Firefox 158 (`src/htslib.c:913-966`, `1214-1340`).
+  - The browser family is told by the User-Agent alone: Chrome/Edge when the client hints parse, Firefox from 90 with only Firefox's products (`src/htslib.c:820-866`); the tables go with the fetch metadata (`src/htslib.c:1002-1004`), and `-%Q0` turns all of it off (`fetch_meta_sent`, `src/htslib.c:878`; hints `src/htslib.c:1214`).
   - The docs justify it as sending what a browser sends, because "a wrong value can get it refused" (WinHTTrack `html/cmdguide.html` §7). **This is header-level fingerprint impersonation.**
+  - **The `httrack` profile ports it (#170, 2026-11-24):** HTTrack has it on by default, and the profile spec wins over the non-goal below (user decision, 2026-11-24). The port is `client_hints()`, `browser_family()`, `BROWSER_ACCEPT` and `_ORDERS` in `src/dograpper/lib/httrack/policy.py`; `Origin` is not ported.
 - **F2: UA-spoof recipe.** The docs include "Get past a crawler-UA block" with a browser `--user-agent` (WinHTTrack `html/cmdguide.html` §11), and the FAQ suggests changing the UA when HTTrack is filtered (WinHTTrack `html/faq.html`).
 - **F3: clearance transplant.**
   - The `cf-mitigated` log message and `login.html` advise solving the challenge in a browser and passing its cookies and exact UA (`src/htsback.c:4207-4215`; WinHTTrack `html/login.html` "Limits").
   - `WhttBrowserLogin.dll` automates collecting those cookies and that identity (§2.5).
+  - **The `httrack` profile ports it (#169, #171, 2026-11-24):** `--cookies` reads and rewrites a Netscape jar as `-%K` does, and `--browser-login` collects a headed Chromium's cookies and User-Agent as `WhttBrowserLogin.dll` collects a WebView2's. HTTrack has both, and the profile spec wins over the non-goal below (user decision, 2026-11-24). A person logs in or passes the challenge in the window; nothing is solved automatically.
 - **Absent:**
   - TLS (JA3/JA4) or HTTP/2 fingerprint impersonation (stock OpenSSL, HTTP/1.1; §2.1);
   - JavaScript execution (§2.6);
@@ -377,7 +380,7 @@ this repository.
 | DL-16 | **COULD** add MIME and size limits: per-file maximum, total maximum, and MIME accept/deny after headers arrive. | Extension filters miss extensionless URLs and dynamic pages. | `-m`, `-M`, `-mime:`, `*[<NN]` (WinHTTrack `html/filters.html` §1.b, §2) | **Partial.** Extension filters only (`wget_mirror.py:40-66`). Playwright uses extensions only for naming (`playwright_crawl.py:122-123`). |
 | DL-17 | **COULD** add run limits (maximum pages, time, bytes) that end with a "partial" status in the summary. | Bounded runs on unknown sites. | `-#L` 100000 default `src/htslib.c:5484`; `-E`, `-M` (man page) | **Missing.** Only `--depth` exists (`commands/download.py:248-249`). |
 | DL-18 | **SHOULD** print an end-of-run report: counts by status class plus challenged, robots-blocked, retried and out-of-scope URLs, and per-URL errors with their referrer. | Failures should be visible without re-running at debug level. | Error lines with "(from …)" `src/htsmirror.c:462-482`; run: `hts-log.txt` | **Partial.** Only downloaded/skipped/size are printed (`commands/download.py:304-310`). wget's stdout/stderr is captured but never surfaced (`wget_mirror.py:129-131`). |
-| DL-19 | **COULD** import a Netscape `cookies.txt` (opt-in) for docs the user is entitled to read. Never log the file, never copy it into the output, and never document it as a way past bot challenges. | Private or internal docs behind a login. | `src/htscore.c:955-962`; man page `-%K` | **Missing.** |
+| DL-19 | **COULD** import a Netscape `cookies.txt` (opt-in) for docs the user is entitled to read. Never log the file, never copy it into the output, and never document it as a way past bot challenges. | Private or internal docs behind a login. | `src/htscore.c:955-962`; man page `-%K` | **Has (httrack profile, #169, #171; reconciled 2026-11-24).** `--cookies FILE` loads and rewrites the jar as `-%K`; no cookie value in logs, report or manifest, and the file is never copied into the output. The "never document it as a way past bot challenges" clause is lifted for `--browser-login`, where a person passes the challenge in a browser (user decision, 2026-11-24). |
 | DL-20 | **COULD** honor robots.txt `Crawl-delay` for dograpper's group as a minimum per-host delay. | A cheap politeness signal. HTTrack is not the model here, because it ignores the directive. | Not supported (no occurrence in `src/`, `html/`, `man/`) | **Missing.** |
 
 ## 4. Out of scope, non-goals, open questions
@@ -388,9 +391,9 @@ These next three are non-goals **of the `httrack` profile only**, which stays
 behaviourally identical to HTTrack. They are no longer dograpper-wide non-goals
 since 2026-11-18 (`docs/DECISIONS.md`); a separate downloader may adopt them.
 
-- **Header-level browser impersonation** (§2.10 F1): client hints, `Sec-Fetch-*` synthesized to look like a browser, browser `Accept` tables, browser header order. DL-01 deliberately goes the other way.
+- ~~**Header-level browser impersonation** (§2.10 F1): client hints, `Sec-Fetch-*` synthesized to look like a browser, browser `Accept` tables, browser header order. DL-01 deliberately goes the other way.~~ **Reconciled 2026-11-24 (#170):** no longer a non-goal of the `httrack` profile. HTTrack sends these by default (`-%Q`), the profile spec wins over this list (user decision, 2026-11-24), and the profile ports them behind `--browser-headers`; with the default User-Agent nothing changes, so DL-01 still holds.
 - **UA spoofing as a WAF workaround** (§2.10 F2). This includes the current README claim (`README.md:264-265`), which DL-01 replaces.
-- **Clearance transplant:** embedded-browser cookie/UA harvesting, and documenting cookies.txt as a way past challenges (§2.10 F3). DL-19 is limited to sessions the user is entitled to.
+- ~~**Clearance transplant:** embedded-browser cookie/UA harvesting, and documenting cookies.txt as a way past challenges (§2.10 F3). DL-19 is limited to sessions the user is entitled to.~~ **Reconciled 2026-11-24 (#169, #171):** no longer a non-goal of the `httrack` profile, which has HTTrack's `-%K` jar (`--cookies`) and its browser login (`--browser-login`: a person logs in or passes a challenge in a headed Chromium, and the run takes its cookies and User-Agent). The README describes it as a login or a challenge a person completes, with no CAPTCHA-solving service; automatic solving stays out of scope.
 - **Evasion HTTrack does not have either:** TLS or HTTP/2 fingerprint impersonation, challenge or CAPTCHA solving, proxy rotation. Out of scope for the `httrack` profile only, which stays identical to HTTrack; no longer a dograpper non-goal since 2026-11-18 (`docs/DECISIONS.md`).
 - **Offline-browsing fidelity:** link-rewriting modes (`-K`), footers, index pages, MHT/WARC/single-file output, and asset mirroring. dograpper skips assets by design (`wget_mirror.py:28-37`) and its consumer is `pack`, not a browser.
 - **FTP, proxy chains, MPTCP, bandwidth caps in bytes per second.** Politeness is expressed as request rate (DL-05).

@@ -240,9 +240,10 @@ def _sync_httrack(runner, args):
     seen = {}
 
     def fake_run(url, output, depth, delay, ext, headless, verbose, policy_kw,
-                 from_config, discover, filters, previous=None):
+                 from_config, discover, filters, previous=None, **run_kw):
         seen["policy_kw"] = policy_kw
         seen["from_config"] = from_config
+        seen["run_kw"] = run_kw
         return 0, 0, [], {}, {}
 
     with patch("dograpper.commands.download.run_httrack", fake_run):
@@ -297,3 +298,43 @@ def test_sync_header_cli_list_replaces_the_json_one():
         assert result.exit_code == 0, result.output
         assert seen["policy_kw"]["headers"] == (("X-Cli", "2"),)
         assert "header" not in seen["from_config"]
+
+
+def test_sync_forwards_cookies_from_the_cli_over_the_json():
+    """#169: --cookies is an [httrack] flag sync forwards; the CLI beats the config."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        with open(".dograpper.json", "w", encoding="utf-8") as f:
+            json.dump({"download": {"downloader": "httrack", "cookies": "json.txt"}}, f)
+        result, seen = _sync_httrack(runner, [])
+        assert result.exit_code == 0, result.output
+        assert seen["run_kw"]["cookies"] == "json.txt" and "cookies" in seen["from_config"]
+        result, seen = _sync_httrack(runner, ["--cookies", "cli.txt"])
+        assert result.exit_code == 0, result.output
+        assert seen["run_kw"]["cookies"] == "cli.txt"
+
+
+def test_sync_forwards_no_browser_headers_into_the_policy():
+    """#170: --no-browser-headers is an [httrack] flag sync forwards to the policy."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        result, seen = _sync_httrack(runner, ["--downloader", "httrack",
+                                              "--no-browser-headers"])
+        assert result.exit_code == 0, result.output
+        assert seen["policy_kw"]["browser_headers"] is False and seen["run_kw"] == {
+            "cookies": None, "browser_login": False}
+
+
+def test_sync_forwards_browser_login_from_the_json():
+    """#171: --browser-login has a .dograpper.json key and sync forwards it."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _make_docs()
+        with open(".dograpper.json", "w", encoding="utf-8") as f:
+            json.dump({"download": {"downloader": "httrack", "browser-login": True}}, f)
+        result, seen = _sync_httrack(runner, [])
+        assert result.exit_code == 0, result.output
+        assert seen["run_kw"]["browser_login"] is True
+        assert seen["policy_kw"]["user_agent"] is None  # the browser's, once logged in

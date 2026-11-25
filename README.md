@@ -536,7 +536,7 @@ command line, or set away from its default in `.dograpper.json`). Their
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--user-agent` | `Mozilla/5.0 (compatible; dograpper/<version>)` | User-Agent header |
+| `--user-agent` | `Mozilla/5.0 (compatible; dograpper/<version>)` | User-Agent header; `''` sends none, as HTTrack `-F ""` and `curl -H 'User-Agent:'` do |
 | `--header` | — | Extra request header `'Name: value'`, repeatable (see "Request headers") |
 | `--no-robots` | off | Ignore robots.txt |
 | `--connections` | `4` | Parallel connections (clamped to 8) |
@@ -554,6 +554,16 @@ command line, or set away from its default in `.dograpper.json`). Their
 | `--do-not-recatch` | off | Leave a recorded non-page file erased since empty instead of fetching it (HTTrack `-%n`) |
 | `--changes` | off | Write `hts-changes.json` in `-o`: what this run left new, changed, unchanged or gone (HTTrack `-%d`, see "Change report") |
 
+`[httrack]` flags: `httrack` only, so an error under `--downloader wget` and
+under `fire-engine` alike, on the command line or set away from its default in
+`.dograpper.json`:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--cookies FILE` | — | Netscape cookies.txt jar, read before the run and written back at its end (HTTrack `-%K`, see "Cookies") |
+| `--browser-headers` / `--no-browser-headers` | on | Send what the browser `--user-agent` names sends (HTTrack `-%Q`, see "Browser headers") |
+| `--browser-login` | off | Log in, or pass a challenge, in a browser window before the run, which then uses that browser's cookies and User-Agent (see "Browser login") |
+
 **Request headers (`--header`, HTTrack `-%X`).** `--header 'Name: value'`,
 repeatable, or a `"header"` list in `.dograpper.json` (a list given on the
 command line replaces the config one), adds a header to every request,
@@ -565,7 +575,12 @@ without case) takes that header's place in the order, with your value and your
 spelling of the name, which shows on HTTP/1.1 only (HTTP/2 lowercases every
 name); any other header is added after the profile's. `--header 'User-Agent:
 X'` is exactly `--user-agent X`, so it goes out spelled `User-Agent` whatever
-the spelling you gave; giving both is a usage error (exit 2), and so
+the spelling you gave, and an empty one (`--header 'User-Agent:'`, like
+`--user-agent ''` or `"user-agent": ""` in config) sends no `User-Agent` at
+all (under `httrack`, no `Sec-Fetch-*` either: the profile sends them only
+beside a browser User-Agent; under `--headless`, the browser's own subresource
+requests keep Chromium's); giving both, even with one of them empty, is a
+usage error (exit 2), and so
 is one name on two `--header` lines (no line silently wins). A line
 that is not `Name: value`, a name that is not an RFC 9110 token, a value with
 CR, LF or NUL, and the names `Host`, `Content-Length`, `Transfer-Encoding` and
@@ -574,6 +589,74 @@ position) and never quotes the value, which can carry a credential. A
 `--user-agent` value with CR, LF or NUL is refused the same way. Under
 `--headless`, the headers reach every navigation, which the profile fetches,
 but not the browser's own subresource requests.
+
+**Cookies (`--cookies FILE`, HTTrack `-%K`).** `FILE` (or `"cookies"` in
+`.dograpper.json`) is a Netscape cookies.txt, as curl and the browser
+cookie-export extensions write it, `#HttpOnly_` lines included; a missing file
+is an empty jar. Every request to the start URL's host, robots.txt included,
+carries the cookies that match its path and scheme (a `Secure` one over
+`https://` only, a host-only one never on a subdomain) in one `Cookie` header,
+the last of the
+request, after your `--header` lines, as HTTrack writes it. A request to any
+other host (discovery can fetch a sub-sitemap elsewhere) carries none, even the
+jar's cookies for that host, and its `Set-Cookie` never enters the jar. A
+`--header 'Cookie: …'` line wins: the jar is not sent on that request, nor put
+in the browser of the browser pass. Each
+`Set-Cookie` of the start host is taken in, and the next request sends it,
+unless its name or value holds a control character (NUL, a tab, a folded
+line): that one is refused, so a server cannot make the next run's jar
+unreadable. So is a `Domain` that is an IP address or a name with no dot, or
+any `Domain` set by an IP host (there is no public suffix list). A `Secure`
+cookie, or one named `__Secure-…` or `__Host-…` (which must also meet its
+prefix: `Secure`, and for `__Host-` no `Domain` and `Path=/`), is taken over https alone,
+and a plain-http `Set-Cookie` never shadows, replaces or erases a `Secure`
+one, as HTTrack does. The `Cookie` line goes through the same check as a `--header`
+line. At the end of the
+run, a failed one included, the jar is written back to `FILE`: `#HttpOnly_`
+lines and session cookies kept (expiry `0`, as curl writes them), expired ones
+dropped. A `FILE` dograpper creates is owner-only (mode `0600`); an existing
+one keeps its mode, and a symlink is written through, to its target. Cookie values never appear in the logs, the report or the
+manifest; a malformed line is a usage error (exit 2) that names its number,
+never its content. Under the browser pass ("Playwright under the profile"),
+the jar goes into the browser before the first page opens, and what the
+browser holds at the end (the cookies a page's scripts or subresources set) is
+merged back into it before it is written. A cookie's `SameSite` goes between
+the jar and the browser for the run; a cookies.txt has no field for it.
+
+**Browser headers (`--browser-headers`, HTTrack `-%Q`, on by default).** With
+the default User-Agent this is the `Sec-Fetch-*` set every request already
+carries: `Sec-Fetch-Site`, `-Mode`, `-User` and `-Dest`, plus
+`Upgrade-Insecure-Requests` on an https navigation, sent to an https or
+loopback URL for a link whose kind HTTrack can tell. When `--user-agent` names
+Chrome or Edge 108 or later, or Firefox 90 or later (read as HTTrack reads it:
+any other product in the string, such as Opera's `OPR/`, is no browser), the
+profile sends what that browser sends, from HTTrack's tables (Chrome 155 and
+Firefox 158 captures): the browser's `Accept` for each kind of request (page,
+stylesheet, script, image, font…), `Accept-Language: en-US,en;q=0.9` and its
+header order; Chrome and Edge also get their `sec-ch-ua`, `sec-ch-ua-mobile`
+and `sec-ch-ua-platform` client hints over https, with Chromium's GREASE brand
+list for that version. A `--header` line still takes the place of the header
+of the same name. `--no-browser-headers` sends HTTrack's plain set instead: no
+`Sec-Fetch-*`, no `Upgrade-Insecure-Requests`, no client hints, HTTrack's own
+`Accept`, `Accept-Language: en, *` and order. The browser's `Origin` on a CORS
+request is not sent (HTTrack sends it).
+
+**Browser login (`--browser-login`).** For documentation behind a login, or
+behind a challenge, that a person completes in a browser. Before any request of
+the run, dograpper opens a Chromium window on the start URL; you log in or pass
+the challenge there yourself, then press Enter in the terminal. The run then
+uses that browser's cookies (they go into the jar, see "Cookies") and its own
+User-Agent, on every request, robots.txt and discovery included; with
+`--cookies FILE` the cookies are also written to `FILE` (owner-only when it is
+new), so later runs, on a machine without a display too, reuse them with
+`--cookies FILE` alone. dograpper solves nothing itself, and uses no
+CAPTCHA-solving service: a person does it in the window. The site's cookies are
+tied to that browser's User-Agent, so `--user-agent` (even `''`) or a `--header
+'User-Agent: …'` beside `--browser-login` is a usage error (exit 2). It needs
+Playwright (`uv sync --extra headless`, then `dograpper doctor --install`) and
+a display: without either, or with no terminal to press Enter in, the run
+exits 1 before any request, naming the fix. When the start URL, or every seed,
+is challenged, the error suggests `--browser-login`.
 
 `--delay` (ms) also applies. Deviations from HTTrack, deliberate because they
 protect the corpus:
@@ -727,7 +810,9 @@ profile's `sec-ch-ua`, `sec-ch-ua-mobile` and `sec-ch-ua-platform` client hints
 describe its own User-Agent, they are dropped (a hint you send with `--header`
 stays), and the run warns once that the
 TLS fingerprint still says the `--impersonate` profile: a WAF that compares the
-handshake with the User-Agent can still tell them apart. Without
+handshake with the User-Agent can still tell them apart. An empty User-Agent
+(`--user-agent ''`, `--header 'User-Agent:'`) is one you gave: it sends no
+`User-Agent` and no client hint, with the same warning. Without
 `--user-agent`, the identity is the profile's, coherent end to end.
 
 #### Incremental
@@ -1509,6 +1594,7 @@ dograpper sync <url> -o <dir> [options]
 | `--filter` | — | *(none)* | URL rule, repeatable (passed to `download`; see [URL filters](#url-filters---filter)) |
 | `--downloader` | — | `wget` | `wget` \| `httrack` \| `fire-engine` (passed to `download`; see [Downloader profiles](#downloader-profiles)) |
 | `[httrack, fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--user-agent`, `--header`, `--no-robots`, `--connections`, `--max-conn-rate`, `--max-bandwidth`, `--timeout`, `--retries`, `--max-links`, `--max-retry-after`, `--disable-security-limits`, `--no-parse-scripts`, `--no-extended-parsing`, `--cache`, `--updatehack`, `--do-not-recatch`, `--changes` (passed to `download`) |
+| `[httrack]` flags | — | see [Downloader profiles](#downloader-profiles) | `--cookies`, `--browser-headers`, `--browser-login` (passed to `download`) |
 | `[fire-engine]` flags | — | see [Downloader profiles](#downloader-profiles) | `--proxy`, `--impersonate` (passed to `download`) |
 | `--max-words-per-chunk` | — | `500000` | Word limit (passed to `pack`) |
 | `--max-chunks` | — | `50` | Chunk limit (passed to `pack`) |
@@ -1756,7 +1842,7 @@ Stop the server with Ctrl+C.
 | 1 | doctor --check-system-libs | `ldd` not found on this system | install `ldd` (usually part of `libc-bin`) |
 | 1 | download / crawl | chromium not installed, or any other crawl failure | run `dograpper doctor --install` |
 | 1 | download --downloader httrack / fire-engine | every seed, or the start URL of the crawl (or of `httrack --headless`'s Playwright crawl), refused/challenged; `fire-engine`: `--headless`, a result that looks client-rendered, or no `fire-engine` extra | retry later, switch to `--downloader wget`, change network (`fire-engine`: `--proxy`), or install the extra |
-| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
+| 2 | download / sync | an invalid `--header` (see "Request headers"), a `--user-agent` with CR, LF or NUL, or the User-Agent given both by `--user-agent` and by `--header`; a malformed line in the `--cookies` file; `--browser-login` beside `--user-agent` or `--header 'User-Agent: …'`; a `[httrack]` flag (`--cookies`, `--browser-headers`, `--browser-login`) under any downloader but `httrack`; a `[httrack, fire-engine]` flag under `--downloader wget`, `--proxy` or a non-default `--impersonate` without `--downloader fire-engine`, `--cache`/`--updatehack`/`--do-not-recatch`/`--changes` with `--downloader httrack --headless`, or an invalid `--filter` rule | fix the flags |
 | 1 | pack --context-header --manifest | the manifest named with `--manifest` is missing or cannot be loaded | fix the path, or re-run `dograpper download` to rewrite the manifest |
 | 1 | pack --layout page | `pages/` exists in the output directory without `INDEX.md`, or a page file cannot be written | move that `pages/` away or pick another `--output`; free space or fix permissions |
 | 2 | pack --layout page | a chunk-only setting, `--bundle`, `--for-queries`, `--format jsonl`, `--api-records` or `--dedup` other than `off` | drop the setting, or use `--layout chunk` |

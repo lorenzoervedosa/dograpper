@@ -22,6 +22,69 @@ Entry format:
 - **Pending:** <what the maintainer still has to answer, or "none">
 ```
 
+## 2026-11-24 — `--browser-login`: F3 and DL-19 reconciled, and the login's edges (#171)
+
+- **Decision:**
+  - F3 (cookies and User-Agent taken from an embedded browser) and DL-19 leave the `httrack` profile's non-goals in the HTTrack mirroring requirements: the profile spec wins (maintainer, 2026-11-24);
+  - the login runs inside the profile's fetcher factory: after the usage checks (`--headless` with `--cache`) and the `--cookies` file's load, so neither error comes after a person has logged in, and before the first request;
+  - the User-Agent is read on a blank page of the same context, not on the site's page, where a script can redefine `navigator.userAgent`; it goes through the `--header` wire guard (CR, LF, NUL);
+  - "no display" is Linux without `DISPLAY` and `WAYLAND_DISPLAY`; no Enter to read (stdin closed) is exit 1 too, since waiting forever or going on silently would both be wrong;
+  - the login's cookies go into the jar over the file's; without `--cookies` the jar lives for the run alone;
+  - the challenged-start hint also goes on the every-seed-challenged message, the same failure from the seeded fetch;
+  - the shared Chromium launch (its one-line errors, the `doctor --install` hint) moved into `_launch()` in `lib/playwright_crawl.py`, used by the crawl and the login.
+- **Why:** the Agent Brief and the 2026-11-24 addendum fix the flag; these are the gaps.
+- **Rejected:** opening the window before the usage checks (a person would log in for nothing); reading the User-Agent from the logged-in page.
+- **Pending:** the real headed login, `docs/MANUAL-CHECKS.md` (its entry already names the shipped flag).
+
+## 2026-11-24 — `--browser-headers`: F1 reconciled, and how far the port goes (#170)
+
+- **Decision:**
+  - F1 (header-level browser imitation) leaves the `httrack` profile's non-goals in the HTTrack mirroring requirements: HTTrack sends it by default (`-%Q`), and the profile spec wins over that list (maintainer, 2026-11-24);
+  - the port follows HTTrack's code at the pinned commit, not only the brief's list: the client hints go on every https request with a Chrome or Edge User-Agent, robots.txt included (htslib.c:1213-1235 does not look at the fetch metadata), while the `Accept`, `Accept-Language` and order tables go only with fetch metadata (htslib.c:1002-1004);
+  - `--no-browser-headers` also drops the client hints, as `-%Q0` does (HTTrack's tests/597), beyond the brief's `Sec-Fetch-*` and `Upgrade-Insecure-Requests`;
+  - `Origin` on a CORS request is not ported: the profile's `FetchMeta` carries no initiator; listed as a known gap in the spec;
+  - the usage error of a `--x/--no-x` flag names both forms (`--browser-headers/--no-browser-headers requires --downloader httrack`).
+- **Why:** the brief asks for HTTrack's tables, and HTTrack's own test vectors (tests/597, 602, 603) are the expected values of the tests.
+- **Rejected:** sending `Origin` from the `Referer` page: the initiator is not always the referer (a redirect target keeps the original link's), so it would be a guess.
+- **Pending:** none.
+
+## 2026-11-24 — The cookie jar after the security review of the session flags (#169, #171)
+
+- **Decision:** the maintainer's decisions on #169 (2026-11-24), one fix each; where the code had to pick, it picked:
+  - the jar is bound to the start URL's host: a request to another host gets none of its cookies, and that host's `Set-Cookie` and the browser's cookies for it never enter the jar; the cookies the file holds for other hosts stay in the file, and the browser is given only the ones the start host gets, so a subresource request elsewhere carries none either;
+  - a control character (C0, HTAB and an obs-fold included, or DEL) in a `Set-Cookie` name, value or path refuses that cookie, as one in a browser cookie does; in the file it is a bad line (exit 2); the `Cookie` line passes `check_value` too, and a line that fails is that request's error, never sent, and the error names `Cookie` without the value (http.client's own refusal quoted it into the report);
+  - a `Domain` attribute set by an IP host, or naming an IP or a name with no dot, refuses that cookie (`Domain=localhost` from `localhost` included: without the attribute it is a host-only cookie), and an IP host gets a domain cookie only when its domain is the host exactly; the public suffix list stays out (`docs/DEBT.md`);
+  - a `Secure` cookie, and one named `__Secure-`/`__Host-`, is taken over https alone; beyond the brief, plain http also may not shadow, replace or erase a Secure one (RFC 6265bis 5.6 step 16, as HTTrack's `htslib.c:1983-1987`): that is how the review's http cookie overwrote the https session; the prefixes' other requirements came after a re-review: a `__Secure-` cookie must be Secure, a `__Host-` one Secure, without Domain and set with `Path=/` (RFC 6265bis 4.1.3), the prefixes read without case as the draft now says;
+  - an expired `Set-Cookie` (`Max-Age=0`) on a dotless host erases the cookie the jar holds for that host, where the stdlib named it `<host>.local`;
+  - a jar that is a symlink is written to the link's target (resolved when the run ends; a dangling link creates its target, 0600), done in `Jar.save()`, not in `atomic_write_bytes`, whose other callers keep replacing what is at their path;
+  - an expiry past what a float holds (over ~308 digits) is a bad line of the file (exit 2 with its number), where `Cookie()` raised `OverflowError`; a `Set-Cookie` with such a `Max-Age` is already dropped by the stdlib, which only warns "http.cookiejar bug!" on stderr, left as it is;
+  - under the browser pass, a `--header 'Cookie: …'` line keeps the jar out of the browser context (the header itself still reaches only the navigations the profile fetches, so the browser's own subresource requests carry no cookie); what the context holds at the end is still merged back;
+  - `sameSite` goes between the jar and the browser context and back (a browser cookie's, or a `Set-Cookie`'s `SameSite`), but not into the file: a Netscape cookies.txt has 7 fields and no place for it, and an 8th field would break curl, HTTrack and the cookie exporters that read the file; `None` reaches the browser only beside `Secure`, the one place Chromium keeps it;
+  - after a re-review: the deletion the stdlib does on an expired `Set-Cookie`, before any check, erases no cookie of a domain the response's host is not in; the response's rules (this one, the dotless name, no Secure erased from http) now apply to that deletion alone, where they also reached the expired-cookie cleanup at save (the last response's state: an expired Secure cookie survived a run whose last response was http);
+  - after a re-review: the jar is bound to the start host in its wire form (IDNA, lowercase, no port: `wire_host`, as the Fetcher asks the jar), where the Unicode hostname of an IDN start URL bound it to a host no request names; a host IDNA cannot encode keeps its own form, since no request reaches it either;
+  - after CI on Python 3.10: the `Cookie` line is in RFC 6265 5.4 order, longer paths first and then the earlier creation, from the jar's own creation counter (a cookie that replaces another keeps its creation, 5.3 step 11.3); it relied on `http.cookiejar`'s iteration, which Python 3.10 sorts by name and 3.12 keeps in insertion order;
+- **Why:** each was reproduced by the review; the tests run the failing case first.
+- **Rejected:** fixing the sub-sitemap rule of `sitemap_parser` instead (kept as it is, as decided).
+- **Pending:** none.
+
+## 2026-11-24 — `--cookies`: what the jar does where HTTrack and the brief are silent (#169)
+
+- **Decision:**
+  - a malformed cookies.txt line is a usage error (exit 2) naming its line number, never its content; HTTrack skips the line and leaves the file unchanged at the end;
+  - a missing `FILE` is an empty jar, created at the end of the run (mode `0600`);
+  - the file is read and written as latin-1, not as UTF-8 with `errors="replace"`: every byte round-trips to the wire and back to the file, and no byte can fail to decode, which is contract 7's purpose;
+  - the jar is written back after a failed run too, as HTTrack's exit macro does (htscore.c:134-147); a run refused with a usage error before its first request (`--headless` with `--cache`, a bad jar) reads and writes no jar;
+  - robots.txt and the discovery requests to the start host carry the matching cookies, as every HTTrack request does; superseded for other hosts by the security review (entry above): no other host gets any;
+  - the browser pass merges back every cookie its context holds, a subresource's from another host included;
+  - the `Cookie` line goes after the `--header` lines, last, as `http_sendhead` writes it (htslib.c:1401-1412), read in the clone authorised on #170.
+  - the jar matches cookies itself, per RFC 6265 5.4, and uses `http.cookiejar` only to read `Set-Cookie`: the stdlib's policy reads a host without a dot (localhost, an intranet `wiki`) as `<host>.local`, so it sent such a host no cookie of the file or the browser and wrote the `.local` name back (lane review);
+  - every string of the jar is wire bytes as latin-1, a browser's cookie taken as the UTF-8 bytes Chromium sends: nothing is replaced on the way to the file (lane review);
+- **Why:** the Agent Brief and the 2026-11-24 decisions fix the rest; these are the gaps, each filled with the louder or the more HTTrack-faithful option.
+- **Rejected:**
+  - `MozillaCookieJar` for the file: it drops an expiry-0 session cookie, forgets the HttpOnly of a `Set-Cookie` and quotes a bad line, value included, in its error (probed on Python 3.10 and 3.13);
+  - skipping bad lines as HTTrack does: a silent fallback that drops a cookie.
+- **Pending:** none.
+
 ## 2026-11-24 — Redirect-stub links in the page layout (#174)
 
 - **Decision:** the skipped stubs live in a separate `stubs` dict (source path → meta-refresh target), not in `page_of`; in a chain the fragment of the last hop that has one wins; an empty `#` on the link counts as a fragment, so the stub's is not used; `redirect_target` unescapes HTML entities in the target; a stub fragment holding `<`, `>`, whitespace or a control character is dropped (the link keeps no fragment from the stub).
