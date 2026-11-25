@@ -25,7 +25,7 @@ listing, source and the other topic pages keep one record; any other markup rais
 
 from typing import Dict, List, Optional, Tuple
 
-from . import ApiRecord, NotSplit, check_symbol, declared
+from . import ApiRecord, NotSplit, check_anchor, check_symbol, declared
 from ._html import Regions, Text, line
 
 GENERATOR = "doxygen"
@@ -368,9 +368,8 @@ def records(html: str, generator: str) -> List[ApiRecord]:
 
     # Namespaces a file page lists have pages of their own, which document their members.
     namespaces = {line(name) for label, name in page.names if cached_line(label) == _NAMESPACES}
-    by_anchor: Dict[str, Optional[ApiRecord]] = {}  # None: a member that gets no record
-    texts: Dict[str, List[str]] = {}  # anchor -> its record's lines
-    members: List[ApiRecord] = []
+    found: Dict[str, Tuple[ApiRecord, List[str]]] = {}  # anchor -> its record and lines, in page order
+    anchors = set()
     for member in page.members:
         if symbol_kind == "group" and not member.summary:
             # The section's title drops the namespace ("count()"); its summary row names the
@@ -390,26 +389,23 @@ def records(html: str, generator: str) -> List[ApiRecord]:
         if symbol_kind == "file" and member.summary and name.rpartition("::")[0] in namespaces:
             kind = None  # a namespace member Doxygen also anchors here: documented on the namespace page
         member_symbol = name if symbol_kind in ("file", "group") else f"{symbol}::{name}"
-        if member.anchor in by_anchor:
+        earlier = found.get(member.anchor)
+        if earlier is not None and (earlier[0].symbol, earlier[0].symbol_kind) == (member_symbol, kind):
             # Doxygen 1.9.8 gives overloads that differ only in a template constraint one anchor
             # (libstdc++'s std::optional): their one record holds them all, in page order.
-            earlier = by_anchor[member.anchor]
-            if kind is None or earlier is None or (earlier.symbol, earlier.symbol_kind) != (member_symbol, kind):
-                raise _unsupported("duplicate member anchor")
-            texts[member.anchor].extend(body)
+            earlier[1].extend(body)
             continue
+        check_anchor(member.anchor, anchors, _unsupported, "duplicate member anchor")
         if kind is None:
-            by_anchor[member.anchor] = None  # its name stays on the container
-            continue
+            continue  # its name stays on the container
         check_symbol(member_symbol, _unsupported)
-        record = ApiRecord(
+        found[member.anchor] = (ApiRecord(
             text="", symbol=member_symbol, kind="member", symbol_kind=kind, breadcrumb=[symbol, name],
-            generator=GENERATOR, anchor=member.anchor, container=symbol)
-        by_anchor[member.anchor] = record
-        texts[member.anchor] = [member_symbol] + body
+            generator=GENERATOR, anchor=member.anchor, container=symbol), [member_symbol] + body)
+    members = []
+    for record, record_lines in found.values():
+        record.text = "\n".join(record_lines)
         members.append(record)
-    for record in members:
-        record.text = "\n".join(texts[record.anchor])
 
     if symbol_kind == "file" and not members:
         raise NotSplit("Doxygen file page that documents no member")
