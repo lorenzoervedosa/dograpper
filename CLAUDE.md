@@ -124,7 +124,10 @@ rápido é só para iterar.
 2. **Completo (cada commit, obrigatório antes de push/PR):** `uv run pytest tests/ -q`
    com `uv sync --extra dev --extra headless --extra httrack --extra fire-engine`, como o CI. Cada
    commit da branch passa sozinho; quem monta o lote confere numa worktree
-   descartável (`git worktree add --detach <dir> <sha>`).
+   descartável (`git worktree add --detach <dir> <sha>`). O CI roda 3.10 e 3.12, e
+   o Python local cobre uma só: antes do push, o HEAD também com
+   `uv run --python 3.10 --extra dev --extra headless --extra httrack --extra fire-engine pytest tests/ -q`
+   (a ordem de iteração da stdlib muda entre versões; onda 3, #196).
 
 Nunca mascare o exit code com pipe: `uv run pytest tests/ -q | tail` devolve o
 status do `tail`. Rode sem pipe, ou leia `${PIPESTATUS[0]}` (bash) /
@@ -194,11 +197,15 @@ da worktree, gates, hooks, limpeza e documentos vivos estão nas seções acima.
   #158 foi lote; #161, #164 e #165, próprios).
 - **Registro de decisões:** `docs/DECISIONS.md`, entrada nova no topo; a
   entrada de fechamento da onda segue o mesmo formato.
-- **Flakes conhecidos:** os testes de linearidade por razão de CPU de
-  `tests/test_api_reference.py` (`test_parsing_stays_linear_on_hostile_markup`,
-  `test_sphinx_parsing_stays_linear_on_hostile_markup`) falham sob a carga de
-  várias raias rodando a suíte ao mesmo tempo (onda 2). Reexecute o teste isolado 3x
-  antes de concluir que quebrou.
+- **Flakes conhecidos:** os testes de linearidade por razão de CPU (`assert_linear`
+  de `tests/linearity.py`) falham sob a carga de várias raias rodando a suíte ao
+  mesmo tempo:
+  - `tests/test_api_reference.py::test_parsing_stays_linear_on_hostile_markup` e
+    `::test_sphinx_parsing_stays_linear_on_hostile_markup` (onda 2);
+  - `tests/test_httrack_links.py::test_rewrite_of_scanned_links_is_linear_on_hostile_pages`
+    (onda 3, #192).
+
+  Reexecute o teste isolado 3x antes de concluir que quebrou.
 
 ## Armadilhas do ambiente
 
