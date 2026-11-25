@@ -31,7 +31,7 @@ Data is not syntax: the body of a quoted-delimiter heredoc (`<<'EOF'`, `<<"EOF"`
 with no `$` and no backtick, are never read as git arguments or as unmodelled
 syntax. An unquoted heredoc, `$`, backtick, a backslash or `#` outside such data
 stay unreadable for the amend check and block (fail closed). A `<<` inside
-quotes opens no heredoc.
+quotes or in a comment opens no heredoc.
 
 Exit 2 blocks the tool call (stderr is shown to the agent); exit 0 allows.
 Python (not sed) because `command` may be multi-line JSON-escaped text.
@@ -78,7 +78,9 @@ _GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
 _SHELL_ONLY = re.compile(r"[\\$`]|<<|(?:^|\s)#")
 # A `-m`/`--message` value that is data: single-quoted, or double-quoted with no
 # `$` and no backtick (nothing in it expands).
-_MESSAGE = re.compile(r"""(?<!\S)(-[A-Za-z]*m|--message=?)[ \t]*('[^']*'|"[^"$`]*")""")
+_MESSAGE = re.compile(
+    r"""'[^']*'|"[^"]*"|(?<!\S)(?P<flag>-[A-Za-z]*m|--message=?)[ \t]*(?:'[^']*'|"[^"$`]*")"""
+)
 # Branches every change reaches only through a reviewed PR.
 _SHARED_BRANCHES = ("main", "develop")
 
@@ -131,7 +133,9 @@ def amend_repo_dirs(raw_cmd: str, cwd: str) -> list:
 
     Data is dropped first: the body of a quoted-delimiter heredoc and a `-m`
     value that cannot expand never count as syntax or as an `--amend`."""
-    raw_cmd = _MESSAGE.sub(lambda m: m.group(1) + " ''", _strip_heredocs(raw_cmd, only_quoted=True))
+    # Quoted spans match first (left to right), so a `-m` inside one is never a flag.
+    raw_cmd = _MESSAGE.sub(lambda m: m["flag"] + " ''" if m["flag"] else m[0],
+                           _strip_heredocs(raw_cmd, only_quoted=True))
     # With syntax the mask cannot follow (or unpaired quotes), not even the
     # amend detection is reliable: any `commit` plus `--am…` in the text blocks.
     unpaired = re.search(r"['\"]", _QUOTED.sub("", raw_cmd))
@@ -219,13 +223,19 @@ _HEREDOC = re.compile(r"(?<!<)<<-?[ \t]*(['\"]?)([A-Za-z_]\w*)\1")
 
 def _strip_heredocs(raw: str, only_quoted: bool = False) -> str:
     """Drop heredoc bodies: they are data (a commit message), not commands.
-    Quote-aware: a `<<` inside quotes opens no heredoc, so the next line stays
-    a command. With `only_quoted` just the bodies of `<<'EOF'`/`<<"EOF"` go
+    Quote- and comment-aware: a `<<` inside quotes or after a `#` opens no
+    heredoc, so the next line stays a command. With `only_quoted` just the bodies of `<<'EOF'`/`<<"EOF"` go
     (and their opener, so `<<` stops looking like unmodelled syntax); an
     unquoted `<<EOF` body expands, so it stays in the text."""
     out, pending, quote, i, n = [], [], None, 0, len(raw)
     while i < n:
         c = raw[i]
+        if not quote and c == "#" and (i == 0 or raw[i - 1].isspace()):
+            eol = raw.find("\n", i)  # a comment: a `<<` in it opens no heredoc
+            eol = n if eol < 0 else eol
+            out.append(raw[i:eol])
+            i = eol
+            continue
         m = None if quote or c != "<" else _HEREDOC.match(raw, i)
         if m:
             pending.append((m.group(2), bool(m.group(1))))

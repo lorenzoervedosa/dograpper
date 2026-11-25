@@ -273,6 +273,21 @@ def test_guard_checks_the_line_after_a_quoted_heredoc_marker(tmp_path):
     assert guard('echo "<<X"\ngit reset --hard HEAD~1', tmp_path) == 2
 
 
+@pytest.mark.parametrize("command", [
+    # a heredoc marker in a comment opens no heredoc: the next line is a command
+    "echo hi # <<'EOF'\ngit commit --amend --no-edit\nEOF",
+    # a -m inside quotes is not a message flag: it cannot hide the amend after it
+    "echo \"a -m '\" ; git commit --amend --no-edit ; echo \"b'\"",
+])
+def test_guard_data_stripping_never_hides_a_real_amend(command, repos):
+    main, _ = repos
+    assert guard(command, main) == 2
+
+
+def test_guard_checks_a_destructive_line_after_a_commented_heredoc_marker(tmp_path):
+    assert guard("echo hi # <<'EOF'\ngit reset --hard HEAD~1", tmp_path) == 2
+
+
 def test_guard_blocks_a_bare_push_from_a_shared_branch(repos):
     main, wt = repos
     assert guard("git push", main) == 2
