@@ -4,6 +4,8 @@ import gc
 import os
 import time
 
+ATTEMPTS = 3
+
 
 def cpu_time(run, arg, repeats=3):
     """Best-of-`repeats` CPU time of run(arg). The garbage collector is off during each
@@ -21,7 +23,7 @@ def cpu_time(run, arg, repeats=3):
     return best
 
 
-def assert_linear(build, run, n, bound=7.0, floor=0.01, attempts=3):
+def assert_linear(build, run, n, bound=7.0, floor=0.01):
     """run(build(4n)) costs less than `bound` times run(build(n)): linear work gives a
     ratio near 4, quadratic near 16. CPU time, so other processes on the machine do not
     count. `floor` keeps a tiny t(n) from turning timer noise into a huge ratio: the
@@ -31,7 +33,7 @@ def assert_linear(build, run, n, bound=7.0, floor=0.01, attempts=3):
     (~5.4) and below the weakest regression the api-reference tests catch (~7.7).
 
     Retry-on-exceed (#192): when an attempt exceeds the bound, both sizes are measured
-    again, up to `attempts` in total, keeping the minimum time per size across attempts;
+    again, up to 3 attempts in total, keeping the minimum time per size across attempts;
     it fails only if the ratio of those minima still exceeds the bound. A first attempt
     that passes costs nothing extra. Host load only ever inflates a time, so a minimum
     can only move toward the true cost: a quadratic stays above the bound on every
@@ -40,7 +42,7 @@ def assert_linear(build, run, n, bound=7.0, floor=0.01, attempts=3):
     small_in, large_in = build(n), build(4 * n)
     best_small = best_large = float("inf")
     ratios = []
-    for _ in range(attempts):
+    for _ in range(ATTEMPTS):
         small, large = cpu_time(run, small_in), cpu_time(run, large_in)
         ratios.append(large / max(small, floor))
         best_small, best_large = min(best_small, small), min(best_large, large)

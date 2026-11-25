@@ -61,9 +61,9 @@ tests/
 ├── test_httrack_robots.py  # parse_robots: grupos, longest-match, Allow vence empate, wildcard/$, Crawl-delay, Sitemap, caps, corpo HTML sem regras
 ├── test_init_wizard.py     # Init wizard: presets por alvo, overwrite guard, modos interativo/não-interativo, stub SKILL.md do claude-code (nunca sobrescrito, sobrevive ao pack)
 ├── test_jsonl_format.py    # JSONL format: criação, validação JSON, word count, multi-chunk, registros de API, CLI
+├── test_linearity.py       # assert_linear com cpu_time roteirizado: passa sem retry, passa se só a 1ª medição foi lenta, falha com razão de cada tentativa, tamanhos, tempos, limite e carga, piso; tempo real separa linear de quadrático (#192)
 ├── test_link_extractor.py  # Link extraction, cross-ref index, annotation, CLI integration
 ├── test_llms_txt_parser.py # fetch_llms_txt: markdown, bare URLs, comments, dedup, llms-full fallback, 404, UA, gzip
-├── test_linearity.py       # assert_linear com cpu_time roteirizado: passa sem retry, passa se só a 1ª medição foi lenta, falha com razão de cada tentativa, tamanhos, tempos, limite e carga, piso; tempo real separa linear de quadrático (#192)
 ├── test_markdown_render.py # Markdown do md (#87): títulos, links, listas, tabelas (grade summary-table do Javadoc, <br> na célula), tabulação entre células no texto puro, tempo linear, offsets de título, contagem sem marcação, pack md/txt/jsonl/page
 ├── test_mcp_serve.py       # MCP server: protocolo (initialize/ping/tools), stdio loop, tools sobre pack, CLI
 ├── test_mediawiki.py       # Limpeza MediaWiki: navbox (inclusive aninhado), mw-editsection, caixas de manutenção vs nota, markup fora do corte intacto, caixa sem fim mantida, título que ficou vazio após o corte removido, link vermelho vira texto, página de outro gerador idêntica à extração de antes (sha256); versão como metadata (3 redações, categoria oculta, redação desconhecida), header nos dois layouts e registro JSONL (só MediaWiki), --dedup exact mantém a versão de cada página; aliases de redirect (alvo presente, ausente, dois aliases), pack pula e conta

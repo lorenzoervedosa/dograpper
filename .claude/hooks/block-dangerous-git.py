@@ -74,7 +74,8 @@ _STEP = re.compile(
 # Variables that switch the repository without `cd` or `-C`.
 _GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
 # Syntax the quote mask cannot follow: escapes, substitutions, backticks and
-# unquoted heredocs (quoted ones are stripped as data first) move where quotes open and close; a comment hides a command.
+# unquoted heredocs (quoted ones are stripped as data first) move where quotes
+# open and close; a comment hides a command.
 _SHELL_ONLY = re.compile(r"[\\$`]|<<|(?:^|\s)#")
 # A `-m`/`--message` value that is data: single-quoted, or double-quoted with no
 # `$` and no backtick (nothing in it expands).
@@ -224,9 +225,11 @@ _HEREDOC = re.compile(r"(?<!<)<<-?[ \t]*(['\"]?)([A-Za-z_]\w*)\1")
 def _strip_heredocs(raw: str, only_quoted: bool = False) -> str:
     """Drop heredoc bodies: they are data (a commit message), not commands.
     Quote- and comment-aware: a `<<` inside quotes or after a `#` opens no
-    heredoc, so the next line stays a command. With `only_quoted` just the bodies of `<<'EOF'`/`<<"EOF"` go
-    (and their opener, so `<<` stops looking like unmodelled syntax); an
-    unquoted `<<EOF` body expands, so it stays in the text."""
+    heredoc, so the next line stays a command. With `only_quoted` just the
+    bodies of `<<'EOF'`/`<<"EOF"` go (and their opener, so `<<` stops looking
+    like unmodelled syntax); an unquoted `<<EOF` body expands, so it stays in
+    the text. Second quote scanner of the guard, after `_segments` (which
+    splits segments) and the `_QUOTED` mask: each answers a different question."""
     out, pending, quote, i, n, escaped_to = [], [], None, 0, len(raw), -1
     while i < n:
         c = raw[i]

@@ -9,12 +9,12 @@ from tests import linearity
 from tests.linearity import assert_linear
 
 
-def _script(monkeypatch, small, large):
+def _script(monkeypatch, small, large, n=10):
     """cpu_time answers from the `small`/`large` lists, one entry per measurement."""
     queues = {"small": list(small), "large": list(large)}
 
     def fake(run, arg, repeats=3):
-        return queues["small" if len(arg) == 10 else "large"].pop(0)
+        return queues["small" if len(arg) == n else "large"].pop(0)
 
     monkeypatch.setattr(linearity, "cpu_time", fake)
     return queues
