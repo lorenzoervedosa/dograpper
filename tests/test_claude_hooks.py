@@ -229,6 +229,50 @@ def test_guard_blocks_an_amend_it_cannot_place(repos):
     assert guard(f"cd {wt}; {AMEND}", main) == 2
 
 
+# #198: text that is data (a quoted heredoc body, a quoted -m value) is not git
+# syntax; whatever the guard cannot read for sure still blocks.
+_HD_PY = "git branch -r --contains HEAD;\npython - <<'EOF'\nprint('git commit --amend')\nEOF"
+_HD_CAT = "cat > f <<'EOF'\nnote: git commit --amend\nEOF\ngh issue create"
+_MSG_HASH = 'git commit --amend -m "fix: handle # and C:\\dir paths"'
+_MSG_SQ = "git commit --amend -m 'fix: $(x) # and `y` \\z'"
+
+
+@pytest.mark.parametrize("command", [
+    _HD_PY,
+    _HD_CAT,
+    _MSG_HASH,
+    _MSG_SQ,
+    "cat > f <<-\"EOF\"\n\tgit commit --amend $(x)\n\tEOF\necho ok",
+])
+def test_guard_reads_quoted_heredocs_and_messages_as_data(command, repos):
+    _, wt = repos
+    assert guard(command, wt) == 0
+
+
+@pytest.mark.parametrize("command", [
+    "git branch -r --contains HEAD;\npython - <<EOF\nprint('git commit --amend $(x)')\nEOF",
+    "cat > f <<EOF\nnote: git commit --amend $(x)\nEOF\ngh issue create",
+    'git commit --amend -m "fix: $(x) # y"',
+    'git commit --amend -m "fix: `x` # y"',
+])
+def test_guard_still_blocks_what_it_cannot_read_for_sure(command, repos):
+    _, wt = repos
+    assert guard(command, wt) == 2
+
+
+@pytest.mark.parametrize("command", [_HD_PY, _HD_CAT, _MSG_HASH, _MSG_SQ])
+def test_guard_still_blocks_a_published_amend_beside_data(command, repos):
+    main, _ = repos
+    # the quoted-data forms above carry the amend in their text, so add a real one
+    real = "git commit --amend --no-edit\n" + command if "\n" in command else command
+    assert guard(real, main) == 2
+
+
+def test_guard_checks_the_line_after_a_quoted_heredoc_marker(tmp_path):
+    assert guard("echo '<<X'\ngit reset --hard HEAD~1", tmp_path) == 2
+    assert guard('echo "<<X"\ngit reset --hard HEAD~1', tmp_path) == 2
+
+
 def test_guard_blocks_a_bare_push_from_a_shared_branch(repos):
     main, wt = repos
     assert guard("git push", main) == 2

@@ -19,7 +19,7 @@ tests/
 ├── test_browser_login.py   # --browser-login (#171) com o Playwright mockado e o fixture `server`: login headed antes do 1º pedido, cookies e UA do navegador em todo pedido, --cookies salva o jar do login, sem Playwright / sem display / sem Enter = exit 1 com a correção e sem pedido, --user-agent (inclusive '') ou --header 'User-Agent' junto = exit 2
 ├── test_boundary_chunking.py # Boundary-aware chunking: preservação de blocos estruturais
 ├── test_bundle_notebooklm.py # Bundle presets: notebooklm, rag-standard
-├── test_claude_hooks.py    # Hooks de .claude/hooks como CLIs (JSON no stdin): guarda de git (bloqueia/libera, fail-open, amend por repo), lembretes de contrato e pós-commit
+├── test_claude_hooks.py    # Hooks de .claude/hooks como CLIs (JSON no stdin): guarda de git (bloqueia/libera, fail-open, amend por repo, heredoc entre aspas e `-m` sem expansão como dado, `<<` entre aspas não abre heredoc), lembretes de contrato e pós-commit
 ├── test_claude_md_inventory.py # Guard estrutural dos CLAUDE.md (raiz e aninhados de src/ e tests/): cada módulo e teste é entrada de árvore só do CLAUDE.md mais próximo acima dele, referências de caminho válidas, raiz aponta para cada aninhado
 ├── test_changelog.py       # Guard estrutural do CHANGELOG.md: seções válidas, ordem, versão por data (YYYY.M do mês do release), versão casando com pyproject (.devN sem release)
 ├── test_cli_help_coverage.py # Guard: todo comando tem descrição e toda opção tem help (alimenta `--help` e o `docs`)

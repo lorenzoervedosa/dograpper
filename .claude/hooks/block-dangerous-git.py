@@ -26,6 +26,13 @@ wrappers (`sudo`, `env`, `timeout`, `nice`, `nohup`, `command`, `exec`,
 `time`) and with git's global options (`-C`, `-c`, `--git-dir`,
 `--no-pager`…) stripped first. An inline alias (`-c alias.*`) blocks.
 
+Data is not syntax: the body of a quoted-delimiter heredoc (`<<'EOF'`, `<<"EOF"`,
+`<<-` too) and a `-m`/`--message` value that is single-quoted, or double-quoted
+with no `$` and no backtick, are never read as git arguments or as unmodelled
+syntax. An unquoted heredoc, `$`, backtick, a backslash or `#` outside such data
+stay unreadable for the amend check and block (fail closed). A `<<` inside
+quotes opens no heredoc.
+
 Exit 2 blocks the tool call (stderr is shown to the agent); exit 0 allows.
 Python (not sed) because `command` may be multi-line JSON-escaped text.
 Tests: tests/test_claude_hooks.py.
@@ -67,8 +74,11 @@ _STEP = re.compile(
 # Variables that switch the repository without `cd` or `-C`.
 _GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
 # Syntax the quote mask cannot follow: escapes, substitutions, backticks and
-# heredocs move where quotes open and close; a comment hides a command.
+# unquoted heredocs (quoted ones are stripped as data first) move where quotes open and close; a comment hides a command.
 _SHELL_ONLY = re.compile(r"[\\$`]|<<|(?:^|\s)#")
+# A `-m`/`--message` value that is data: single-quoted, or double-quoted with no
+# `$` and no backtick (nothing in it expands).
+_MESSAGE = re.compile(r"""(?<!\S)(-[A-Za-z]*m|--message=?)[ \t]*('[^']*'|"[^"$`]*")""")
 # Branches every change reaches only through a reviewed PR.
 _SHARED_BRANCHES = ("main", "develop")
 
@@ -117,7 +127,11 @@ def amend_repo_dirs(raw_cmd: str, cwd: str) -> list:
     or an `--amend`, and each word is read back from the original at the same
     offsets. Only the `_STEP` shape is read; a `cd ..` is resolved like the
     shell (logically, without following links). None = a directory that cannot
-    be known from here (blocks). Empty list = no amend."""
+    be known from here (blocks). Empty list = no amend.
+
+    Data is dropped first: the body of a quoted-delimiter heredoc and a `-m`
+    value that cannot expand never count as syntax or as an `--amend`."""
+    raw_cmd = _MESSAGE.sub(lambda m: m.group(1) + " ''", _strip_heredocs(raw_cmd, only_quoted=True))
     # With syntax the mask cannot follow (or unpaired quotes), not even the
     # amend detection is reliable: any `commit` plus `--am…` in the text blocks.
     unpaired = re.search(r"['\"]", _QUOTED.sub("", raw_cmd))
@@ -203,18 +217,50 @@ _WHOLE_TREE = frozenset({".", "./", ":/"})
 _HEREDOC = re.compile(r"(?<!<)<<-?[ \t]*(['\"]?)([A-Za-z_]\w*)\1")
 
 
-def _strip_heredocs(raw: str) -> str:
-    """Drop heredoc bodies: they are data (a commit message), not commands."""
-    lines, out, i = raw.split("\n"), [], 0
-    while i < len(lines):
-        line = lines[i]
-        out.append(line)
-        i += 1
-        for m in _HEREDOC.finditer(line):
-            while i < len(lines) and lines[i].strip() != m.group(2):
+def _strip_heredocs(raw: str, only_quoted: bool = False) -> str:
+    """Drop heredoc bodies: they are data (a commit message), not commands.
+    Quote-aware: a `<<` inside quotes opens no heredoc, so the next line stays
+    a command. With `only_quoted` just the bodies of `<<'EOF'`/`<<"EOF"` go
+    (and their opener, so `<<` stops looking like unmodelled syntax); an
+    unquoted `<<EOF` body expands, so it stays in the text."""
+    out, pending, quote, i, n = [], [], None, 0, len(raw)
+    while i < n:
+        c = raw[i]
+        m = None if quote or c != "<" else _HEREDOC.match(raw, i)
+        if m:
+            pending.append((m.group(2), bool(m.group(1))))
+            out.append(" " if only_quoted and m.group(1) else m.group(0))
+            i = m.end()
+            continue
+        out.append(c)
+        if quote:
+            if c == "\\" and quote == '"' and i + 1 < n:
+                out.append(raw[i + 1])
                 i += 1
-            i += 1  # the delimiter line
-    return "\n".join(out)
+            elif c == quote:
+                quote = None
+        elif c == "\\" and i + 1 < n:
+            out.append(raw[i + 1])
+            i += 1
+        elif c in "'\"":
+            quote = c
+        elif c == "\n" and pending:
+            i += 1
+            for delim, quoted in pending:
+                start = i
+                while i < n:  # through the delimiter line
+                    eol = raw.find("\n", i)
+                    eol = n if eol < 0 else eol
+                    done = raw[i:eol].strip() == delim
+                    i = min(eol + 1, n)
+                    if done:
+                        break
+                if only_quoted and not quoted:
+                    out.append(raw[start:i])
+            pending = []
+            continue
+        i += 1
+    return "".join(out)
 
 
 def _segments(raw: str) -> list:
@@ -445,7 +491,9 @@ def main() -> None:
             "command this guard cannot read for sure. Accepted shape: `cd <dir> "
             "&& [git add ... &&] git commit --amend ...` or `git -C <dir> commit "
             "--amend ...`, with <dir> absolute, ./ or ../, and no `$`, backtick, "
-            "backslash, heredoc or `#` in the command (new message: `-F <file>`). "
+            "backslash, unquoted heredoc or `#` outside a quoted heredoc body or "
+            "a `-m '…'` / `-m \"…\"` value without `$` or backtick (new message: "
+            "`-F <file>`). "
             "Or use `git commit --fixup=<sha>`. " + consent_msg
         )
 
